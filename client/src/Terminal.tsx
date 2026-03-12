@@ -7,7 +7,12 @@ import type { TerminalMux, CreateOptions } from './mux';
 
 export interface TerminalProps {
   mux: TerminalMux;
+  /** 새 세션 생성 시 사용할 cmd (없으면 기본 쉘) */
   cmd?: string[];
+  /** 기존 세션에 재부착할 때의 sessionId */
+  attachId?: number;
+  /** readwrite (기본) | readonly (입력 차단, 관전 모드) */
+  mode?: 'readwrite' | 'readonly';
   className?: string;
   style?: React.CSSProperties;
   onCreated?: (sessionId: number) => void;
@@ -18,7 +23,7 @@ export interface TerminalProps {
 const PAUSE_HIGH = 1024 * 1024; // 1MB pending → PAUSE
 const RESUME_LOW = 256 * 1024;  // 256KB remaining → RESUME
 
-export function Terminal({ mux, cmd, className, style, onCreated, onExit }: TerminalProps) {
+export function Terminal({ mux, cmd, attachId, mode = 'readwrite', className, style, onCreated, onExit }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<number | null>(null);
   const onExitRef = useRef(onExit);
@@ -30,12 +35,14 @@ export function Terminal({ mux, cmd, className, style, onCreated, onExit }: Term
 
     let disposed = false;
     const disposables: IDisposable[] = [];
+    const isReadonly = mode === 'readonly';
 
     const term = new XTerm({
-      cursorBlink: true,
+      cursorBlink: !isReadonly,
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+      disableStdin: isReadonly,
     });
 
     const fit = new FitAddon();
@@ -46,7 +53,6 @@ export function Terminal({ mux, cmd, className, style, onCreated, onExit }: Term
     term.open(el);
     try { webgl = new WebglAddon(); term.loadAddon(webgl); } catch {}
     fit.fit();
-    // 초기화 완료 후 한 프레임 뒤에 표시 — 슬라이드 방지
     requestAnimationFrame(() => { if (!disposed) el.style.visibility = 'visible'; });
 
     // --- rAF 기반 write 배치 + flow control ---
@@ -85,24 +91,14 @@ export function Terminal({ mux, cmd, className, style, onCreated, onExit }: Term
       if (writeRaf === null) writeRaf = requestAnimationFrame(flushWrites);
     };
 
-    // create session
-    const opts: CreateOptions = { cmd, cols: term.cols, rows: term.rows };
-    mux.createSession(opts, {
-      onData: enqueueWrite,
-      onExit: () => {
-        console.log(`[term] onExit called disposed=${disposed} session=${sessionRef.current} hasOnExitRef=${!!onExitRef.current}`);
-        if (disposed) return;
-        if (writeRaf !== null) { cancelAnimationFrame(writeRaf); writeRaf = null; }
-        if (sessionRef.current !== null) onExitRef.current?.(sessionRef.current);
-        console.log(`[term] onExitRef called done`);
-      },
-    }).then((id) => {
-      if (disposed) { mux.destroySession(id); return; }
+    const handleSnapshot = (snapStr: string) => {
+      if (disposed) return;
+      term.reset();
+      term.write(snapStr);
+    };
 
-      sessionRef.current = id;
-      console.log(`[term] session created id=${id}`);
-      onCreated?.(id);
-
+    const wireInput = (id: number) => {
+      if (isReadonly) return; // readonly는 입력 안 함
       disposables.push(term.onData((data) => mux.send(id, data)));
       disposables.push(term.onBinary((data) => {
         const bytes = new Uint8Array(data.length);
@@ -110,9 +106,53 @@ export function Terminal({ mux, cmd, className, style, onCreated, onExit }: Term
         mux.send(id, bytes);
       }));
       disposables.push(term.onResize(({ cols, rows }) => mux.resize(id, cols, rows)));
-    }).catch(() => {
-      if (!disposed) term.write('\r\n\x1b[31m[failed to create session]\x1b[0m\r\n');
-    });
+    };
+
+    const callbacks = {
+      onData: enqueueWrite,
+      onSnapshot: handleSnapshot,
+      onExit: () => {
+        if (disposed) return;
+        if (writeRaf !== null) { cancelAnimationFrame(writeRaf); writeRaf = null; }
+        if (sessionRef.current !== null) onExitRef.current?.(sessionRef.current);
+      },
+    };
+
+    if (attachId !== undefined) {
+      mux.attachSession(attachId, callbacks, {
+        cols: term.cols,
+        rows: term.rows,
+        mode,
+      }).then((info) => {
+        if (disposed) { mux.detachSession(attachId); return; }
+        sessionRef.current = info.id;
+        onCreated?.(info.id);
+        wireInput(info.id);
+      }).catch(() => {
+        if (!disposed) term.write('\r\n\x1b[31m[failed to attach session]\x1b[0m\r\n');
+      });
+    } else {
+      const opts: CreateOptions = { cmd, cols: term.cols, rows: term.rows };
+      mux.createSession(opts, callbacks).then((id) => {
+        if (disposed) { mux.destroySession(id); return; }
+        sessionRef.current = id;
+        onCreated?.(id);
+        wireInput(id);
+      }).catch(() => {
+        if (!disposed) term.write('\r\n\x1b[31m[failed to create session]\x1b[0m\r\n');
+      });
+    }
+
+    // --- Page Visibility API ---
+    const onVisibilityChange = () => {
+      if (sessionRef.current === null) return;
+      if (document.hidden) {
+        mux.pauseView(sessionRef.current);
+      } else {
+        mux.resumeView(sessionRef.current);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     // auto-fit
     const ro = new ResizeObserver(() => {
@@ -124,15 +164,18 @@ export function Terminal({ mux, cmd, className, style, onCreated, onExit }: Term
 
     return () => {
       disposed = true;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       if (writeRaf !== null) cancelAnimationFrame(writeRaf);
       ro.disconnect();
       for (const d of disposables) d.dispose();
-      if (sessionRef.current !== null) mux.destroySession(sessionRef.current);
+      if (sessionRef.current !== null) {
+        mux.detachSession(sessionRef.current);
+      }
       webgl?.dispose();
       fit.dispose();
       term.dispose();
     };
-  }, [mux]);
+  }, [mux, attachId, mode]);
 
   return (
     <div

@@ -2,10 +2,12 @@ import { CMD, encode, decode } from './protocol';
 
 type DataCallback = (data: Uint8Array) => void;
 type ExitCallback = () => void;
+type SnapshotCallback = (data: string) => void;
 
 interface SessionCallbacks {
   onData: DataCallback;
   onExit?: ExitCallback;
+  onSnapshot?: SnapshotCallback;
 }
 
 export interface CreateOptions {
@@ -14,21 +16,50 @@ export interface CreateOptions {
   rows?: number;
 }
 
+export interface SessionInfo {
+  id: number;
+  pid: number;
+  cmd: string[];
+  cols: number;
+  rows: number;
+  status: 'attached' | 'detached' | 'dead';
+  lastSeq: number;
+  createdAt: number;
+  detachedAt: number | null;
+}
+
 interface PendingCreate {
   resolve: (id: number) => void;
   reject: (error: Error) => void;
   timeoutId: ReturnType<typeof setTimeout>;
 }
 
+interface PendingAttach {
+  resolve: (info: SessionInfo) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
+interface PendingList {
+  resolve: (list: SessionInfo[]) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof setTimeout>;
+}
+
 const CREATE_TIMEOUT_MS = 10_000;
+const ATTACH_TIMEOUT_MS = 10_000;
+const LIST_TIMEOUT_MS = 5_000;
 
 export class TerminalMux {
   private ws: WebSocket | null = null;
   private sessions = new Map<number, SessionCallbacks>();
   private pendingCreates: PendingCreate[] = [];
+  private pendingAttaches = new Map<number, PendingAttach>();
+  private pendingList: PendingList | null = null;
   private readonly url: string;
   private readonly encoder = new TextEncoder();
   private readonly decoder = new TextDecoder();
+  private _lastSeqs = new Map<number, number>(); // sessionId → 최신 수신 seq
 
   constructor(url: string) {
     this.url = url;
@@ -43,13 +74,34 @@ export class TerminalMux {
       const ws = new WebSocket(this.url);
       this.ws = ws;
       ws.binaryType = 'arraybuffer';
-      ws.onopen = () => resolve();
+      ws.onopen = () => {
+        // HELLO 전송
+        this.sendRaw(encode(0, CMD.HELLO, this.encoder.encode(JSON.stringify({
+          clientId: this.clientId(),
+        }))));
+        resolve();
+      };
       ws.onerror = () => reject(new Error('WebSocket connection failed'));
       ws.onmessage = (e) => this.handleMessage(e);
       ws.onclose = () => {
         if (this.ws === ws) this.cleanup(new Error('WebSocket closed'));
       };
     });
+  }
+
+  private clientId(): string {
+    let id = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ttym-client-id') : null;
+    if (!id) {
+      id = crypto.randomUUID();
+      try { sessionStorage.setItem('ttym-client-id', id); } catch {}
+    }
+    return id;
+  }
+
+  private sendRaw(data: Uint8Array) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(data);
+    }
   }
 
   private cleanup(error: Error) {
@@ -66,9 +118,22 @@ export class TerminalMux {
       p.reject(error);
     }
     this.pendingCreates = [];
+    // reject pending attaches
+    for (const [, p] of this.pendingAttaches) {
+      clearTimeout(p.timeoutId);
+      p.reject(error);
+    }
+    this.pendingAttaches.clear();
+    // reject pending list
+    if (this.pendingList) {
+      clearTimeout(this.pendingList.timeoutId);
+      this.pendingList.reject(error);
+      this.pendingList = null;
+    }
     // notify sessions
     for (const session of this.sessions.values()) session.onExit?.();
     this.sessions.clear();
+    this._lastSeqs.clear();
     this.ws = null;
   }
 
@@ -81,16 +146,24 @@ export class TerminalMux {
 
     switch (cmd) {
       case CMD.DATA:
+        if (decoded.seq !== undefined) {
+          this._lastSeqs.set(sessionId, decoded.seq);
+          this.sendRaw(encode(sessionId, CMD.ACK, this.encoder.encode(JSON.stringify({ seq: decoded.seq }))));
+        }
         this.sessions.get(sessionId)?.onData(payload);
         break;
 
+      case CMD.SNAPSHOT: {
+        const snapStr = this.decoder.decode(payload);
+        this.sessions.get(sessionId)?.onSnapshot?.(snapStr);
+        break;
+      }
+
       case CMD.CREATE: {
-        // parse JSON response: { requestId, ok, error? }
         let meta: { requestId?: number; ok?: boolean; error?: string } = {};
         if (payload.length > 0) {
           try { meta = JSON.parse(this.decoder.decode(payload)); } catch {}
         }
-        console.log(`[mux] CREATE response session=${sessionId} ok=${meta.ok}`);
         const pending = this.pendingCreates.shift();
         if (!pending) break;
         clearTimeout(pending.timeoutId);
@@ -103,16 +176,53 @@ export class TerminalMux {
         break;
       }
 
+      case CMD.ATTACH: {
+        let meta: { ok?: boolean; error?: string } & Partial<SessionInfo> = {};
+        if (payload.length > 0) {
+          try { meta = JSON.parse(this.decoder.decode(payload)); } catch {}
+        }
+        const pendingAttach = this.pendingAttaches.get(sessionId);
+        if (!pendingAttach) break;
+        this.pendingAttaches.delete(sessionId);
+        clearTimeout(pendingAttach.timeoutId);
+
+        if (meta.ok === false) {
+          pendingAttach.reject(new Error(meta.error ?? 'Attach failed'));
+        } else {
+          if (typeof meta.lastSeq === 'number') this._lastSeqs.set(sessionId, meta.lastSeq);
+          pendingAttach.resolve(meta as SessionInfo);
+        }
+        break;
+      }
+
+      case CMD.DETACH: {
+        // 서버 응답 (현재는 무시)
+        break;
+      }
+
+      case CMD.LIST: {
+        if (this.pendingList) {
+          let list: SessionInfo[] = [];
+          if (payload.length > 0) {
+            try { list = JSON.parse(this.decoder.decode(payload)); } catch {}
+          }
+          clearTimeout(this.pendingList.timeoutId);
+          this.pendingList.resolve(list);
+          this.pendingList = null;
+        }
+        break;
+      }
+
       case CMD.DESTROY: {
-        const hasSession = this.sessions.has(sessionId);
-        const hasExit = !!this.sessions.get(sessionId)?.onExit;
-        console.log(`[mux] DESTROY received session=${sessionId} hasSession=${hasSession} hasExitCb=${hasExit}`);
         this.sessions.get(sessionId)?.onExit?.();
         this.sessions.delete(sessionId);
+        this._lastSeqs.delete(sessionId);
         break;
       }
     }
   }
+
+  // ───── 세션 생성 ─────
 
   async createSession(options: CreateOptions, callbacks: SessionCallbacks): Promise<number> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -130,17 +240,88 @@ export class TerminalMux {
 
       this.pendingCreates.push({ resolve, reject, timeoutId });
       const payload = this.encoder.encode(JSON.stringify({ ...options, requestId }));
-      this.ws!.send(encode(0, CMD.CREATE, payload));
+      this.sendRaw(encode(0, CMD.CREATE, payload));
     });
 
     this.sessions.set(sessionId, callbacks);
     return sessionId;
   }
 
+  // ───── 세션 목록 조회 ─────
+
+  listSessions(): Promise<SessionInfo[]> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('Not connected'));
+    }
+
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pendingList = null;
+        reject(new Error('LIST timed out'));
+      }, LIST_TIMEOUT_MS);
+
+      this.pendingList = { resolve, reject, timeoutId };
+      this.sendRaw(encode(0, CMD.LIST));
+    });
+  }
+
+  // ───── 세션 재부착 ─────
+
+  async attachSession(
+    sessionId: number,
+    callbacks: SessionCallbacks,
+    opts?: { fromSeq?: number; cols?: number; rows?: number; mode?: 'readwrite' | 'readonly' },
+  ): Promise<SessionInfo> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('Not connected');
+    }
+
+    this.sessions.set(sessionId, callbacks);
+
+    const info = await new Promise<SessionInfo>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pendingAttaches.delete(sessionId);
+        reject(new Error('ATTACH timed out'));
+      }, ATTACH_TIMEOUT_MS);
+
+      this.pendingAttaches.set(sessionId, { resolve, reject, timeoutId });
+      this.sendRaw(encode(sessionId, CMD.ATTACH, this.encoder.encode(JSON.stringify({
+        fromSeq: opts?.fromSeq ?? this._lastSeqs.get(sessionId) ?? 0,
+        cols: opts?.cols,
+        rows: opts?.rows,
+        mode: opts?.mode,
+      }))));
+    });
+
+    return info;
+  }
+
+  // ───── 세션 분리 ─────
+
+  detachSession(sessionId: number) {
+    this.sendRaw(encode(sessionId, CMD.DETACH));
+    this.sessions.delete(sessionId);
+    this._lastSeqs.delete(sessionId);
+  }
+
+  // ───── hidden 탭 ─────
+
+  pauseView(sessionId: number) {
+    this.sendRaw(encode(sessionId, CMD.PAUSE_VIEW));
+  }
+
+  resumeView(sessionId: number, fromSeq?: number) {
+    this.sendRaw(encode(sessionId, CMD.RESUME_VIEW, this.encoder.encode(JSON.stringify({
+      fromSeq: fromSeq ?? this._lastSeqs.get(sessionId) ?? 0,
+    }))));
+  }
+
+  // ───── 기존 API ─────
+
   send(sessionId: number, data: string | Uint8Array) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const payload = typeof data === 'string' ? this.encoder.encode(data) : data;
-    this.ws.send(encode(sessionId, CMD.DATA, payload));
+    this.sendRaw(encode(sessionId, CMD.DATA, payload));
   }
 
   resize(sessionId: number, cols: number, rows: number) {
@@ -149,32 +330,30 @@ export class TerminalMux {
       cols & 0xff, (cols >>> 8) & 0xff,
       rows & 0xff, (rows >>> 8) & 0xff,
     ]);
-    this.ws.send(encode(sessionId, CMD.RESIZE, payload));
+    this.sendRaw(encode(sessionId, CMD.RESIZE, payload));
   }
 
   pause(sessionId: number) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(encode(sessionId, CMD.PAUSE));
-    }
+    this.sendRaw(encode(sessionId, CMD.PAUSE));
   }
 
   resume(sessionId: number) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(encode(sessionId, CMD.RESUME));
-    }
+    this.sendRaw(encode(sessionId, CMD.RESUME));
   }
 
   destroySession(sessionId: number) {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(encode(sessionId, CMD.DESTROY));
-    }
+    this.sendRaw(encode(sessionId, CMD.DESTROY));
     this.sessions.delete(sessionId);
+    this._lastSeqs.delete(sessionId);
   }
 
   disconnect() {
     const ws = this.ws;
     if (!ws) return;
-    for (const id of Array.from(this.sessions.keys())) this.destroySession(id);
+    // detach all (kill하지 않음)
+    for (const id of Array.from(this.sessions.keys())) {
+      this.detachSession(id);
+    }
     ws.close();
     this.cleanup(new Error('Disconnected'));
   }

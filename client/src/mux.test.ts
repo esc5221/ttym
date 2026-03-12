@@ -1,0 +1,135 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TerminalMux } from './mux.js';
+import { CMD, decode, encode, encodeData } from './protocol.js';
+
+function toArrayBuffer(data: Uint8Array): ArrayBuffer {
+  return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+}
+
+class FakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  static instances: FakeWebSocket[] = [];
+
+  readonly sent: Uint8Array[] = [];
+  binaryType = 'blob';
+  readyState = FakeWebSocket.CONNECTING;
+  onopen: (() => void) | null = null;
+  onmessage: ((event: MessageEvent<ArrayBuffer>) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+
+  constructor(public readonly url: string) {
+    FakeWebSocket.instances.push(this);
+  }
+
+  send(data: Uint8Array) {
+    this.sent.push(data);
+  }
+
+  close() {
+    this.readyState = FakeWebSocket.CLOSED;
+    this.onclose?.();
+  }
+
+  open() {
+    this.readyState = FakeWebSocket.OPEN;
+    this.onopen?.();
+  }
+
+  emitMessage(data: Uint8Array) {
+    this.onmessage?.({ data: toArrayBuffer(data) } as MessageEvent<ArrayBuffer>);
+  }
+
+  static latest(): FakeWebSocket {
+    return FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
+  }
+}
+
+describe('TerminalMux', () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends HELLO on connect', async () => {
+    const mux = new TerminalMux('ws://example.test');
+    const connected = mux.connect();
+    const socket = FakeWebSocket.latest();
+
+    socket.open();
+    await connected;
+
+    const hello = decode(toArrayBuffer(socket.sent[0]));
+    expect(hello?.cmd).toBe(CMD.HELLO);
+  });
+
+  it('tracks the last delivered seq, ACKs data, and reuses it for resumeView', async () => {
+    const mux = new TerminalMux('ws://example.test');
+    const connected = mux.connect();
+    const socket = FakeWebSocket.latest();
+    socket.open();
+    await connected;
+
+    const createPromise = mux.createSession({}, {
+      onData: vi.fn(),
+    });
+
+    socket.emitMessage(encode(9, CMD.CREATE, new TextEncoder().encode(JSON.stringify({ ok: true }))));
+    await createPromise;
+
+    const onData = vi.fn();
+    const attachPromise = mux.attachSession(9, { onData }, { cols: 80, rows: 24 });
+    socket.emitMessage(encode(9, CMD.ATTACH, new TextEncoder().encode(JSON.stringify({
+      ok: true,
+      id: 9,
+      pid: 123,
+      cmd: ['/bin/sh'],
+      cols: 80,
+      rows: 24,
+      status: 'attached',
+      lastSeq: 3,
+      createdAt: Date.now(),
+      detachedAt: null,
+    }))));
+    await attachPromise;
+
+    socket.emitMessage(encodeData(9, 4, new TextEncoder().encode('hello')));
+
+    expect(onData).toHaveBeenCalledTimes(1);
+
+    const ack = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
+    expect(ack?.cmd).toBe(CMD.ACK);
+    expect(JSON.parse(new TextDecoder().decode(ack!.payload))).toEqual({ seq: 4 });
+
+    mux.resumeView(9);
+
+    const resume = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
+    expect(resume?.cmd).toBe(CMD.RESUME_VIEW);
+    expect(JSON.parse(new TextDecoder().decode(resume!.payload))).toEqual({ fromSeq: 4 });
+  });
+
+  it('detaches tracked sessions on disconnect', async () => {
+    const mux = new TerminalMux('ws://example.test');
+    const connected = mux.connect();
+    const socket = FakeWebSocket.latest();
+    socket.open();
+    await connected;
+
+    const createPromise = mux.createSession({}, { onData: vi.fn() });
+    socket.emitMessage(encode(5, CMD.CREATE, new TextEncoder().encode(JSON.stringify({ ok: true }))));
+    await createPromise;
+
+    mux.disconnect();
+
+    const sentCommands = socket.sent.map((frame) => decode(toArrayBuffer(frame))!.cmd);
+    expect(sentCommands).toContain(CMD.DETACH);
+    expect(sentCommands).not.toContain(CMD.DESTROY);
+  });
+});
