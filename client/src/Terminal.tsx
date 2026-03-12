@@ -13,6 +13,8 @@ export interface TerminalProps {
   attachId?: number;
   /** readwrite (기본) | readonly (입력 차단, 관전 모드) */
   mode?: 'readwrite' | 'readonly';
+  /** xterm 폰트 크기 (기본 14) */
+  fontSize?: number;
   className?: string;
   style?: React.CSSProperties;
   onCreated?: (sessionId: number) => void;
@@ -23,7 +25,7 @@ export interface TerminalProps {
 const PAUSE_HIGH = 1024 * 1024; // 1MB pending → PAUSE
 const RESUME_LOW = 256 * 1024;  // 256KB remaining → RESUME
 
-export function Terminal({ mux, cmd, attachId, mode = 'readwrite', className, style, onCreated, onExit }: TerminalProps) {
+export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14, className, style, onCreated, onExit }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<number | null>(null);
   const onExitRef = useRef(onExit);
@@ -39,7 +41,7 @@ export function Terminal({ mux, cmd, attachId, mode = 'readwrite', className, st
 
     const term = new XTerm({
       cursorBlink: !isReadonly,
-      fontSize: 14,
+      fontSize,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
       theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
       disableStdin: isReadonly,

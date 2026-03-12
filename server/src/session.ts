@@ -1,17 +1,12 @@
-import * as pty from 'node-pty';
-import kill from 'tree-kill';
+import { spawn, ChildProcess } from 'node:child_process';
+import { createConnection, Socket } from 'node:net';
+import { existsSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import headless from '@xterm/headless';
 const { Terminal } = headless;
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { OutputRing } from './output-ring.js';
-
-function cleanEnv(): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined) env[k] = v;
-  }
-  return env;
-}
 
 export type SessionStatus = 'attached' | 'detached' | 'dead';
 export type ViewerMode = 'readwrite' | 'readonly';
@@ -35,99 +30,302 @@ type ExitCb = (code: number) => void;
 export interface Viewer {
   dataCb: DataCb;
   mode: ViewerMode;
-  paused: boolean; // PAUSE_VIEW 상태
+  paused: boolean;
 }
 
+// ───── Holder protocol ─────
+
+const H_CMD_STATE = 0x02;
+const H_CMD_DATA_OUT = 0x03;
+const H_CMD_DATA_IN = 0x04;
+const H_CMD_RESIZE = 0x05;
+const H_CMD_DUMP_REQ = 0x06;
+const H_CMD_DUMP_RESP = 0x07;
+const H_CMD_EXIT = 0x08;
+const H_CMD_KILL = 0x09;
+const H_CMD_PING = 0x0a;
+const H_CMD_PONG = 0x0b;
+
+function writeFrame(sock: Socket, cmd: number, payload: Buffer = Buffer.alloc(0)) {
+  const hdr = Buffer.allocUnsafe(5);
+  hdr.writeUInt32LE(1 + payload.length, 0);
+  hdr[4] = cmd;
+  sock.write(hdr);
+  if (payload.length > 0) sock.write(payload);
+}
+
+/** Parse length-prefixed frames from a stream */
+class HolderFrameReader {
+  private buf = Buffer.alloc(0);
+
+  feed(data: Buffer | Uint8Array) {
+    const buf = Buffer.from(data);
+    this.buf = this.buf.length === 0 ? buf : Buffer.concat([this.buf, buf]);
+  }
+
+  *frames(): Generator<{ cmd: number; payload: Buffer }> {
+    while (this.buf.length >= 5) {
+      const flen = this.buf.readUInt32LE(0);
+      if (flen === 0 || this.buf.length < 4 + flen) break;
+      const cmd = this.buf[4];
+      const payload = this.buf.subarray(5, 4 + flen);
+      this.buf = this.buf.subarray(4 + flen);
+      yield { cmd, payload };
+    }
+  }
+}
+
+// ───── Runtime dir ─────
+
+export function getHomeDir(): string {
+  return resolve(process.env.HOME || '/tmp', '.ttym');
+}
+
+export function getRuntimeDir(): string {
+  const env = process.env;
+  if (env.TTYM_RUNTIME_DIR) return env.TTYM_RUNTIME_DIR;
+  return resolve(getHomeDir(), 'run');
+}
+
+// ───── Holder binary path ─────
+
+function holderBin(): string {
+  if (process.env.TTYM_HOLDER_BIN) return process.env.TTYM_HOLDER_BIN;
+  // 1. Same directory as this script (bundled dist/)
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const samedir = resolve(__dirname, 'ttym-holder');
+  if (existsSync(samedir)) return samedir;
+  // 2. Dev: relative to server/src/
+  return resolve(__dirname, '../../holder/target/release/ttym-holder');
+}
+
+// ───── Session ─────
+
 /**
- * 3계층 세션 — multi-viewer 지원
+ * 3-layer session with external holder process for PTY persistence.
  *
- * Layer 1: node-pty — PTY 소유, WebSocket과 독립 수명
- * Layer 2: @xterm/headless + SerializeAddon — 서버 측 터미널 상태
- * Layer 3: OutputRing — seq 기반 transport recovery buffer
+ * Holder: Rust binary that owns PTY FD + ring buffer (survives server restart)
+ * Server: headless xterm (snapshot) + OutputRing (viewer delta) + viewers
  */
 export class Session {
   readonly id: number;
-  readonly pid: number;
+  readonly pid: number; // holder process pid
+  readonly childPid: number; // actual shell pid
   readonly cmd: string[];
   readonly createdAt: number;
 
-  // Layer 1: PTY
-  private pty: pty.IPty;
+  // Holder connection
+  private sock: Socket | null = null;
+  private holderProc: ChildProcess | null = null;
+  private reader = new HolderFrameReader();
   private closed = false;
 
-  // Layer 2: Headless terminal state
+  // Layer 2: Headless terminal state (server-side mirror)
   private term: InstanceType<typeof Terminal>;
   private serializer: SerializeAddon;
 
-  // Layer 3: Ring buffer
+  // Layer 3: Ring buffer (for viewer delta replay)
   readonly ring: OutputRing;
 
   // Multi-viewer state
   private viewers = new Map<string, Viewer>();
   private _detachedAt: number | null = null;
   private exitCbs: ExitCb[] = [];
+  private _cols: number;
+  private _rows: number;
 
-  constructor(id: number, cmd: string[], cols: number, rows: number) {
+  private constructor(
+    id: number, cmd: string[], cols: number, rows: number,
+    pid: number, childPid: number, createdAt: number,
+  ) {
     this.id = id;
     this.cmd = cmd;
-    this.createdAt = Date.now();
+    this.pid = pid;
+    this.childPid = childPid;
+    this.createdAt = createdAt;
+    this._cols = cols;
+    this._rows = rows;
 
-    // Layer 2: headless xterm
+    // Layer 2
     this.term = new Terminal({ cols, rows, scrollback: 1000, allowProposedApi: true });
     this.serializer = new SerializeAddon();
     this.term.loadAddon(this.serializer as any);
 
-    // Layer 3: ring buffer
+    // Layer 3
     this.ring = new OutputRing(128 * 1024);
+  }
 
-    // Layer 1: PTY
-    this.pty = pty.spawn(cmd[0], cmd.slice(1), {
-      name: 'xterm-256color',
-      cols,
-      rows,
-      cwd: process.env.HOME || '/tmp',
-      env: cleanEnv(),
+  /** Create a new session: spawn holder, connect */
+  static async create(
+    id: number, cmd: string[], cols: number, rows: number,
+    runtimeDir: string,
+  ): Promise<Session> {
+    const socketPath = resolve(runtimeDir, `session-${id}.sock`);
+
+    // Spawn holder (detached, survives server exit)
+    // stdio must be 'ignore' — pipe would kill holder on SIGPIPE when server exits
+    const proc = spawn(holderBin(), [
+      '--id', String(id),
+      '--cols', String(cols),
+      '--rows', String(rows),
+      '--runtime-dir', runtimeDir,
+      '--', ...cmd,
+    ], {
+      detached: true,
+      stdio: 'ignore',
     });
-    this.pid = this.pty.pid;
+    proc.unref();
 
-    // PTY output → Layer 2 (항상) + Layer 3 (항상) + viewers (broadcast)
-    this.pty.onData((raw) => {
-      if (this.closed) return;
-      const data = Buffer.from(raw);
+    // Wait for socket to appear (holder needs a moment)
+    await waitForSocket(socketPath, 3000);
 
-      // Layer 2: headless xterm에 항상 먹임
-      this.term.write(data);
+    // Connect and wait for STATE
+    const sock = await connectSocket(socketPath);
+    const session = new Session(id, cmd, cols, rows, proc.pid ?? 0, 0, Date.now());
+    session.holderProc = proc;
 
-      // Layer 3: ring에 항상 적재
-      const seq = this.ring.push(data);
+    await session.connectHolder(sock);
 
-      // broadcast to all non-paused viewers
-      for (const viewer of this.viewers.values()) {
-        if (!viewer.paused) {
-          viewer.dataCb(data, seq);
+    return session;
+  }
+
+  /** Recover an existing session from a running holder */
+  static async recover(manifest: HolderManifest, runtimeDir: string): Promise<Session> {
+    const sock = await connectSocket(manifest.socket);
+
+    const session = new Session(
+      manifest.id, manifest.cmd,
+      manifest.cols, manifest.rows,
+      manifest.pid, manifest.childPid,
+      manifest.createdAt,
+    );
+
+    await session.connectHolder(sock, true);
+
+    return session;
+  }
+
+  /** Connect to holder socket, receive STATE + DUMP for initial catch-up */
+  connectHolder(sock: Socket, _recovery = false): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.sock = sock;
+      let gotState = false;
+      let pendingDump = false;
+      const buffered: Array<{ cmd: number; payload: Buffer }> = [];
+
+      const timer = setTimeout(() => reject(new Error('holder handshake timeout')), 10000);
+
+      sock.on('data', (data: Buffer) => {
+        this.reader.feed(data);
+        for (const frame of this.reader.frames()) {
+          if (!gotState && frame.cmd === H_CMD_STATE) {
+            gotState = true;
+            try {
+              const state = JSON.parse(frame.payload.toString()) as HolderState;
+              (this as any).childPid = state.childPid ?? this.childPid;
+              this._cols = state.cols ?? this._cols;
+              this._rows = state.rows ?? this._rows;
+              try { this.term.resize(this._cols, this._rows); } catch {}
+
+              // Always request DUMP to catch any output already in holder's ring
+              pendingDump = true;
+              writeFrame(sock, H_CMD_DUMP_REQ);
+            } catch (e) {
+              clearTimeout(timer);
+              reject(e);
+            }
+            continue;
+          }
+
+          if (pendingDump) {
+            if (frame.cmd === H_CMD_DUMP_RESP) {
+              pendingDump = false;
+              const finalize = () => {
+                // Replay any DATA_OUT buffered during handshake
+                for (const f of buffered) {
+                  this.handleHolderFrame(f.cmd, f.payload);
+                }
+                buffered.length = 0;
+                clearTimeout(timer);
+                resolve();
+              };
+              // Write ring dump to headless xterm
+              if (frame.payload.length > 0) {
+                this.ring.push(Buffer.from(frame.payload));
+                this.term.write(Buffer.from(frame.payload), finalize);
+              } else {
+                finalize();
+              }
+              continue;
+            }
+            // Buffer DATA_OUT during handshake to avoid double-write
+            buffered.push(frame);
+            continue;
+          }
+
+          // Normal processing after handshake
+          this.handleHolderFrame(frame.cmd, frame.payload);
         }
-      }
-    });
+      });
 
-    this.pty.onExit(({ exitCode }) => {
-      if (this.closed) return;
-      this.closed = true;
-      for (const cb of this.exitCbs) cb(exitCode);
-      this.exitCbs = [];
+      sock.on('close', () => {
+        if (!this.closed) {
+          this.closed = true;
+          for (const cb of this.exitCbs) cb(-1);
+          this.exitCbs = [];
+        }
+        this.sock = null;
+      });
+      sock.on('error', () => {});
     });
   }
+
+  private handleHolderFrame(cmd: number, payload: Buffer) {
+    switch (cmd) {
+      case H_CMD_DATA_OUT: {
+        if (this.closed) return;
+        if (payload.length < 4) return;
+        const seq = payload.readUInt32LE(0);
+        const data = payload.subarray(4);
+
+        // Layer 2: headless xterm
+        this.term.write(data);
+
+        // Layer 3: ring (for viewer delta replay)
+        this.ring.push(data); // ring assigns its own seq for viewers
+
+        // Broadcast to viewers
+        const viewerSeq = this.ring.nextSeq - 1;
+        for (const viewer of this.viewers.values()) {
+          if (!viewer.paused) {
+            viewer.dataCb(data, viewerSeq);
+          }
+        }
+        break;
+      }
+      case H_CMD_EXIT: {
+        const code = payload.length >= 4 ? payload.readInt32LE(0) : -1;
+        this.closed = true;
+        for (const cb of this.exitCbs) cb(code);
+        this.exitCbs = [];
+        break;
+      }
+      case H_CMD_PONG:
+        break;
+    }
+  }
+
+  // ───── Public API (identical interface) ─────
 
   get status(): SessionStatus {
     if (this.closed) return 'dead';
     return this.viewers.size > 0 ? 'attached' : 'detached';
   }
   get detachedAt(): number | null { return this._detachedAt; }
-  get cols(): number { return this.term.cols; }
-  get rows(): number { return this.term.rows; }
+  get cols(): number { return this._cols; }
+  get rows(): number { return this._rows; }
   get isDead(): boolean { return this.closed; }
   get viewerCount(): number { return this.viewers.size; }
-
-  // ───── Viewer 관리 ─────
 
   addViewer(viewerId: string, dataCb: DataCb, mode: ViewerMode = 'readwrite'): void {
     this.viewers.set(viewerId, { dataCb, mode, paused: false });
@@ -141,39 +339,30 @@ export class Session {
     }
   }
 
-  hasViewer(viewerId: string): boolean {
-    return this.viewers.has(viewerId);
-  }
+  hasViewer(viewerId: string): boolean { return this.viewers.has(viewerId); }
+  getViewer(viewerId: string): Viewer | undefined { return this.viewers.get(viewerId); }
 
-  getViewer(viewerId: string): Viewer | undefined {
-    return this.viewers.get(viewerId);
-  }
-
-  /** viewer별 PAUSE_VIEW */
   pauseViewer(viewerId: string): void {
     const v = this.viewers.get(viewerId);
     if (v) v.paused = true;
   }
 
-  /** viewer별 RESUME_VIEW */
   resumeViewer(viewerId: string): void {
     const v = this.viewers.get(viewerId);
     if (v) v.paused = false;
   }
 
-  /** 현재 터미널 화면을 VT sequence로 직렬화 */
   snapshot(): string {
     return this.serializer.serialize();
   }
 
-  /** 세션 정보 */
   info(): SessionInfo {
     return {
       id: this.id,
-      pid: this.pid,
+      pid: this.childPid,
       cmd: this.cmd,
-      cols: this.term.cols,
-      rows: this.term.rows,
+      cols: this._cols,
+      rows: this._rows,
       status: this.status,
       viewerCount: this.viewers.size,
       lastSeq: this.ring.nextSeq - 1,
@@ -187,42 +376,86 @@ export class Session {
     this.exitCbs.push(cb);
   }
 
-  /** readwrite viewer만 write 가능 (서버에서 체크) */
   write(data: Buffer): void {
-    if (this.closed) return;
-    try { this.pty.write(data.toString()); } catch {}
+    if (this.closed || !this.sock) return;
+    writeFrame(this.sock, H_CMD_DATA_IN, data);
   }
 
   resize(cols: number, rows: number): void {
-    if (this.closed) return;
-    try {
-      this.pty.resize(cols, rows);
-      this.term.resize(cols, rows);
-    } catch {}
+    if (this.closed || !this.sock) return;
+    this._cols = cols;
+    this._rows = rows;
+    const payload = Buffer.allocUnsafe(4);
+    payload.writeUInt16LE(cols, 0);
+    payload.writeUInt16LE(rows, 2);
+    writeFrame(this.sock, H_CMD_RESIZE, payload);
+    try { this.term.resize(cols, rows); } catch {}
   }
 
   pause(): void {
-    if (this.closed) return;
-    try { this.pty.pause(); } catch {}
+    // No-op: holder manages PTY directly, backpressure is per-viewer now
   }
 
   resume(): void {
-    if (this.closed) return;
-    try { this.pty.resume(); } catch {}
+    // No-op: same reason
   }
 
   kill(): void {
     if (this.closed) return;
     this.closed = true;
     this.viewers.clear();
-    try { this.pty.kill(); } catch {}
-    if (this.pid > 0) {
-      const pid = this.pid;
-      kill(pid, 'SIGHUP', () => {
-        setTimeout(() => kill(pid, 'SIGKILL', () => {}), 100);
-      });
+    if (this.sock) {
+      writeFrame(this.sock, H_CMD_KILL);
+      this.sock.destroy();
+      this.sock = null;
     }
     this.term.dispose();
     this.ring.clear();
   }
+}
+
+// ───── Holder manifest ─────
+
+export interface HolderManifest {
+  id: number;
+  pid: number;
+  childPid: number;
+  cmd: string[];
+  cols: number;
+  rows: number;
+  socket: string;
+  createdAt: number;
+}
+
+// ───── Utilities ─────
+
+function waitForSocket(path: string, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      if (existsSync(path)) { resolve(); return; }
+      if (Date.now() - start > timeoutMs) { reject(new Error(`socket ${path} not ready`)); return; }
+      setTimeout(check, 20);
+    };
+    check();
+  });
+}
+
+function connectSocket(path: string): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const sock = createConnection(path, () => resolve(sock));
+    sock.on('error', reject);
+  });
+}
+
+interface HolderState {
+  id: number;
+  pid: number;
+  childPid: number;
+  cmd: string[];
+  cols: number;
+  rows: number;
+  createdAt: number;
+  nextSeq: number;
+  alive: boolean;
 }

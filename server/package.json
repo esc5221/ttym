@@ -11,8 +11,6 @@
   "dependencies": {
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
-    "node-pty": "^1.0.0",
-    "tree-kill": "^1.2.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {

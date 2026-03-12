@@ -9,7 +9,6 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "node-pty",
       "esbuild"
     ]
   },

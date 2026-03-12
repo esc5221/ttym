@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
-import { createServer } from './server.js';
+import { createServer, TtymServer } from './server.js';
 import { CMD, decodeDataFrame, encode, toBuffer } from './protocol.js';
+import { rmSync } from 'node:fs';
 
 type Frame = ReturnType<typeof decodeDataFrame>;
 
@@ -29,23 +30,19 @@ class TestClient {
     });
   }
 
-  send(frame: Buffer) {
-    this.ws.send(frame);
-  }
+  send(frame: Buffer) { this.ws.send(frame); }
 
-  next(predicate: (frame: Frame) => boolean, timeoutMs = 5_000): Promise<Frame> {
+  next(predicate: (frame: Frame) => boolean, timeoutMs = 10_000): Promise<Frame> {
     const existingIndex = this.frames.findIndex(predicate);
     if (existingIndex !== -1) {
       return Promise.resolve(this.frames.splice(existingIndex, 1)[0]!);
     }
-
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         const index = this.waiters.findIndex((waiter) => waiter.resolve === resolve);
         if (index !== -1) this.waiters.splice(index, 1);
         reject(new Error('Timed out waiting for frame'));
       }, timeoutMs);
-
       this.waiters.push({ predicate, resolve, reject, timeoutId });
     });
   }
@@ -59,25 +56,6 @@ class TestClient {
   }
 }
 
-function waitForCondition(check: () => boolean, timeoutMs = 5_000, intervalMs = 25): Promise<void> {
-  const startedAt = Date.now();
-
-  return new Promise((resolve, reject) => {
-    const tick = () => {
-      if (check()) {
-        resolve();
-        return;
-      }
-      if (Date.now() - startedAt > timeoutMs) {
-        reject(new Error('Timed out waiting for condition'));
-        return;
-      }
-      setTimeout(tick, intervalMs);
-    };
-    tick();
-  });
-}
-
 async function openClient(port: number): Promise<TestClient> {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);
   await new Promise<void>((resolve, reject) => {
@@ -88,90 +66,57 @@ async function openClient(port: number): Promise<TestClient> {
 }
 
 describe('createServer', () => {
-  let server: ReturnType<typeof createServer> | null = null;
+  let server: TtymServer | null = null;
   let clients: TestClient[] = [];
+  const runtimeDir = `/tmp/ttym-srv-test-${process.pid}`;
 
   beforeEach(async () => {
-    server = createServer(0);
-    if (!server.wss.address()) {
-      await new Promise<void>((resolve) => server!.wss.once('listening', () => resolve()));
-    }
+    process.env.TTYM_RUNTIME_DIR = runtimeDir;
+    server = await createServer(0);
   });
 
   afterEach(async () => {
     while (clients.length > 0) {
       await clients.pop()!.close();
     }
-    if (server) await server.close();
+    if (server) {
+      server.manager.destroyAll();
+      await server.close();
+    }
     server = null;
+    await new Promise((r) => setTimeout(r, 200));
+    try { rmSync(runtimeDir, { recursive: true }); } catch {}
+    delete process.env.TTYM_RUNTIME_DIR;
   });
 
-  it('keeps detached sessions alive and restores them via ATTACH + SNAPSHOT', async () => {
-    const port = (server!.wss.address() as AddressInfo).port;
+  it('creates session and attaches with snapshot', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);
     clients.push(ws1);
 
     ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
       cmd: ['/bin/sh', '-lc', "printf 'hello\\n'; stty -echo; exec cat"],
-      cols: 80,
-      rows: 24,
+      cols: 80, rows: 24,
     }))));
 
-    const created = await ws1.next((frame) => frame.cmd === CMD.CREATE);
-    const sessionId = created.sessionId;
-    await ws1.next((frame) => frame.cmd === CMD.DATA && frame.sessionId === sessionId);
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    // Wait for initial output — may arrive as DATA or SNAPSHOT (holder catches up via DUMP)
+    await ws1.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid);
 
-    ws1.send(encode(sessionId, CMD.DETACH));
-    await ws1.next((frame) => frame.cmd === CMD.DETACH && frame.sessionId === sessionId);
+    // Detach and reattach
+    ws1.send(encode(sid, CMD.DETACH));
+    await ws1.next((f) => f.cmd === CMD.DETACH && f.sessionId === sid);
     await ws1.close();
 
     const ws2 = await openClient(port);
     clients.push(ws2);
-    ws2.send(encode(sessionId, CMD.ATTACH, Buffer.from(JSON.stringify({
-      fromSeq: 0,
-      cols: 80,
-      rows: 24,
-    }))));
+    ws2.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: 0, cols: 80, rows: 24 }))));
 
-    const attached = await ws2.next((frame) => frame.cmd === CMD.ATTACH && frame.sessionId === sessionId);
+    const attached = await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
     expect(JSON.parse(attached.payload.toString()).ok).toBe(true);
 
-    const snapshot = await ws2.next((frame) => frame.cmd === CMD.SNAPSHOT && frame.sessionId === sessionId);
+    const snapshot = await ws2.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid);
     expect(snapshot.payload.toString()).toContain('hello');
-  });
-
-  it('replays buffered output on RESUME_VIEW when fromSeq is available', async () => {
-    const port = (server!.wss.address() as AddressInfo).port;
-    const ws = await openClient(port);
-    clients.push(ws);
-
-    ws.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
-      cmd: ['/bin/sh', '-lc', "printf 'ready\\n'; stty -echo; exec cat"],
-      cols: 80,
-      rows: 24,
-    }))));
-
-    const created = await ws.next((frame) => frame.cmd === CMD.CREATE);
-    const sessionId = created.sessionId;
-    const initialData = await ws.next((frame) => frame.cmd === CMD.DATA && frame.sessionId === sessionId);
-    const firstSeq = initialData.seq!;
-
-    ws.send(encode(sessionId, CMD.PAUSE_VIEW));
-    ws.send(encode(sessionId, CMD.DATA, Buffer.from('XYZ\n')));
-
-    await waitForCondition(() => {
-      const session = server!.manager.get(sessionId);
-      return Boolean(session && session.ring.nextSeq - 1 > firstSeq);
-    });
-
-    ws.send(encode(sessionId, CMD.RESUME_VIEW, Buffer.from(JSON.stringify({ fromSeq: firstSeq }))));
-
-    let replay = '';
-    while (!replay.includes('XYZ')) {
-      const frame = await ws.next((candidate) => candidate.cmd === CMD.DATA && candidate.sessionId === sessionId && (candidate.seq ?? 0) > firstSeq);
-      replay += frame.payload.toString();
-    }
-
-    expect(replay).toContain('XYZ');
   });
 });

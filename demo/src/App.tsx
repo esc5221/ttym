@@ -28,12 +28,14 @@ function saveWorkspaces(ws: Workspace[]) {
 
 type Route =
   | { page: 'dashboard' }
+  | { page: 'overview' }
   | { page: 'session'; id: number }
   | { page: 'viewer'; id: number }
   | { page: 'workspace'; id: string };
 
 function parseHash(): Route {
   const hash = window.location.hash;
+  if (hash === '#overview') return { page: 'overview' };
   const sessionMatch = hash.match(/^#s\/(\d+)$/);
   if (sessionMatch) return { page: 'session', id: parseInt(sessionMatch[1], 10) };
   const viewerMatch = hash.match(/^#v\/(\d+)$/);
@@ -46,6 +48,7 @@ function parseHash(): Route {
 function navigate(route: Route) {
   switch (route.page) {
     case 'dashboard': window.location.hash = ''; break;
+    case 'overview': window.location.hash = 'overview'; break;
     case 'session': window.location.hash = `s/${route.id}`; break;
     case 'viewer': window.location.hash = `v/${route.id}`; break;
     case 'workspace': window.location.hash = `w/${route.id}`; break;
@@ -118,6 +121,16 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
 
   return (
     <div style={{ padding: 32, fontFamily: 'monospace', color: '#ccc', maxWidth: 700 }}>
+      {/* OVERVIEW LINK */}
+      <div style={{ marginBottom: 24 }}>
+        <button
+          onClick={() => navigate({ page: 'overview' })}
+          style={{ ...actionBtnStyle, background: '#0d3a58', color: '#4fc3f7', border: '1px solid #007acc' }}
+        >
+          overview — live preview
+        </button>
+      </div>
+
       {/* WORKSPACES */}
       <div style={{ marginBottom: 32 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
@@ -413,6 +426,174 @@ function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: st
   );
 }
 
+// ───── Overview 페이지 (실시간 미리보기) ─────
+
+function OverviewPage({ mux }: { mux: TerminalMux }) {
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(loadWorkspaces);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    mux.listSessions().then((list) => {
+      if (cancelled) return;
+      setSessions(list.filter((s) => s.status !== 'dead'));
+      setLoading(false);
+    }).catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [mux]);
+
+  // 워크스페이스에 속한 세션 ID 집합
+  const assignedIds = new Set(workspaces.flatMap((w) => w.sessionIds));
+  const aliveIds = new Set(sessions.map((s) => s.id));
+  const standalone = sessions.filter((s) => !assignedIds.has(s.id));
+
+  // 워크스페이스별 살아있는 세션만 필터
+  const workspacesWithSessions = workspaces
+    .map((ws) => ({
+      ...ws,
+      liveSessions: ws.sessionIds.filter((id) => aliveIds.has(id)),
+    }))
+    .filter((ws) => ws.liveSessions.length > 0);
+
+  if (loading) {
+    return (
+      <div style={{ color: '#666', padding: 40, fontFamily: 'monospace' }}>loading...</div>
+    );
+  }
+
+  const noSessions = sessions.length === 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#111' }}>
+      <div style={toolbarStyle}>
+        <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
+        <span style={{ color: '#aaa', fontSize: 12 }}>overview</span>
+        <span style={{ color: '#555', fontSize: 11, marginLeft: 'auto' }}>
+          {sessions.length} session{sessions.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {noSessions ? (
+        <div style={{ color: '#444', fontSize: 13, fontFamily: 'monospace', padding: 40 }}>
+          no active sessions. go to{' '}
+          <span onClick={() => navigate({ page: 'dashboard' })} style={{ color: '#007acc', cursor: 'pointer' }}>
+            dashboard
+          </span>
+          {' '}to create one.
+        </div>
+      ) : (
+        <div style={{ flex: 1, overflow: 'auto', padding: 20 }}>
+          {workspacesWithSessions.map((ws) => (
+            <div key={ws.id} style={{ marginBottom: 28 }}>
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
+                  padding: '6px 12px', background: '#1a1a1a', borderRadius: 4,
+                  cursor: 'pointer',
+                }}
+                onClick={() => navigate({ page: 'workspace', id: ws.id })}
+              >
+                <span style={{ color: '#ccc', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
+                  {ws.name}
+                </span>
+                <span style={{ color: '#555', fontSize: 11, fontFamily: 'monospace' }}>
+                  {ws.liveSessions.length} session{ws.liveSessions.length !== 1 ? 's' : ''}
+                </span>
+                <span style={{ color: '#444', fontSize: 11, fontFamily: 'monospace', marginLeft: 'auto' }}>
+                  click to open &rarr;
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(560px, 1fr))', gap: 8 }}>
+                {ws.liveSessions.map((sid) => {
+                  const info = sessions.find((s) => s.id === sid);
+                  return (
+                    <PreviewCard
+                      key={sid}
+                      mux={mux}
+                      sessionId={sid}
+                      label={info ? `#${sid} ${info.cmd.join(' ')}` : `#${sid}`}
+                      status={info?.status}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
+          {standalone.length > 0 && (
+            <div>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
+                padding: '6px 12px', background: '#1a1a1a', borderRadius: 4,
+              }}>
+                <span style={{ color: '#888', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
+                  standalone
+                </span>
+                <span style={{ color: '#555', fontSize: 11, fontFamily: 'monospace' }}>
+                  {standalone.length} session{standalone.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(560px, 1fr))', gap: 8 }}>
+                {standalone.map((s) => (
+                  <PreviewCard
+                    key={s.id}
+                    mux={mux}
+                    sessionId={s.id}
+                    label={`#${s.id} ${s.cmd.join(' ')}`}
+                    status={s.status}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreviewCard({ mux, sessionId, label, status }: {
+  mux: TerminalMux;
+  sessionId: number;
+  label: string;
+  status?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: 'flex', flexDirection: 'column',
+        background: '#1e1e1e', borderRadius: 4, overflow: 'hidden',
+        border: '1px solid #2a2a2a',
+        cursor: 'pointer',
+        transition: 'border-color 0.15s',
+      }}
+      onClick={() => navigate({ page: 'session', id: sessionId })}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#007acc'; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#2a2a2a'; }}
+    >
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '4px 10px', background: '#181818',
+        borderBottom: '1px solid #2a2a2a',
+        fontFamily: 'monospace', fontSize: 11, userSelect: 'none',
+      }}>
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: status === 'attached' ? '#4fc3f7' : '#555',
+          flexShrink: 0,
+        }} />
+        <span style={{ color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {label}
+        </span>
+      </div>
+      <div style={{ height: 220, pointerEvents: 'none' }}>
+        <Terminal mux={mux} attachId={sessionId} mode="readonly" fontSize={9} />
+      </div>
+    </div>
+  );
+}
+
 // ───── App (라우터) ─────
 
 function App() {
@@ -444,6 +625,8 @@ function App() {
   const mux = muxRef.current;
 
   switch (route.page) {
+    case 'overview':
+      return <OverviewPage mux={mux} />;
     case 'session':
       return <SessionPage mux={mux} sessionId={route.id} />;
     case 'viewer':

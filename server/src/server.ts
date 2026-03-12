@@ -97,13 +97,13 @@ function handleHttpApi(manager: SessionManager, req: IncomingMessage, res: Serve
 
   // POST /api/sessions — create
   if (path === '/api/sessions' && req.method === 'POST') {
-    readBody().then((body) => {
+    readBody().then(async (body) => {
       try {
         const opts = body ? JSON.parse(body) : {};
         const cmd = Array.isArray(opts.cmd) ? opts.cmd : [DEFAULT_SHELL];
         const cols = opts.cols || 80;
         const rows = opts.rows || 24;
-        const session = manager.create(cmd, cols, rows);
+        const session = await manager.create(cmd, cols, rows);
         log(`HTTP CREATE session=${session.id} pid=${session.pid}`);
         json(201, session.info());
       } catch {
@@ -187,8 +187,9 @@ function handleHttpApi(manager: SessionManager, req: IncomingMessage, res: Serve
 
 // ───── Main ─────
 
-export function createServer(port: number): TtymServer {
+export async function createServer(port: number): Promise<TtymServer> {
   const manager = new SessionManager();
+  await manager.boot();
   const httpServer = createHttpServer((req, res) => {
     if (handleHttpApi(manager, req, res)) return;
     res.writeHead(404);
@@ -352,18 +353,19 @@ export function createServer(port: number): TtymServer {
             }
           }
 
-          let session;
-          try {
-            session = manager.create(opts.cmd, opts.cols, opts.rows);
-          } catch (error) {
+          manager.create(opts.cmd, opts.cols, opts.rows).then((session) => {
+            log(`CREATE session=${session.id} pid=${session.pid} cmd=${opts.cmd.join(' ')}`);
+            safeSend(ws, encode(session.id, CMD.CREATE, jsonPayload({ requestId, ok: true })));
+            wireSession(session.id);
+            // Send initial snapshot (holder may have buffered output before viewer was added)
+            const snap = session.snapshot();
+            if (snap.length > 0) {
+              safeSend(ws, encode(session.id, CMD.SNAPSHOT, Buffer.from(snap)));
+            }
+          }).catch((error) => {
             console.error('Failed to create session:', error);
             safeSend(ws, encode(0, CMD.CREATE, jsonPayload({ requestId, ok: false, error: 'spawn failed' })));
-            break;
-          }
-
-          log(`CREATE session=${session.id} pid=${session.pid} cmd=${opts.cmd.join(' ')}`);
-          safeSend(ws, encode(session.id, CMD.CREATE, jsonPayload({ requestId, ok: true })));
-          wireSession(session.id);
+          });
           break;
         }
 
@@ -520,14 +522,14 @@ export function createServer(port: number): TtymServer {
     });
   });
 
-  httpServer.listen(port);
+  await new Promise<void>((resolve) => httpServer.listen(port, resolve));
 
   return {
     manager,
     wss,
     httpServer,
     close: async () => {
-      manager.destroyAll();
+      manager.shutdown(); // don't kill holders — they survive restart
       await new Promise<void>((resolve, reject) => {
         wss.close((error) => {
           if (error) reject(error);

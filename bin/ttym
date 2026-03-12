@@ -1,0 +1,178 @@
+#!/usr/bin/env node
+
+import { spawn, execSync } from 'node:child_process';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import http from 'node:http';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const HOME_DIR = resolve(process.env.HOME || '/tmp', '.ttym');
+const PID_FILE = resolve(HOME_DIR, 'ttym.pid');
+const LOG_FILE = resolve(HOME_DIR, 'ttym.log');
+const SERVER_JS = resolve(__dirname, 'ttym-server.js');
+const HOLDER_BIN = resolve(__dirname, 'ttym-holder');
+
+// ───── Helpers ─────
+
+function readPid() {
+  try {
+    const pid = parseInt(readFileSync(PID_FILE, 'utf8').trim(), 10);
+    if (isNaN(pid)) return null;
+    // Check if process is alive
+    try { process.kill(pid, 0); return pid; } catch { return null; }
+  } catch {
+    return null;
+  }
+}
+
+function getPort() {
+  const idx = process.argv.indexOf('--port');
+  if (idx !== -1 && process.argv[idx + 1]) return parseInt(process.argv[idx + 1], 10);
+  return parseInt(process.env.PORT || '7690', 10);
+}
+
+function fetchJson(port, path) {
+  return new Promise((resolve, reject) => {
+    const req = http.get(`http://127.0.0.1:${port}${path}`, (res) => {
+      let body = '';
+      res.on('data', (c) => body += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)); } catch { resolve(null); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(2000, () => { req.destroy(); reject(new Error('timeout')); });
+  });
+}
+
+// ───── Commands ─────
+
+function cmdStart() {
+  const pid = readPid();
+  if (pid) {
+    console.log(`ttym already running (pid ${pid})`);
+    process.exit(1);
+  }
+
+  if (!existsSync(SERVER_JS)) {
+    console.error(`server not found: ${SERVER_JS}`);
+    console.error('run scripts/build.sh first');
+    process.exit(1);
+  }
+
+  mkdirSync(HOME_DIR, { recursive: true });
+
+  const port = getPort();
+  const logFd = openSync(LOG_FILE, 'a');
+
+  const env = {
+    ...process.env,
+    PORT: String(port),
+    TTYM_HOLDER_BIN: HOLDER_BIN,
+  };
+
+  const child = spawn('node', [SERVER_JS], {
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
+    env,
+  });
+  child.unref();
+
+  // Write PID file immediately (don't wait for server boot)
+  writeFileSync(PID_FILE, String(child.pid));
+
+  console.log(`ttym started (pid ${child.pid}, port ${port})`);
+  console.log(`log: ${LOG_FILE}`);
+}
+
+function waitForExit(pid, maxMs = 5000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    try { process.kill(pid, 0); } catch { return true; }
+    execSync('sleep 0.1');
+  }
+  return false;
+}
+
+function cmdStop() {
+  const pid = readPid();
+  if (!pid) {
+    console.log('ttym is not running');
+    process.exit(1);
+  }
+  process.kill(pid, 'SIGTERM');
+  waitForExit(pid);
+  console.log(`ttym stopped (pid ${pid})`);
+}
+
+function cmdRestart() {
+  const pid = readPid();
+  if (pid) {
+    process.kill(pid, 'SIGTERM');
+    if (!waitForExit(pid)) {
+      console.error(`failed to stop pid ${pid}, force killing`);
+      process.kill(pid, 'SIGKILL');
+      waitForExit(pid, 2000);
+    }
+  }
+  cmdStart();
+}
+
+async function cmdStatus() {
+  const pid = readPid();
+  if (!pid) {
+    console.log('ttym is not running');
+    process.exit(1);
+  }
+
+  const port = getPort();
+  console.log(`ttym running (pid ${pid}, port ${port})`);
+
+  try {
+    const sessions = await fetchJson(port, '/api/sessions');
+    if (Array.isArray(sessions)) {
+      console.log(`sessions: ${sessions.length}`);
+      for (const s of sessions) {
+        const status = s.status === 'attached' ? 'attached' : s.status === 'dead' ? 'dead' : 'detached';
+        console.log(`  #${s.id} [${status}] ${s.cmd.join(' ')} (${s.cols}x${s.rows})`);
+      }
+    }
+  } catch {
+    console.log('sessions: (could not fetch)');
+  }
+}
+
+function cmdLog() {
+  if (!existsSync(LOG_FILE)) {
+    console.log('no log file');
+    process.exit(1);
+  }
+  const follow = process.argv.includes('-f');
+  const args = follow ? ['-f', LOG_FILE] : ['-50', LOG_FILE];
+  const tail = spawn('tail', args, { stdio: 'inherit' });
+  tail.on('exit', (code) => process.exit(code ?? 0));
+}
+
+// ───── Main ─────
+
+const cmd = process.argv[2];
+
+switch (cmd) {
+  case 'start':   cmdStart(); break;
+  case 'stop':    cmdStop(); break;
+  case 'restart': cmdRestart(); break;
+  case 'status':  await cmdStatus(); break;
+  case 'log':     cmdLog(); break;
+  default:
+    console.log(`usage: ttym <start|stop|restart|status|log>`);
+    console.log('');
+    console.log('commands:');
+    console.log('  start [--port 7690]   Start server in background');
+    console.log('  stop                  Stop server (holders survive)');
+    console.log('  restart               Restart server');
+    console.log('  status                Show server & session info');
+    console.log('  log [-f]              Show server log');
+    process.exit(cmd ? 1 : 0);
+}
