@@ -1,0 +1,14 @@
+{
+  "name": "ttym",
+  "private": true,
+  "description": "Web terminal multiplexer — single WebSocket, multiple PTY sessions",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "node-pty",
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2"
+  }
+}
