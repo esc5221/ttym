@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ttym Native Chrome Proposals</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0d10;
+        --surface: #111419;
+        --surface-2: #151a20;
+        --surface-3: #1b2129;
+        --surface-4: #202833;
+        --line: #252d37;
+        --line-soft: rgba(255, 255, 255, 0.06);
+        --text: #edf2f7;
+        --text-soft: #a7b0bb;
+        --text-dim: #6f7884;
+        --focus: #88a9cf;
+        --focus-strong: #9ac2f1;
+        --terminal: #090b0f;
+        --shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+        font-family: "SF Pro Text", "Inter", system-ui, sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(72, 96, 132, 0.15), transparent 24%),
+          linear-gradient(180deg, #10141a 0%, #090b0f 100%);
+        color: var(--text);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+      }
+
+      body {
+        padding: 32px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      .page {
+        display: grid;
+        gap: 28px;
+      }
+
+      .intro {
+        display: grid;
+        gap: 10px;
+        max-width: 900px;
+      }
+
+      .intro h1 {
+        font-size: 34px;
+        letter-spacing: -0.04em;
+      }
+
+      .intro p {
+        color: var(--text-soft);
+        line-height: 1.5;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(320px, 1fr));
+        gap: 22px;
+      }
+
+      .card {
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+        border-radius: 22px;
+        border: 1px solid var(--line-soft);
+        background: rgba(17, 20, 25, 0.78);
+        backdrop-filter: blur(14px);
+        box-shadow: var(--shadow);
+      }
+
+      .meta {
+        display: grid;
+        gap: 6px;
+      }
+
+      .meta h2 {
+        font-size: 16px;
+        letter-spacing: -0.02em;
+      }
+
+      .meta p {
+        color: var(--text-dim);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .window {
+        min-height: 260px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        border-radius: 16px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        background: var(--terminal);
+      }
+
+      .terminal-body {
+        display: grid;
+        gap: 0;
+        min-height: 0;
+        background: var(--terminal);
+      }
+
+      .pane {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        border-right: 1px solid var(--line);
+        min-width: 0;
+      }
+
+      .pane:last-child {
+        border-right: none;
+      }
+
+      .pane-head {
+        height: 26px;
+        padding: 0 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font: 11px/1 "SF Mono", Menlo, monospace;
+        color: var(--text-soft);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .pane-body {
+        min-height: 140px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent 12%),
+          var(--terminal);
+      }
+
+      .focus-line {
+        box-shadow: inset 0 2px 0 var(--focus);
+      }
+
+      .tabs {
+        display: flex;
+        align-items: flex-end;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .tab {
+        height: 24px;
+        padding: 0 10px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-dim);
+        font-size: 11px;
+        border-radius: 8px 8px 0 0;
+        border: 1px solid transparent;
+      }
+
+      .tab.active {
+        color: var(--text);
+      }
+
+      .tab-close {
+        opacity: 0.55;
+      }
+
+      .terminal-split-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .terminal-split-3 {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+
+      .layout-stack {
+        display: grid;
+        grid-template-rows: 1fr 1fr;
+      }
+
+      .layout-stack .pane {
+        border-right: none;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .layout-stack .pane:last-child {
+        border-bottom: none;
+      }
+
+      .v1-bar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 8px;
+        height: 34px;
+        padding: 5px 8px 0;
+        background: #13171d;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v1-bar .tab.active {
+        background: #1d232c;
+        border-color: var(--line);
+      }
+
+      .v1-actions,
+      .v2-actions,
+      .v3-actions,
+      .v4-actions,
+      .v5-actions,
+      .v6-actions,
+      .v7-actions,
+      .v8-actions,
+      .v9-actions,
+      .v10-actions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .chip {
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--text-dim);
+        font-size: 10px;
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .v2-bar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 10px;
+        height: 30px;
+        padding: 0 8px;
+        background: #11151a;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v2-bar .tabs {
+        align-items: center;
+      }
+
+      .v2-bar .tab {
+        border-radius: 6px;
+        height: 20px;
+      }
+
+      .v2-bar .tab.active {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .v3-bar {
+        height: 32px;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        padding: 0 8px;
+        gap: 10px;
+        background: #12161d;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v3-label {
+        color: var(--text-dim);
+        font: 11px/1 "SF Mono", Menlo, monospace;
+      }
+
+      .v3-bar .tab.active {
+        background: #202734;
+        border-color: #2f3946;
+      }
+
+      .v4-bar {
+        height: 28px;
+        display: flex;
+        align-items: center;
+        padding: 0 6px;
+        gap: 6px;
+        background: #0f1317;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v4-bar .tab {
+        height: 18px;
+        border-radius: 4px;
+        padding: 0 8px;
+      }
+
+      .v4-bar .tab.active {
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .v5-bar {
+        height: 34px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 8px;
+        padding: 6px 10px 0;
+        background: linear-gradient(180deg, #171d25 0%, #12161c 100%);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v5-bar .tab.active {
+        background: #232b35;
+        border-color: #33404f;
+        box-shadow: inset 0 2px 0 var(--focus);
+      }
+
+      .v6-bar {
+        height: 30px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        padding: 0 8px;
+        background: #11151a;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v6-bar .tab {
+        height: 30px;
+        border-radius: 0;
+        border-top: 2px solid transparent;
+      }
+
+      .v6-bar .tab.active {
+        border-top-color: var(--focus-strong);
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .v7-bar {
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 8px;
+        background: #11161d;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v7-bar .tab.active {
+        background: transparent;
+        border-color: transparent;
+        box-shadow: inset 0 -1px 0 var(--focus);
+      }
+
+      .v8-bar {
+        height: 32px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        padding: 5px 8px 0;
+        background: #101419;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v8-bar .tab {
+        height: 22px;
+        border-radius: 999px;
+      }
+
+      .v8-bar .tab.active {
+        background: rgba(255, 255, 255, 0.07);
+        border-color: #2a323c;
+      }
+
+      .v9-bar {
+        height: 29px;
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 10px;
+        padding: 0 8px;
+        background: #11151b;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v9-keyline {
+        width: 28px;
+        height: 1px;
+        background: var(--line-strong);
+      }
+
+      .v9-bar .tab.active {
+        background: #1f2630;
+        border-color: #303947;
+      }
+
+      .v10-bar {
+        height: 34px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 8px;
+        padding: 0 8px;
+        background: #141922;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v10-bar .tabs {
+        position: relative;
+        padding-bottom: 5px;
+      }
+
+      .v10-bar .tabs::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 1px;
+        background: var(--line);
+      }
+
+      .v10-bar .tab {
+        position: relative;
+        z-index: 1;
+      }
+
+      .v10-bar .tab.active {
+        background: #1d232b;
+        border-color: #303946;
+      }
+
+      .proposal-note {
+        color: var(--text-soft);
+        font-size: 12px;
+      }
+
+      @media (max-width: 980px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="intro">
+        <h1>ttym Native Terminal Chrome Studies</h1>
+        <p>
+          10 restrained terminal chrome directions focused only on tab bar and split headers.
+          All are terminal-first, startup-grade clean, and intentionally close to what a real
+          product team could ship.
+        </p>
+        <p class="proposal-note">
+          Guidance: no sidebar, no loud branding, no novelty UI. Choose one system and refine it.
+        </p>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <div class="meta">
+            <h2>1. Quiet Baseline</h2>
+            <p>Default recommendation. Familiar tab strip, small actions, gentle focus line, safe and polished.</p>
+          </div>
+          <div class="window">
+            <div class="v1-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1 <span class="tab-close">×</span></div>
+                <div class="tab">workspace 2</div>
+                <div class="tab">workspace 3</div>
+              </div>
+              <div class="v1-actions"><div class="chip">+</div></div>
+            </div>
+            <div class="terminal-body terminal-split-2">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#77</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#121</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>2. WezTerm Compact</h2>
+            <p>More compressed and dense. Better if you want maximum content area with minimum chrome.</p>
+          </div>
+          <div class="window">
+            <div class="v2-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1</div>
+                <div class="tab">workspace 2</div>
+                <div class="tab">workspace 3</div>
+              </div>
+              <div class="v2-actions"><div class="chip">⌘T</div></div>
+            </div>
+            <div class="terminal-body terminal-split-3">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#77</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#103</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#125</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>3. One-Line Operator</h2>
+            <p>Single-line top chrome with tiny workspace label. Good if the app should feel almost invisible.</p>
+          </div>
+          <div class="window">
+            <div class="v3-bar">
+              <div class="v3-label">ttym</div>
+              <div class="tabs">
+                <div class="tab active">workspace 1</div>
+                <div class="tab">workspace 2</div>
+              </div>
+              <div class="v3-actions"><div class="chip">+</div></div>
+            </div>
+            <div class="terminal-body terminal-split-2">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#121</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#123</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>4. Ultra Minimal</h2>
+            <p>Tabs become almost text labels. Best when you want the top bar to visually disappear.</p>
+          </div>
+          <div class="window">
+            <div class="v4-bar">
+              <div class="tab active">workspace 1</div>
+              <div class="tab">workspace 2</div>
+              <div class="tab">workspace 3</div>
+              <div class="chip">+</div>
+            </div>
+            <div class="terminal-body terminal-split-2">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#77</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#103</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>5. Focus Rail</h2>
+            <p>Active workspace gets a subtle top rail. Slightly more expressive without becoming flashy.</p>
+          </div>
+          <div class="window">
+            <div class="v5-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1</div>
+                <div class="tab">workspace 2</div>
+              </div>
+              <div class="v5-actions"><div class="chip">new</div></div>
+            </div>
+            <div class="terminal-body layout-stack">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#121</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#125</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>6. iTerm-Lite</h2>
+            <p>Closer to native desktop terminal conventions. Tabs feel architectural rather than decorative.</p>
+          </div>
+          <div class="window">
+            <div class="v6-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1</div>
+                <div class="tab">workspace 2</div>
+                <div class="tab">workspace 3</div>
+              </div>
+              <div class="v6-actions"><div class="chip">+</div></div>
+            </div>
+            <div class="terminal-body terminal-split-2">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#77</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#121</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>7. Underline Tabs</h2>
+            <p>Very light tabs with a single underline. Elegant, but slightly less scannable than boxed tabs.</p>
+          </div>
+          <div class="window">
+            <div class="v7-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1</div>
+                <div class="tab">workspace 2</div>
+              </div>
+              <div class="v7-actions"><div class="chip">+</div></div>
+            </div>
+            <div class="terminal-body terminal-split-3">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#103</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#121</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#123</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>8. Soft Capsule</h2>
+            <p>Rounded tabs without bright color. Slightly friendlier, still acceptable if the product wants warmth.</p>
+          </div>
+          <div class="window">
+            <div class="v8-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1</div>
+                <div class="tab">workspace 2</div>
+                <div class="tab">workspace 3</div>
+              </div>
+              <div class="v8-actions"><div class="chip">+</div></div>
+            </div>
+            <div class="terminal-body terminal-split-2">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#77</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#125</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>9. Editorial Thin</h2>
+            <p>Sharper spacing and a more graphic header. Good if you want a little more brand polish without noise.</p>
+          </div>
+          <div class="window">
+            <div class="v9-bar">
+              <div class="v9-keyline"></div>
+              <div class="tabs">
+                <div class="tab active">workspace 1</div>
+                <div class="tab">workspace 2</div>
+              </div>
+              <div class="v9-actions"><div class="chip">+</div></div>
+            </div>
+            <div class="terminal-body layout-stack">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#121</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#125</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>10. Productized Default</h2>
+            <p>Most balanced for launch. Clean tabs, quiet separators, and headers that look intentional but not overdesigned.</p>
+          </div>
+          <div class="window">
+            <div class="v10-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1</div>
+                <div class="tab">workspace 2</div>
+                <div class="tab">workspace 3</div>
+              </div>
+              <div class="v10-actions"><div class="chip">+</div></div>
+            </div>
+            <div class="terminal-body terminal-split-2">
+              <div class="pane focus-line">
+                <div class="pane-head"><span>#77</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+              <div class="pane">
+                <div class="pane-head"><span>#121</span><span>×</span></div>
+                <div class="pane-body"></div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

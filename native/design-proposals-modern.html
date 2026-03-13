@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ttym Native Modern Chrome Proposals</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #07090c;
+        --bg-2: #0c1015;
+        --surface: #11161d;
+        --surface-2: #171d25;
+        --surface-3: #1e2630;
+        --line: rgba(255, 255, 255, 0.08);
+        --line-strong: rgba(255, 255, 255, 0.14);
+        --text: #edf2f7;
+        --text-soft: #a7b0bc;
+        --text-dim: #69717d;
+        --accent: #8db5e4;
+        --accent-strong: #cde1f7;
+        --terminal: #06080b;
+        --shadow: 0 26px 80px rgba(0, 0, 0, 0.42);
+        font-family: "SF Pro Text", "Inter", system-ui, sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(126, 167, 220, 0.12), transparent 28%),
+          linear-gradient(180deg, #0d1117 0%, #07090c 100%);
+        color: var(--text);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+      }
+
+      body {
+        padding: 36px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      .page {
+        display: grid;
+        gap: 24px;
+      }
+
+      .intro {
+        display: grid;
+        gap: 8px;
+        max-width: 820px;
+      }
+
+      .intro h1 {
+        font-size: 34px;
+        letter-spacing: -0.045em;
+      }
+
+      .intro p {
+        color: var(--text-soft);
+        line-height: 1.55;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(300px, 1fr));
+        gap: 20px;
+      }
+
+      .card {
+        display: grid;
+        gap: 14px;
+        padding: 18px;
+        border-radius: 24px;
+        border: 1px solid var(--line);
+        background: rgba(15, 19, 25, 0.78);
+        backdrop-filter: blur(16px);
+        box-shadow: var(--shadow);
+      }
+
+      .meta {
+        display: grid;
+        gap: 6px;
+      }
+
+      .meta h2 {
+        font-size: 16px;
+        letter-spacing: -0.02em;
+      }
+
+      .meta p {
+        color: var(--text-dim);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .window {
+        min-height: 280px;
+        display: grid;
+        grid-template-rows: auto 1fr;
+        border-radius: 18px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        background: var(--terminal);
+      }
+
+      .tabs {
+        display: flex;
+        align-items: flex-end;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .tab {
+        height: 25px;
+        padding: 0 11px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text-dim);
+        font-size: 11px;
+        letter-spacing: 0.01em;
+        border-radius: 9px 9px 0 0;
+        border: 1px solid transparent;
+      }
+
+      .tab.active {
+        color: var(--text);
+      }
+
+      .tab-close {
+        opacity: 0.55;
+      }
+
+      .terminal-body {
+        display: grid;
+        grid-template-columns: 1.35fr 1fr;
+        min-height: 0;
+        background: var(--terminal);
+      }
+
+      .pane {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        min-width: 0;
+        border-right: 1px solid var(--line);
+      }
+
+      .pane:last-child {
+        border-right: none;
+      }
+
+      .pane-head {
+        height: 26px;
+        padding: 0 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+        color: var(--text-soft);
+        font: 11px/1 "SF Mono", Menlo, monospace;
+      }
+
+      .pane-body {
+        min-height: 180px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.014), transparent 12%),
+          var(--terminal);
+      }
+
+      .pane.focused .pane-head {
+        color: var(--text);
+      }
+
+      .v1-bar,
+      .v2-bar,
+      .v3-bar,
+      .v4-bar {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .v1-bar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 10px;
+        height: 36px;
+        padding: 6px 8px 0;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent),
+          #121821;
+      }
+
+      .v1-bar .tab {
+        background: transparent;
+      }
+
+      .v1-bar .tab.active {
+        background: #202937;
+        border-color: rgba(205, 225, 247, 0.2);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.08),
+          0 0 0 1px rgba(141, 181, 228, 0.08);
+        font-weight: 600;
+      }
+
+      .v1-plus,
+      .v2-plus,
+      .v3-plus {
+        height: 22px;
+        min-width: 22px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        color: var(--text-soft);
+        border: 1px solid var(--line);
+        font-size: 12px;
+      }
+
+      .v2-bar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 10px;
+        height: 32px;
+        padding: 0 8px;
+        background: #0f141b;
+      }
+
+      .v2-bar .tabs {
+        align-items: stretch;
+      }
+
+      .v2-bar .tab {
+        height: 100%;
+        border-radius: 0;
+        padding: 0 12px;
+        border-top: 2px solid transparent;
+        border-bottom: 0;
+      }
+
+      .v2-bar .tab.active {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+        border-top-color: var(--accent);
+        color: var(--accent-strong);
+        font-weight: 600;
+      }
+
+      .v2-window .pane.focused .pane-head {
+        box-shadow: inset 0 2px 0 var(--accent);
+      }
+
+      .v3-bar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 10px;
+        height: 38px;
+        padding: 6px;
+        background: #121821;
+      }
+
+      .v3-bar .tab {
+        height: 26px;
+        border-radius: 999px;
+        padding: 0 13px;
+      }
+
+      .v3-bar .tab.active {
+        background: #eff4fb;
+        color: #11161d;
+        font-weight: 700;
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+      }
+
+      .v3-window .pane.focused .pane-head {
+        background: #151c25;
+        border-bottom-color: var(--line-strong);
+      }
+
+      .v3-window .pane.focused {
+        box-shadow: inset 0 0 0 1px rgba(205, 225, 247, 0.08);
+      }
+
+      .v4-bar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: end;
+        gap: 10px;
+        height: 38px;
+        padding: 6px 10px 0;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 60%),
+          #121821;
+      }
+
+      .v4-bar .tabs {
+        gap: 2px;
+      }
+
+      .v4-bar .tab {
+        position: relative;
+        height: 27px;
+        padding: 0 14px;
+        border-radius: 10px 10px 0 0;
+        background: #151b23;
+        color: #88919d;
+        border-color: rgba(255, 255, 255, 0.04);
+      }
+
+      .v4-bar .tab::before,
+      .v4-bar .tab::after {
+        content: "";
+        position: absolute;
+        bottom: -1px;
+        width: 14px;
+        height: 14px;
+        border-bottom: 1px solid transparent;
+      }
+
+      .v4-bar .tab::before {
+        left: -8px;
+        border-right: 1px solid transparent;
+        border-bottom-right-radius: 12px;
+      }
+
+      .v4-bar .tab::after {
+        right: -8px;
+        border-left: 1px solid transparent;
+        border-bottom-left-radius: 12px;
+      }
+
+      .v4-bar .tab.active {
+        background: #eff4fb;
+        color: #11161d;
+        border-color: rgba(255, 255, 255, 0.08);
+        font-weight: 700;
+        z-index: 2;
+      }
+
+      .v4-bar .tab.active::before {
+        background:
+          radial-gradient(circle at 100% 0, transparent 12px, #eff4fb 13px);
+      }
+
+      .v4-bar .tab.active::after {
+        background:
+          radial-gradient(circle at 0 0, transparent 12px, #eff4fb 13px);
+      }
+
+      .v4-bar .tab:not(.active):hover {
+        background: #1b222c;
+        color: var(--text-soft);
+      }
+
+      .v4-plus {
+        height: 24px;
+        min-width: 24px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--text-soft);
+      }
+
+      .v4-window .pane.focused .pane-head {
+        background: #141a22;
+        box-shadow: inset 0 2px 0 rgba(141, 181, 228, 0.58);
+      }
+
+      @media (max-width: 1120px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="intro">
+        <h1>Modern Terminal Chrome Directions</h1>
+        <p>
+          현재 탭을 확실히 더 진하게 올리고, 지금 앱보다 더 정제된 제품 톤으로 바꾼 3개 시안입니다.
+          전부 과한 실험 없이 실제 shipping 가능한 범위로만 잡았습니다.
+        </p>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <div class="meta">
+            <h2>1. Inked Active</h2>
+            <p>가장 안전한 방향. 현재 탭만 짙은 플레이트처럼 눌러 주고, 나머지는 뒤로 물립니다.</p>
+          </div>
+          <div class="window v1-window">
+            <div class="v1-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1 <span class="tab-close">×</span></div>
+                <div class="tab">workspace 2</div>
+                <div class="tab">workspace 3</div>
+              </div>
+              <div class="v1-plus">+</div>
+            </div>
+            <div class="terminal-body">
+              <section class="pane focused">
+                <header class="pane-head"><span>#107</span><span>⌘\\</span></header>
+                <div class="pane-body"></div>
+              </section>
+              <section class="pane">
+                <header class="pane-head"><span>#121</span><span>⌘W</span></header>
+                <div class="pane-body"></div>
+              </section>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>2. Soft Capsule</h2>
+            <p>조금 더 모던한 제품 톤. active tab을 밝은 캡슐로 띄워 주되 전체는 여전히 터미널답게 차분합니다.</p>
+          </div>
+          <div class="window v3-window">
+            <div class="v3-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1 <span class="tab-close">×</span></div>
+                <div class="tab">workspace 2</div>
+                <div class="tab">workspace 3</div>
+              </div>
+              <div class="v3-plus">+</div>
+            </div>
+            <div class="terminal-body">
+              <section class="pane focused">
+                <header class="pane-head"><span>#107</span><span>pane 1</span></header>
+                <div class="pane-body"></div>
+              </section>
+              <section class="pane">
+                <header class="pane-head"><span>#125</span><span>pane 2</span></header>
+                <div class="pane-body"></div>
+              </section>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="meta">
+            <h2>3. Chrome Workspace</h2>
+            <p>Chrome 탭 실루엣을 가져오되 과한 브라우저 감성은 빼고, 워크스페이스 전환용으로 더 단정하게 다듬은 방향입니다.</p>
+          </div>
+          <div class="window v4-window">
+            <div class="v4-bar">
+              <div class="tabs">
+                <div class="tab active">workspace 1 <span class="tab-close">×</span></div>
+                <div class="tab">workspace 2</div>
+                <div class="tab">workspace 3</div>
+              </div>
+              <div class="v4-plus">+</div>
+            </div>
+            <div class="terminal-body">
+              <section class="pane focused">
+                <header class="pane-head"><span>#107</span><span>pane 1</span></header>
+                <div class="pane-body"></div>
+              </section>
+              <section class="pane">
+                <header class="pane-head"><span>#121</span><span>pane 2</span></header>
+                <div class="pane-body"></div>
+              </section>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

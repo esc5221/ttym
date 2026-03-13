@@ -19,13 +19,14 @@ export interface TerminalProps {
   style?: React.CSSProperties;
   onCreated?: (sessionId: number) => void;
   onExit?: (sessionId: number) => void;
+  onBell?: () => void;
 }
 
 // flow control 상수
 const PAUSE_HIGH = 1024 * 1024; // 1MB pending → PAUSE
 const RESUME_LOW = 256 * 1024;  // 256KB remaining → RESUME
 
-export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14, className, style, onCreated, onExit }: TerminalProps) {
+export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14, className, style, onCreated, onExit, onBell }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<number | null>(null);
   const onExitRef = useRef(onExit);
@@ -127,6 +128,8 @@ export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14
         if (sessionRef.current !== null) onExitRef.current?.(sessionRef.current);
       },
     };
+
+    disposables.push(term.onBell(() => onBell?.()));
 
     if (attachId !== undefined) {
       mux.attachSession(attachId, callbacks, {

@@ -132,4 +132,20 @@ describe('TerminalMux', () => {
     expect(sentCommands).toContain(CMD.DETACH);
     expect(sentCommands).not.toContain(CMD.DESTROY);
   });
+
+  it('chunks oversized data frames for large pastes', async () => {
+    const mux = new TerminalMux('ws://example.test');
+    const connected = mux.connect();
+    const socket = FakeWebSocket.latest();
+    socket.open();
+    await connected;
+
+    const baseFrames = socket.sent.length;
+    mux.send(7, 'x'.repeat(40_000));
+
+    const frames = socket.sent.slice(baseFrames);
+    expect(frames).toHaveLength(3);
+    expect(frames.every((frame) => frame[2] === CMD.DATA)).toBe(true);
+    expect(frames.map((frame) => frame.byteLength)).toEqual([16_387, 16_387, 7_235]);
+  });
 });

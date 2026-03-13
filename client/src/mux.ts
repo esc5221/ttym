@@ -49,6 +49,7 @@ interface PendingList {
 const CREATE_TIMEOUT_MS = 10_000;
 const ATTACH_TIMEOUT_MS = 10_000;
 const LIST_TIMEOUT_MS = 5_000;
+const MAX_DATA_CHUNK_BYTES = 16 * 1024;
 
 export class TerminalMux {
   private ws: WebSocket | null = null;
@@ -92,7 +93,9 @@ export class TerminalMux {
   private clientId(): string {
     let id = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ttym-client-id') : null;
     if (!id) {
-      id = crypto.randomUUID();
+      id = typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
       try { sessionStorage.setItem('ttym-client-id', id); } catch {}
     }
     return id;
@@ -321,7 +324,15 @@ export class TerminalMux {
   send(sessionId: number, data: string | Uint8Array) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const payload = typeof data === 'string' ? this.encoder.encode(data) : data;
-    this.sendRaw(encode(sessionId, CMD.DATA, payload));
+    if (payload.byteLength <= MAX_DATA_CHUNK_BYTES) {
+      this.sendRaw(encode(sessionId, CMD.DATA, payload));
+      return;
+    }
+
+    // Chunk large pastes to avoid oversized single-frame writes stalling the transport.
+    for (let offset = 0; offset < payload.byteLength; offset += MAX_DATA_CHUNK_BYTES) {
+      this.sendRaw(encode(sessionId, CMD.DATA, payload.subarray(offset, offset + MAX_DATA_CHUNK_BYTES)));
+    }
   }
 
   resize(sessionId: number, cols: number, rows: number) {

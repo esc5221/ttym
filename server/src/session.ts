@@ -1,6 +1,6 @@
 import { spawn, ChildProcess } from 'node:child_process';
 import { createConnection, Socket } from 'node:net';
-import { existsSync } from 'node:fs';
+import { existsSync, openSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import headless from '@xterm/headless';
@@ -137,6 +137,10 @@ export class Session {
   private _lastDirtyAt = 0;
   private _diedAt = 0;
 
+  private debug(message: string): void {
+    console.log(`[sess ${this.id}] ${message}`);
+  }
+
   get dirty(): boolean { return this._dirty; }
   get lastDirtyAt(): number { return this._lastDirtyAt; }
   get diedAt(): number { return this._diedAt; }
@@ -181,9 +185,10 @@ export class Session {
     if (cwd) args.push('--cwd', cwd);
     args.push('--', ...cmd);
 
+    const holderLogFd = openSync(resolve(getHomeDir(), 'ttym.log'), 'a');
     const proc = spawn(holderBin(), args, {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', holderLogFd, holderLogFd],
     });
     proc.unref();
 
@@ -220,11 +225,15 @@ export class Session {
   connectHolder(sock: Socket, _recovery = false): Promise<void> {
     return new Promise((resolve, reject) => {
       this.sock = sock;
+      this.debug(`connectHolder recovery=${_recovery}`);
       let gotState = false;
       let pendingDump = false;
       const buffered: Array<{ cmd: number; payload: Buffer }> = [];
 
-      const timer = setTimeout(() => reject(new Error('holder handshake timeout')), 10000);
+      const timer = setTimeout(() => {
+        this.debug(`handshake timeout recovery=${_recovery} gotState=${gotState} pendingDump=${pendingDump} buffered=${buffered.length}`);
+        reject(new Error('holder handshake timeout'));
+      }, 10000);
 
       sock.on('data', (data: Buffer) => {
         this.reader.feed(data);
@@ -233,6 +242,7 @@ export class Session {
             gotState = true;
             try {
               const state = JSON.parse(frame.payload.toString()) as HolderState;
+              this.debug(`got STATE childPid=${state.childPid} cols=${state.cols} rows=${state.rows} alive=${state.alive}`);
               (this as any).childPid = state.childPid ?? this.childPid;
               this._cols = state.cols ?? this._cols;
               this._rows = state.rows ?? this._rows;
@@ -251,6 +261,7 @@ export class Session {
           if (pendingDump) {
             if (frame.cmd === H_CMD_DUMP_RESP) {
               pendingDump = false;
+              this.debug(`got DUMP_RESP bytes=${frame.payload.length} buffered=${buffered.length}`);
               const finalize = () => {
                 // Replay any DATA_OUT buffered during handshake
                 for (const f of buffered) {
@@ -280,6 +291,7 @@ export class Session {
       });
 
       sock.on('close', () => {
+        this.debug(`socket close closed=${this.closed} viewers=${this.viewers.size}`);
         if (!this.closed) {
           this.closed = true;
           this._diedAt = Date.now();
@@ -288,7 +300,9 @@ export class Session {
         }
         this.sock = null;
       });
-      sock.on('error', () => {});
+      sock.on('error', (err) => {
+        this.debug(`socket error ${(err as Error).message}`);
+      });
     });
   }
 
@@ -319,6 +333,7 @@ export class Session {
       }
       case H_CMD_EXIT: {
         const code = payload.length >= 4 ? payload.readInt32LE(0) : -1;
+        this.debug(`holder EXIT code=${code}`);
         this.closed = true;
         this._diedAt = Date.now();
         for (const cb of this.exitCbs) cb(code);

@@ -3,6 +3,12 @@ import { TerminalMux, Terminal } from '@ttym/client';
 import type { SessionInfo } from '@ttym/client';
 import '@xterm/xterm/css/xterm.css';
 
+/** crypto.randomUUID fallback for non-secure contexts (HTTP over LAN) */
+function uuid(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 // ───── Workspace 타입 + Server API ─────
 
 interface PaneNode { type: 'pane'; sessionId: number; }
@@ -17,7 +23,66 @@ interface Workspace {
   updatedAt: number;
 }
 
-const API_BASE = `http://${window.location.hostname}:7690`;
+const DEFAULT_MAX_PANELS = 3;
+const MIN_MAX_PANELS = 1;
+const MAX_MAX_PANELS = 8;
+
+function clampMaxPanels(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_MAX_PANELS;
+  return Math.max(MIN_MAX_PANELS, Math.min(MAX_MAX_PANELS, Math.trunc(value)));
+}
+
+function readMaxPanels(): number {
+  const raw = new URLSearchParams(window.location.search).get('maxPanels');
+  if (!raw) return DEFAULT_MAX_PANELS;
+  return clampMaxPanels(Number(raw));
+}
+
+function writeMaxPanels(value: number) {
+  const next = clampMaxPanels(value);
+  const url = new URL(window.location.href);
+  url.searchParams.set('maxPanels', String(next));
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+/** Derive ttym server host from current page URL */
+function getTtymHost(): string {
+  const h = window.location.hostname;
+  // ttym-ui.lullu.lan → ttym.lullu.lan (Caddy proxy, port 80)
+  if (h.startsWith('ttym-ui.')) return `ttym.${h.slice(8)}`;
+  // localhost / IP dev mode → same host, port 7690
+  return `${h}:7690`;
+}
+const TTYM_HOST = getTtymHost();
+const API_BASE = `http://${TTYM_HOST}`;
+
+function getTtymUiBase(): string {
+  const { protocol, hostname } = window.location;
+  if (hostname.startsWith('ttym-ui.')) return `${protocol}//${hostname}`;
+  if (hostname.startsWith('ttym.')) return `${protocol}//ttym-ui.${hostname.slice(5)}`;
+  return 'http://ttym-ui.lullu.lan';
+}
+
+function getSessionUrl(sessionId: number): string {
+  return `${getTtymUiBase()}/#s/${sessionId}`;
+}
+
+async function copySessionUrl(sessionId: number) {
+  const url = getSessionUrl(sessionId);
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(url);
+    return;
+  }
+
+  const input = document.createElement('input');
+  input.value = url;
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand('copy');
+  document.body.removeChild(input);
+}
 
 /** Extract flat sessionId list from layout tree */
 function layoutToSessionIds(node: LayoutNode): number[] {
@@ -152,7 +217,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
   }, [mux]);
 
   const createWorkspace = useCallback(async () => {
-    const id = crypto.randomUUID().slice(0, 8);
+    const id = uuid().slice(0, 8);
     const name = `workspace ${workspaces.length + 1}`;
     const layout: LayoutNode = { type: 'pane', sessionId: 0 }; // placeholder
     const ws = await apiCreateWorkspace({ id, name, layout });
@@ -246,7 +311,19 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                   borderLeft: `3px solid ${s.status === 'attached' ? '#007acc' : '#555'}`,
                 }}
               >
-                <span style={{ color: '#eee', fontWeight: 600, width: 36 }}>#{s.id}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: 72 }}>
+                  <span style={{ color: '#eee', fontWeight: 600, width: 36 }}>#{s.id}</span>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await copySessionUrl(s.id);
+                    }}
+                    style={miniLinkBtnStyle}
+                    title={`Copy ${getSessionUrl(s.id)}`}
+                  >
+                    copy
+                  </button>
+                </span>
                 <span style={{ color: '#aaa', flex: 1 }}>{s.cmd.join(' ')}</span>
                 <span style={{
                   fontSize: 11, padding: '1px 6px', borderRadius: 3,
@@ -286,7 +363,16 @@ function SessionPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number }
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
-        <span style={{ color: '#aaa', fontSize: 12 }}>session #{sessionId}</span>
+        <span style={{ color: '#aaa', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span>session #{sessionId}</span>
+          <button
+            onClick={async () => copySessionUrl(sessionId)}
+            style={miniLinkBtnStyle}
+            title={`Copy ${getSessionUrl(sessionId)}`}
+          >
+            copy
+          </button>
+        </span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
         <Terminal mux={mux} attachId={sessionId} onExit={() => navigate({ page: 'dashboard' })} />
@@ -302,7 +388,16 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
-        <span style={{ color: '#aaa', fontSize: 12 }}>session #{sessionId}</span>
+        <span style={{ color: '#aaa', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <span>session #{sessionId}</span>
+          <button
+            onClick={async () => copySessionUrl(sessionId)}
+            style={miniLinkBtnStyle}
+            title={`Copy ${getSessionUrl(sessionId)}`}
+          >
+            copy
+          </button>
+        </span>
         <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 3, background: '#3a2a00', color: '#f0b040' }}>
           readonly
         </span>
@@ -316,9 +411,9 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
 
 // ───── 워크스페이스 페이지 (분할 터미널) ─────
 
-function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: string }) {
+function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; workspaceId: string; maxPanels: number }) {
   const [wsName, setWsName] = useState(workspaceId);
-  const [panels, setPanels] = useState<{ key: string; sessionId?: number }[]>([{ key: crypto.randomUUID() }]);
+  const [panels, setPanels] = useState<{ key: string; sessionId?: number }[]>([{ key: uuid() }]);
   const [focused, setFocused] = useState(0);
   const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const initialized = useRef(false);
@@ -334,7 +429,7 @@ function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: st
         setWsName(ws.name);
         const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
         if (ids.length > 0) {
-          setPanels(ids.map((id) => ({ key: crypto.randomUUID(), sessionId: id })));
+          setPanels(ids.map((id) => ({ key: uuid(), sessionId: id })));
         }
       })
       .catch(() => {});
@@ -347,12 +442,13 @@ function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: st
   }, [workspaceId]);
 
   const add = useCallback(() => {
+    if (panels.length >= maxPanels) return;
     setPanels((p) => {
-      const next = [...p, { key: crypto.randomUUID() }];
+      const next = [...p, { key: uuid() }];
       setFocused(next.length - 1);
       return next;
     });
-  }, []);
+  }, [panels.length, maxPanels]);
 
   const removeAt = useCallback((index: number) => {
     setPanels((prev) => {
@@ -413,16 +509,16 @@ function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: st
     if (panels.length === 0) navigate({ page: 'dashboard' });
   }, [panels.length]);
 
-  const cols = Math.min(panels.length, 3);
+  const cols = Math.min(panels.length, maxPanels);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
         <span style={{ color: '#aaa', fontSize: 12 }}>{wsName}</span>
-        <button onClick={add} style={btnStyle}>+ split</button>
+        <button onClick={add} style={btnStyle} disabled={panels.length >= maxPanels}>+ split</button>
         <span style={{ color: '#666', fontSize: 12 }}>
-          {panels.length} session{panels.length > 1 ? 's' : ''}
+          {panels.length} / {maxPanels} session{panels.length > 1 ? 's' : ''}
         </span>
         <span style={{ color: '#444', fontSize: 11, marginLeft: 'auto' }}>
           {'\u2318\\ split \u2003 \u2318W close \u2003 \u2318\u2190\u2192 navigate'}
@@ -451,8 +547,22 @@ function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: st
                   borderTop: isFocused ? '2px solid #007acc' : '2px solid transparent',
                   borderBottom: '1px solid #333', flexShrink: 0, userSelect: 'none',
                 }}>
-                  <span style={{ color: isFocused ? '#ccc' : '#666', fontSize: 11, fontFamily: 'monospace' }}>
-                    {panel.sessionId ? `#${panel.sessionId}` : 'new'}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ color: isFocused ? '#ccc' : '#666', fontSize: 11, fontFamily: 'monospace' }}>
+                      {panel.sessionId ? `#${panel.sessionId}` : 'new'}
+                    </span>
+                    {panel.sessionId ? (
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await copySessionUrl(panel.sessionId!);
+                        }}
+                        style={miniLinkBtnStyle}
+                        title={`Copy ${getSessionUrl(panel.sessionId)}`}
+                      >
+                        copy
+                      </button>
+                    ) : null}
                   </span>
                   {panels.length > 1 && (
                     <button
@@ -477,6 +587,49 @@ function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: st
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function SettingsOverlay({
+  maxPanels,
+  onChange,
+}: {
+  maxPanels: number;
+  onChange: (value: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  return (
+    <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 100 }}>
+      <button onClick={() => setOpen((value) => !value)} style={settingsButtonStyle}>
+        settings
+      </button>
+      {open ? (
+        <div style={settingsPopoverStyle}>
+          <div style={settingsTitleStyle}>workspace settings</div>
+          <label style={settingsFieldStyle}>
+            <span style={settingsLabelStyle}>max panels</span>
+            <input
+              type="number"
+              min={MIN_MAX_PANELS}
+              max={MAX_MAX_PANELS}
+              value={maxPanels}
+              onChange={(event) => onChange(Number(event.target.value))}
+              style={settingsInputStyle}
+            />
+          </label>
+          <div style={settingsHintStyle}>query: `maxPanels`</div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -656,9 +809,10 @@ function App() {
   const muxRef = useRef<TerminalMux | null>(null);
   const [connected, setConnected] = useState(false);
   const [route, setRoute] = useState<Route>(parseHash);
+  const [maxPanels, setMaxPanels] = useState(readMaxPanels);
 
   useEffect(() => {
-    const mux = new TerminalMux('ws://localhost:7690');
+    const mux = new TerminalMux(`ws://${TTYM_HOST}`);
     muxRef.current = mux;
     mux.connect().then(() => setConnected(true));
     return () => mux.disconnect();
@@ -668,6 +822,18 @@ function App() {
     const onHash = () => setRoute(parseHash());
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => {
+    const syncFromLocation = () => setMaxPanels(readMaxPanels());
+    window.addEventListener('popstate', syncFromLocation);
+    return () => window.removeEventListener('popstate', syncFromLocation);
+  }, []);
+
+  const handleMaxPanelsChange = useCallback((value: number) => {
+    const next = clampMaxPanels(value);
+    writeMaxPanels(next);
+    setMaxPanels(next);
   }, []);
 
   if (!connected || !muxRef.current) {
@@ -680,18 +846,32 @@ function App() {
 
   const mux = muxRef.current;
 
+  let page: React.ReactNode;
+
   switch (route.page) {
     case 'overview':
-      return <OverviewPage mux={mux} />;
+      page = <OverviewPage mux={mux} />;
+      break;
     case 'session':
-      return <SessionPage mux={mux} sessionId={route.id} />;
+      page = <SessionPage mux={mux} sessionId={route.id} />;
+      break;
     case 'viewer':
-      return <ViewerPage mux={mux} sessionId={route.id} />;
+      page = <ViewerPage mux={mux} sessionId={route.id} />;
+      break;
     case 'workspace':
-      return <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} maxPanels={maxPanels} />;
+      break;
     default:
-      return <DashboardPage mux={mux} />;
+      page = <DashboardPage mux={mux} />;
+      break;
   }
+
+  return (
+    <>
+      {page}
+      <SettingsOverlay maxPanels={maxPanels} onChange={handleMaxPanelsChange} />
+    </>
+  );
 }
 
 // ───── 스타일 ─────
@@ -738,6 +918,76 @@ const closeBtnStyle: React.CSSProperties = {
   lineHeight: 1,
   padding: '0 4px',
   borderRadius: 3,
+};
+
+const miniLinkBtnStyle: React.CSSProperties = {
+  background: '#1c2631',
+  color: '#8ab4d8',
+  border: '1px solid #314253',
+  padding: '1px 5px',
+  cursor: 'pointer',
+  fontFamily: 'monospace',
+  fontSize: 10,
+  borderRadius: 3,
+  lineHeight: 1.4,
+};
+
+const settingsButtonStyle: React.CSSProperties = {
+  background: 'rgba(18, 23, 31, 0.96)',
+  color: '#c7d1dd',
+  border: '1px solid rgba(79, 93, 113, 0.58)',
+  padding: '6px 10px',
+  cursor: 'pointer',
+  fontFamily: 'monospace',
+  fontSize: 11,
+  borderRadius: 7,
+};
+
+const settingsPopoverStyle: React.CSSProperties = {
+  marginTop: 8,
+  width: 220,
+  padding: 12,
+  borderRadius: 10,
+  border: '1px solid rgba(79, 93, 113, 0.56)',
+  background: 'rgba(12, 17, 24, 0.98)',
+  boxShadow: '0 18px 42px rgba(0, 0, 0, 0.42)',
+  backdropFilter: 'blur(14px)',
+  fontFamily: 'monospace',
+};
+
+const settingsTitleStyle: React.CSSProperties = {
+  color: '#eaf0f6',
+  fontSize: 12,
+  fontWeight: 600,
+  marginBottom: 10,
+};
+
+const settingsFieldStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 7,
+};
+
+const settingsLabelStyle: React.CSSProperties = {
+  color: '#aab4c0',
+  fontSize: 11,
+};
+
+const settingsInputStyle: React.CSSProperties = {
+  width: '100%',
+  border: '1px solid rgba(79, 93, 113, 0.62)',
+  background: 'rgba(21, 28, 37, 0.98)',
+  color: '#eaf0f6',
+  borderRadius: 7,
+  padding: '7px 9px',
+  outline: 'none',
+  fontFamily: 'monospace',
+};
+
+const settingsHintStyle: React.CSSProperties = {
+  color: '#6f7987',
+  fontSize: 10,
+  marginTop: 8,
 };
 
 export default App;

@@ -316,8 +316,8 @@ fn main() {
                     ring.push(data);
                     if let Some(ref mut c) = client {
                         let payload = data_out_payload(seq, data);
-                        if write_frame(c, CMD_DATA_OUT, &payload).is_err() {
-                            log(config.id, "client write err, dropping");
+                        if let Err(err) = write_frame(c, CMD_DATA_OUT, &payload) {
+                            log(config.id, &format!("client write err kind={:?}, dropping", err.kind()));
                             client = None;
                             reader = FrameReader::new();
                         }
@@ -345,7 +345,7 @@ fn main() {
         if fds[1].revents & libc::POLLIN != 0 {
             if let Ok((stream, _)) = listener.accept() {
                 log(config.id, "client connected");
-                stream.set_nonblocking(true).ok();
+                let _ = stream.set_nonblocking(false);
 
                 // Send STATE to new client
                 let state = format!(

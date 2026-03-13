@@ -2,6 +2,7 @@ packages:
   - server
   - client
   - demo
+  - native
 
 onlyBuiltDependencies:
   - node-pty

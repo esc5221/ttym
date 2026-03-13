@@ -4,3 +4,7 @@ dist/
 *.tsbuildinfo
 holder/target/
 .omx/
+native/node_modules/
+native/dist/
+native/src-tauri/target/
+native/src-tauri/gen/

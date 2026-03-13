@@ -5,7 +5,17 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "native:prepare": "./scripts/build.sh && pnpm --dir native build",
+    "native:dev": "pnpm --dir native dev",
+    "native:build": "pnpm --dir native build",
+    "native:release": "pnpm --dir native tauri:build",
+    "native:release:debug": "pnpm --dir native tauri:build:debug",
+    "native:install": "./scripts/install-native-app.sh",
+    "native:open": "open /Applications/ttym-native.app || open ~/Applications/ttym-native.app",
+    "native:ship": "pnpm run native:release && pnpm run native:install && pnpm run native:open",
+    "native:tauri:dev": "pnpm --dir native tauri:dev",
+    "native:tauri:build": "pnpm --dir native tauri:build"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

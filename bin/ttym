@@ -178,16 +178,19 @@ function cmdLog() {
 async function cmdMeta() {
   const sessionId = process.argv[3];
   if (!sessionId || isNaN(parseInt(sessionId, 10))) {
-    console.error('usage: ttym meta <session-id> [--set key=value ...] [--claude-session <id>] [--codex-session <id>]');
+    console.error('usage: ttym meta <session-id> [--set key=value ...] [--claude-session <id>] [--claude-source <source>] [--clear-claude-session [id]] [--codex-session <id>] [--clear-codex-session [id]]');
     process.exit(1);
   }
   const id = parseInt(sessionId, 10);
   const port = getPort();
+  const now = new Date().toISOString();
 
   // Collect --set key=value pairs and --claude-session shorthand
   const patch = {};
   let hasPatch = false;
   const args = process.argv.slice(4);
+  let pendingClaudeSource = null;
+  let pendingCodexSource = null;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--set' && args[i + 1]) {
       const [k, ...vParts] = args[i + 1].split('=');
@@ -198,12 +201,52 @@ async function cmdMeta() {
       i++;
     } else if (args[i] === '--claude-session' && args[i + 1]) {
       patch.claudeSessionId = args[i + 1];
+      patch.claudeLastSessionId = args[i + 1];
+      patch.claudeActive = true;
+      patch.claudeLastStartedAt = now;
+      patch.claudeLastStoppedAt = null;
+      if (pendingClaudeSource) patch.claudeSessionSource = pendingClaudeSource;
       hasPatch = true;
       i++;
+    } else if (args[i] === '--claude-source' && args[i + 1]) {
+      pendingClaudeSource = args[i + 1];
+      patch.claudeSessionSource = pendingClaudeSource;
+      hasPatch = true;
+      i++;
+    } else if (args[i] === '--clear-claude-session') {
+      const expectedId = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null;
+      patch.claudeSessionId = null;
+      patch.claudeActive = false;
+      patch.claudeLastStoppedAt = now;
+      if (expectedId) {
+        patch.claudeLastSessionId = expectedId;
+        i++;
+      }
+      hasPatch = true;
     } else if (args[i] === '--codex-session' && args[i + 1]) {
       patch.codexSessionId = args[i + 1];
+      patch.codexLastSessionId = args[i + 1];
+      patch.codexActive = true;
+      patch.codexLastStartedAt = now;
+      patch.codexLastStoppedAt = null;
+      if (pendingCodexSource) patch.codexSessionSource = pendingCodexSource;
       hasPatch = true;
       i++;
+    } else if (args[i] === '--codex-source' && args[i + 1]) {
+      pendingCodexSource = args[i + 1];
+      patch.codexSessionSource = pendingCodexSource;
+      hasPatch = true;
+      i++;
+    } else if (args[i] === '--clear-codex-session') {
+      const expectedId = args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : null;
+      patch.codexSessionId = null;
+      patch.codexActive = false;
+      patch.codexLastStoppedAt = now;
+      if (expectedId) {
+        patch.codexLastSessionId = expectedId;
+        i++;
+      }
+      hasPatch = true;
     }
   }
 
@@ -227,30 +270,56 @@ const AGENTS = {
   claude: {
     name: 'Claude Code',
     settingsPath: resolve(process.env.HOME || '/tmp', '.claude', 'settings.json'),
-    hookEvent: 'SessionStart',
-    hookCommand: '[ -z "$TTYM_SESSION_ID" ] && exit 0; jq -r .session_id | xargs -I{} ttym meta $TTYM_SESSION_ID --claude-session {}',
     metaKey: 'claudeSessionId',
+    hooks: [
+      {
+        event: 'SessionStart',
+        matcher: '',
+        command: resolve(__dirname, '..', 'scripts', 'ttym-claude-hook.sh'),
+      },
+      {
+        event: 'Stop',
+        matcher: '',
+        command: resolve(__dirname, '..', 'scripts', 'ttym-claude-stop-hook.sh'),
+      },
+    ],
     resumeArgs: (sid) => ['claude', '--resume', sid],
   },
   codex: {
     name: 'Codex CLI (experimental)',
     settingsPath: resolve(process.env.HOME || '/tmp', '.codex', 'hooks.json'),
-    hookEvent: 'SessionStart',
-    hookCommand: '[ -z "$TTYM_SESSION_ID" ] && exit 0; jq -r .session_id | xargs -I{} ttym meta $TTYM_SESSION_ID --codex-session {}',
     metaKey: 'codexSessionId',
+    hooks: [
+      {
+        event: 'SessionStart',
+        matcher: '',
+        command: '[ -z "$TTYM_SESSION_ID" ] && exit 0; jq -r .session_id | xargs -I{} ttym meta $TTYM_SESSION_ID --codex-session {}',
+      },
+    ],
     resumeArgs: (sid) => ['codex', 'resume', sid],
   },
 };
 
-function isttymHook(command) {
-  return command.includes('TTYM_SESSION_ID') && command.includes('ttym meta');
+function isttymHook(command, cfg) {
+  return cfg.hooks.some((hook) => command === hook.command)
+    || (cfg.metaKey === 'claudeSessionId'
+      && command.includes('TTYM_SESSION_ID')
+      && (command.includes('--claude-session') || command.includes('--clear-claude-session')))
+    || (cfg.metaKey === 'codexSessionId'
+      && command.includes('TTYM_SESSION_ID')
+      && (command.includes('--codex-session') || command.includes('--clear-codex-session')));
 }
 
 function isHookInstalled(cfg) {
   try {
     const settings = JSON.parse(readFileSync(cfg.settingsPath, 'utf8'));
-    const entries = settings?.hooks?.[cfg.hookEvent] || [];
-    return entries.some(e => e.hooks?.some(h => isttymHook(h.command || '')));
+    return cfg.hooks.every((wanted) => {
+      const entries = settings?.hooks?.[wanted.event] || [];
+      return entries.some((entry) => {
+        const sameMatcher = (entry.matcher ?? '') === (wanted.matcher ?? '');
+        return sameMatcher && entry.hooks?.some((hook) => isttymHook(hook.command || '', cfg));
+      });
+    });
   } catch { return false; }
 }
 
@@ -259,31 +328,34 @@ function agentInstall(cfg) {
   try { settings = JSON.parse(readFileSync(cfg.settingsPath, 'utf8')); } catch {}
 
   if (!settings.hooks) settings.hooks = {};
-  if (!Array.isArray(settings.hooks[cfg.hookEvent])) settings.hooks[cfg.hookEvent] = [];
 
-  // Find existing matcher="" entry or create one
-  let target = settings.hooks[cfg.hookEvent].find(e => e.matcher === '' || e.matcher === undefined);
-  if (!target) {
-    target = { hooks: [] };
-    settings.hooks[cfg.hookEvent].push(target);
+  let changed = false;
+  for (const wanted of cfg.hooks) {
+    if (!Array.isArray(settings.hooks[wanted.event])) settings.hooks[wanted.event] = [];
+
+    let target = settings.hooks[wanted.event].find((entry) => (entry.matcher ?? '') === (wanted.matcher ?? ''));
+    if (!target) {
+      target = { matcher: wanted.matcher, hooks: [] };
+      settings.hooks[wanted.event].push(target);
+    }
+    if (!Array.isArray(target.hooks)) target.hooks = [];
+
+    if (target.hooks.some((hook) => isttymHook(hook.command || '', cfg))) continue;
+    target.hooks.push({ type: 'command', command: wanted.command, timeout: 5 });
+    changed = true;
   }
-  if (!Array.isArray(target.hooks)) target.hooks = [];
 
-  // Idempotent
-  if (target.hooks.some(h => isttymHook(h.command || ''))) {
+  if (!changed) {
     console.log(`${cfg.name} hook already installed`);
     return;
   }
 
-  // Backup + write
   if (existsSync(cfg.settingsPath)) {
     writeFileSync(cfg.settingsPath + '.bak', readFileSync(cfg.settingsPath));
   }
-  target.hooks.push({ type: 'command', command: cfg.hookCommand, timeout: 5 });
   mkdirSync(dirname(cfg.settingsPath), { recursive: true });
   writeFileSync(cfg.settingsPath, JSON.stringify(settings, null, 2) + '\n');
   console.log(`${cfg.name} hook installed`);
-  console.log(`  event: ${cfg.hookEvent}`);
   console.log(`  file:  ${cfg.settingsPath}`);
 }
 
@@ -291,13 +363,15 @@ function agentUninstall(cfg) {
   let settings = {};
   try { settings = JSON.parse(readFileSync(cfg.settingsPath, 'utf8')); } catch {}
 
-  const entries = settings?.hooks?.[cfg.hookEvent] || [];
   let removed = false;
-  for (const entry of entries) {
-    if (!Array.isArray(entry.hooks)) continue;
-    const before = entry.hooks.length;
-    entry.hooks = entry.hooks.filter(h => !isttymHook(h.command || ''));
-    if (entry.hooks.length < before) removed = true;
+  for (const wanted of cfg.hooks) {
+    const entries = settings?.hooks?.[wanted.event] || [];
+    for (const entry of entries) {
+      if (!Array.isArray(entry.hooks)) continue;
+      const before = entry.hooks.length;
+      entry.hooks = entry.hooks.filter((hook) => !isttymHook(hook.command || '', cfg));
+      if (entry.hooks.length < before) removed = true;
+    }
   }
 
   if (!removed) {
