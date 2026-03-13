@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Terminal, TerminalMux } from '@ttym/client';
+import { Terminal, TerminalMux, type SessionInfo } from '@ttym/client';
 import {
   createWorkspace,
   deleteWorkspace,
+  getSessionScreen,
   layoutToSessionIds,
+  listSessions,
   listWorkspaces,
   sessionIdsToLayout,
   updateWorkspace,
   type WorkspaceInfo,
 } from './lib/api';
 import { ensureLocalServer } from './lib/daemon';
+import { createNativeWindow } from './lib/window';
 
 interface PanelState {
   key: string;
@@ -25,10 +28,28 @@ interface WorkspaceTab {
   focused: number;
 }
 
+interface WorkspacePreview {
+  workspaceId: string;
+  screens: Record<number, string>;
+  updatedAt: number;
+}
+
+type AppMode = 'home' | 'workspace';
+
 const TTYM_UI_BASE = 'http://ttym-ui.lullu.lan';
 const DEFAULT_MAX_PANELS = 3;
 const MIN_MAX_PANELS = 1;
 const MAX_MAX_PANELS = 8;
+const DEFAULT_ZOOM_LEVEL = 0;
+const MIN_ZOOM_LEVEL = -5;
+const MAX_ZOOM_LEVEL = 8;
+const BASE_TERMINAL_FONT_SIZE = 14;
+const DEFAULT_FONT_SMOOTHING = true;
+
+function clampZoomLevel(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_ZOOM_LEVEL;
+  return Math.max(MIN_ZOOM_LEVEL, Math.min(MAX_ZOOM_LEVEL, Math.trunc(value)));
+}
 
 function clampMaxPanels(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_MAX_PANELS;
@@ -46,6 +67,38 @@ function writeMaxPanels(value: number) {
   const url = new URL(window.location.href);
   url.searchParams.set('maxPanels', String(next));
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function readFontSmoothing(): boolean {
+  const raw = new URLSearchParams(window.location.search).get('fontSmoothing');
+  if (!raw) return DEFAULT_FONT_SMOOTHING;
+  return raw !== 'off';
+}
+
+function writeFontSmoothing(value: boolean) {
+  const url = new URL(window.location.href);
+  url.searchParams.set('fontSmoothing', value ? 'on' : 'off');
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function readAppMode(): AppMode {
+  const raw = new URLSearchParams(window.location.search).get('mode');
+  return raw === 'home' ? 'home' : 'workspace';
+}
+
+function writeAppMode(mode: AppMode) {
+  const url = new URL(window.location.href);
+  if (mode === 'home') url.searchParams.set('mode', 'home');
+  else url.searchParams.delete('mode');
+  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function buildWindowSearch(mode: AppMode): string {
+  const params = new URLSearchParams(window.location.search);
+  if (mode === 'home') params.set('mode', 'home');
+  else params.delete('mode');
+  const search = params.toString();
+  return search ? `?${search}` : '';
 }
 
 function getSessionUrl(sessionId: number): string {
@@ -89,11 +142,65 @@ function clampFocused(tab: WorkspaceTab): WorkspaceTab {
   return focused === tab.focused ? tab : { ...tab, focused };
 }
 
+function stripAnsi(value: string): string {
+  return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[@-Z\\-_]/g, '');
+}
+
+function summarizeScreen(value: string): string {
+  const stripped = stripAnsi(value).replace(/\r/g, '');
+  const lines = stripped
+    .split('\n')
+    .map((line) => line.replace(/\s+$/g, ''))
+    .filter((line, index, array) => line.length > 0 || index < array.length - 1)
+    .slice(0, 12)
+    .map((line) => line.slice(0, 52));
+  return lines.join('\n').trim() || 'idle';
+}
+
+function reconcileWorkspaceTabs(prevTabs: WorkspaceTab[], workspaces: WorkspaceInfo[]): WorkspaceTab[] {
+  const prevByWorkspaceId = new Map(prevTabs.map((tab) => [tab.workspaceId, tab]));
+
+  return workspaces.map((workspace) => {
+    const prevTab = prevByWorkspaceId.get(workspace.id);
+    const sessionIds = layoutToSessionIds(workspace.layout).filter((id) => id > 0);
+
+    if (!prevTab) {
+      return makeTab(workspace.id, workspace.name, sessionIds);
+    }
+
+    const unusedPrevPanels = [...prevTab.panels];
+    const nextPanels = (sessionIds.length > 0 ? sessionIds : [undefined]).map((sessionId) => {
+      if (sessionId !== undefined) {
+        const matchedIndex = unusedPrevPanels.findIndex((panel) => panel.sessionId === sessionId);
+        if (matchedIndex >= 0) {
+          const [matched] = unusedPrevPanels.splice(matchedIndex, 1);
+          return { ...matched, sessionId };
+        }
+      }
+
+      const fallback = unusedPrevPanels.shift();
+      if (fallback) {
+        return { ...fallback, sessionId, hasBell: fallback.hasBell && fallback.sessionId === sessionId };
+      }
+
+      return sessionId === undefined ? makePanel() : { key: crypto.randomUUID(), sessionId, hasBell: false };
+    });
+
+    return clampFocused({
+      ...prevTab,
+      name: workspace.name,
+      panels: nextPanels,
+    });
+  });
+}
+
 export function App() {
   const muxRef = useRef<TerminalMux | null>(null);
   const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [port, setPort] = useState<number | null>(null);
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [previews, setPreviews] = useState<Record<string, WorkspacePreview>>({});
   const [activeTab, setActiveTab] = useState(0);
   const [ready, setReady] = useState(false);
   const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -101,14 +208,47 @@ export function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [maxPanels, setMaxPanels] = useState(readMaxPanels);
+  const [zoomLevel, setZoomLevel] = useState(DEFAULT_ZOOM_LEVEL);
+  const [fontSmoothing, setFontSmoothing] = useState(readFontSmoothing);
+  const [appMode, setAppMode] = useState<AppMode>(readAppMode);
+  const [homeSelection, setHomeSelection] = useState(0);
 
   const currentTab = useMemo(() => tabs[activeTab] ?? null, [tabs, activeTab]);
+  const terminalFontSize = BASE_TERMINAL_FONT_SIZE + zoomLevel;
+  const uiScale = Number((1 + zoomLevel * 0.04).toFixed(3));
+  const currentPanelCount = currentTab?.panels.length ?? 0;
+  const gridColumns = Math.max(1, Math.min(currentPanelCount || 1, maxPanels));
+  const gridRows = Math.max(1, Math.ceil((currentPanelCount || 1) / maxPanels));
+  const homeItems = useMemo(
+    () => [
+      { kind: 'new' as const, id: 'new', title: 'new workspace', meta: 'Press Enter to start' },
+      ...tabs.map((tab, index) => ({
+        kind: 'workspace' as const,
+        id: tab.workspaceId,
+        index,
+        title: tab.name || `workspace ${index + 1}`,
+        meta: `${tab.panels.length} pane${tab.panels.length === 1 ? '' : 's'}`,
+      })),
+    ],
+    [tabs],
+  );
+  const sessionById = useMemo(() => new Map(sessions.map((session) => [session.id, session])), [sessions]);
 
   useEffect(() => {
-    const syncFromLocation = () => setMaxPanels(readMaxPanels());
+    const syncFromLocation = () => {
+      setMaxPanels(readMaxPanels());
+      setFontSmoothing(readFontSmoothing());
+      setAppMode(readAppMode());
+    };
     window.addEventListener('popstate', syncFromLocation);
     return () => window.removeEventListener('popstate', syncFromLocation);
   }, []);
+
+  useEffect(() => {
+    if (homeSelection >= homeItems.length) {
+      setHomeSelection(Math.max(0, homeItems.length - 1));
+    }
+  }, [homeSelection, homeItems.length]);
 
   function workspaceNameForIndex(index: number): string {
     return `workspace ${index + 1}`;
@@ -120,6 +260,47 @@ export function App() {
       workspace.name,
       layoutToSessionIds(workspace.layout).filter((id) => id > 0),
     );
+  }
+
+  async function refreshLauncher(portValue: number) {
+    const [workspaceList, sessionList] = await Promise.all([
+      listWorkspaces(portValue),
+      listSessions(portValue).catch(() => []),
+    ]);
+    setTabs((prev) => reconcileWorkspaceTabs(prev, workspaceList));
+    setSessions(sessionList.filter((session) => session.status !== 'dead'));
+  }
+
+  async function refreshSessionsOnly(portValue: number) {
+    const sessionList = await listSessions(portValue).catch(() => []);
+    setSessions(sessionList.filter((session) => session.status !== 'dead'));
+  }
+
+  async function refreshWorkspacePreviews(portValue: number, workspaceTabs: WorkspaceTab[], sessionList: SessionInfo[]) {
+    const liveSessionIds = new Set(sessionList.filter((session) => session.status !== 'dead').map((session) => session.id));
+    const nextEntries = await Promise.all(workspaceTabs.map(async (tab) => {
+      const previewIds = tab.panels
+        .map((panel) => panel.sessionId)
+        .filter((id): id is number => id !== undefined && liveSessionIds.has(id))
+        .slice(0, 4);
+
+      const screens = await Promise.all(previewIds.map(async (sessionId) => {
+        try {
+          const screen = await getSessionScreen(portValue, sessionId);
+          return [sessionId, summarizeScreen(screen)] as const;
+        } catch {
+          return [sessionId, 'unavailable'] as const;
+        }
+      }));
+
+      return [tab.workspaceId, {
+        workspaceId: tab.workspaceId,
+        screens: Object.fromEntries(screens),
+        updatedAt: Date.now(),
+      }] as const;
+    }));
+
+    setPreviews((prev) => ({ ...prev, ...Object.fromEntries(nextEntries) }));
   }
 
   useEffect(() => {
@@ -141,17 +322,24 @@ export function App() {
         setPort(info.port);
         setReady(true);
 
-        const existing = await listWorkspaces(info.port);
+        const [workspaceList, sessionList] = await Promise.all([
+          listWorkspaces(info.port),
+          listSessions(info.port).catch(() => []),
+        ]);
         if (cancelled) return;
 
-        if (existing.length > 0) {
-          setTabs(existing.map(tabFromWorkspace));
+        setSessions(sessionList.filter((session) => session.status !== 'dead'));
+
+        if (workspaceList.length > 0) {
+          setTabs(workspaceList.map(tabFromWorkspace));
           setActiveTab(0);
-        } else {
+        } else if (readAppMode() === 'workspace') {
           const workspace = await createWorkspace(info.port, workspaceNameForIndex(0), []);
           if (cancelled) return;
           setTabs([tabFromWorkspace(workspace)]);
           setActiveTab(0);
+        } else {
+          setTabs([]);
         }
 
         setWorkspaceReady(true);
@@ -184,15 +372,47 @@ export function App() {
   }, [tabs, port, workspaceReady]);
 
   useEffect(() => {
+    if (appMode !== 'workspace') return;
     const tab = tabs[activeTab];
     if (!tab) return;
     const panel = tab.panels[tab.focused];
     if (!panel) return;
     const el = panelRefs.current.get(panel.key);
     el?.querySelector('textarea')?.focus();
-  }, [tabs, activeTab]);
+  }, [tabs, activeTab, appMode]);
 
   useEffect(() => {
+    if (appMode !== 'home' || port === null || !ready) return;
+    let cancelled = false;
+
+    const tick = async () => {
+      const [workspaceList, sessionList] = await Promise.all([
+        listWorkspaces(port),
+        listSessions(port).catch(() => []),
+      ]);
+      if (cancelled) return;
+
+      const liveSessions = sessionList.filter((session) => session.status !== 'dead');
+      let reconciledTabs: WorkspaceTab[] = [];
+      setTabs((prev) => {
+        reconciledTabs = reconcileWorkspaceTabs(prev, workspaceList);
+        return reconciledTabs;
+      });
+      setSessions(liveSessions);
+      void refreshWorkspacePreviews(port, reconciledTabs, liveSessions);
+    };
+
+    void tick();
+    const interval = window.setInterval(() => { void tick(); }, 3000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [appMode, port, ready]);
+
+  useEffect(() => {
+    if (appMode !== 'workspace') return;
     setTabs((prev) => {
       const tab = prev[activeTab];
       if (!tab) return prev;
@@ -208,13 +428,23 @@ export function App() {
       };
       return nextTabs;
     });
-  }, [activeTab, tabs]);
+  }, [activeTab, tabs, appMode]);
 
   function updateTab(index: number, updater: (tab: WorkspaceTab) => WorkspaceTab) {
     setTabs((prev) => prev.map((tab, i) => (i === index ? clampFocused(updater(tab)) : tab)));
   }
 
-  async function createWorkspaceTab() {
+  function enterWorkspace(index: number) {
+    setActiveTab(index);
+    setAppMode('workspace');
+    writeAppMode('workspace');
+  }
+
+  async function openNativeWindow() {
+    await createNativeWindow(buildWindowSearch('home'));
+  }
+
+  async function createWorkspaceTab(options?: { enter?: boolean }) {
     if (port === null) return;
     setBusy('creating workspace');
     setError(null);
@@ -225,6 +455,11 @@ export function App() {
         setActiveTab(next.length - 1);
         return next;
       });
+      if (options?.enter) {
+        setAppMode('workspace');
+        writeAppMode('workspace');
+      }
+      await refreshLauncher(port);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -241,10 +476,15 @@ export function App() {
     setError(null);
     try {
       if (tabs.length === 1) {
-        const replacement = await createWorkspace(port, workspaceNameForIndex(0), []);
         await deleteWorkspace(port, tab.workspaceId);
-        setTabs([tabFromWorkspace(replacement)]);
-        setActiveTab(0);
+        if (appMode === 'workspace') {
+          const replacement = await createWorkspace(port, workspaceNameForIndex(0), []);
+          setTabs([tabFromWorkspace(replacement)]);
+          setActiveTab(0);
+        } else {
+          setTabs([]);
+          setActiveTab(0);
+        }
       } else {
         await deleteWorkspace(port, tab.workspaceId);
         setTabs((prev) => {
@@ -257,6 +497,7 @@ export function App() {
           return next;
         });
       }
+      await refreshLauncher(port);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -266,7 +507,6 @@ export function App() {
 
   function addSplit() {
     if (!currentTab) return;
-    if (currentTab.panels.length >= maxPanels) return;
     updateTab(activeTab, (tab) => {
       const nextPanels = [...tab.panels, makePanel()];
       return { ...tab, panels: nextPanels, focused: nextPanels.length - 1 };
@@ -276,7 +516,7 @@ export function App() {
   function removeFocusedPane() {
     if (!currentTab) return;
     if (currentTab.panels.length <= 1) {
-      closeWorkspaceTab(activeTab);
+      void closeWorkspaceTab(activeTab);
       return;
     }
 
@@ -312,6 +552,7 @@ export function App() {
         panel.key === panelKey ? { ...panel, sessionId, hasBell: false } : panel
       )),
     }));
+    if (port !== null) void refreshSessionsOnly(port).catch(() => {});
   }
 
   function handleExit(panelKey: string) {
@@ -323,6 +564,7 @@ export function App() {
       const nextFocused = Math.min(tab.focused, nextPanels.length - 1);
       return { ...tab, panels: nextPanels, focused: nextFocused };
     });
+    if (port !== null) void refreshSessionsOnly(port).catch(() => {});
   }
 
   function handleBell(panelKey: string) {
@@ -342,6 +584,16 @@ export function App() {
     });
   }
 
+  async function submitHomeSelection() {
+    const item = homeItems[homeSelection];
+    if (!item) return;
+    if (item.kind === 'new') {
+      await createWorkspaceTab({ enter: true });
+      return;
+    }
+    enterWorkspace(item.index);
+  }
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (settingsOpen && event.key === 'Escape') {
@@ -350,8 +602,31 @@ export function App() {
       }
 
       const meta = event.metaKey || event.ctrlKey;
-      if (!meta) return;
+      if (meta && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        void openNativeWindow();
+        return;
+      }
 
+      if (appMode === 'home') {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          void submitHomeSelection();
+          return;
+        }
+        if (event.code === 'ArrowUp') {
+          event.preventDefault();
+          setHomeSelection((current) => Math.max(0, current - 1));
+          return;
+        }
+        if (event.code === 'ArrowDown') {
+          event.preventDefault();
+          setHomeSelection((current) => Math.min(homeItems.length - 1, current + 1));
+        }
+        return;
+      }
+
+      if (!meta) return;
       const key = event.key.toLowerCase();
 
       if (key === 't') {
@@ -366,6 +641,24 @@ export function App() {
           event.preventDefault();
           setActiveTab(nextIndex);
         }
+        return;
+      }
+
+      if (event.code === 'Equal') {
+        event.preventDefault();
+        setZoomLevel((current) => clampZoomLevel(current + 1));
+        return;
+      }
+
+      if (event.code === 'Minus') {
+        event.preventDefault();
+        setZoomLevel((current) => clampZoomLevel(current - 1));
+        return;
+      }
+
+      if (event.code === 'Digit0') {
+        event.preventDefault();
+        setZoomLevel(DEFAULT_ZOOM_LEVEL);
         return;
       }
 
@@ -407,7 +700,7 @@ export function App() {
 
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [tabs.length, activeTab, currentTab, settingsOpen, maxPanels]);
+  }, [appMode, tabs.length, activeTab, currentTab, settingsOpen, maxPanels, homeItems, homeSelection]);
 
   function handleMaxPanelsChange(nextValue: number) {
     const next = clampMaxPanels(nextValue);
@@ -415,8 +708,184 @@ export function App() {
     setMaxPanels(next);
   }
 
+  function handleFontSmoothingChange(nextValue: boolean) {
+    writeFontSmoothing(nextValue);
+    setFontSmoothing(nextValue);
+  }
+
+  function workspaceAttachState(tab: WorkspaceTab): {
+    label: 'attached' | 'detached' | 'empty';
+    detail: string;
+  } {
+    const tabSessions = tab.panels
+      .map((panel) => panel.sessionId)
+      .filter((id): id is number => id !== undefined)
+      .map((id) => sessionById.get(id))
+      .filter((session): session is SessionInfo => Boolean(session));
+
+    if (tabSessions.length === 0) {
+      return { label: 'empty', detail: 'no live sessions' };
+    }
+
+    const attached = tabSessions.filter((session) => session.status === 'attached').length;
+    const detached = tabSessions.filter((session) => session.status === 'detached').length;
+    if (attached > 0) {
+      return { label: 'attached', detail: `${attached} attached${detached > 0 ? ` · ${detached} detached` : ''}` };
+    }
+    return { label: 'detached', detail: `${detached} detached` };
+  }
+
+  if (appMode === 'home') {
+    return (
+      <div
+        className={fontSmoothing ? 'app-shell home-shell' : 'app-shell home-shell font-smoothing-off'}
+        style={{ ['--ui-scale' as any]: uiScale }}
+      >
+        <div className="window-chrome home-chrome">
+          <div className="chrome-drag chrome-drag-left" data-tauri-drag-region />
+          <div className="home-title" data-tauri-drag-region>ttym native</div>
+          <div className="chrome-actions">
+            <button className="chrome-settings" onClick={() => setSettingsOpen((open) => !open)} title="Launcher settings">
+              settings
+            </button>
+          </div>
+        </div>
+
+        {settingsOpen ? (
+          <div className="settings-popover" role="dialog" aria-modal="false">
+            <div className="settings-popover-title">launcher settings</div>
+            <label className="settings-field">
+              <span className="settings-label">max columns</span>
+              <div className="settings-control">
+                <input
+                  className="settings-input"
+                  type="number"
+                  min={MIN_MAX_PANELS}
+                  max={MAX_MAX_PANELS}
+                  value={maxPanels}
+                  onChange={(event) => handleMaxPanelsChange(Number(event.target.value))}
+                />
+                <span className="settings-hint">query: `maxPanels` (columns per row)</span>
+              </div>
+            </label>
+            <label className="settings-toggle">
+              <span className="settings-label">font smoothing</span>
+              <button
+                className={fontSmoothing ? 'settings-switch on' : 'settings-switch'}
+                type="button"
+                onClick={() => handleFontSmoothingChange(!fontSmoothing)}
+                aria-pressed={fontSmoothing}
+                title="Toggle font smoothing and WebGL terminal rendering"
+              >
+                <span className="settings-switch-thumb" />
+              </button>
+            </label>
+            <div className="settings-footnote">
+              {fontSmoothing ? 'webgl + smoothing on' : 'canvas fallback + smoothing off'}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="home-screen">
+          <div className="home-hero">
+            <div className="home-kicker">local-first terminal workspace</div>
+            <h1 className="home-heading">Start fast.</h1>
+            <p className="home-copy">Press Enter to open a new workspace, or jump back into an existing one.</p>
+          </div>
+
+          <div className="home-grid">
+            <section className="home-panel">
+              <div className="home-panel-header">
+                <span className="home-panel-title">workspaces</span>
+                <span className="home-panel-hint">Enter to open</span>
+              </div>
+              <div className="home-list">
+                {homeItems.map((item, index) => (
+                  <button
+                    key={item.id}
+                    className={index === homeSelection ? 'home-item selected' : 'home-item'}
+                    onClick={() => {
+                      setHomeSelection(index);
+                      void submitHomeSelection();
+                    }}
+                  >
+                    <span className="home-item-main">
+                      <span className="home-item-title">{item.title}</span>
+                      <span className="home-item-meta">{item.meta}</span>
+                    </span>
+                    <span className="home-item-action">{item.kind === 'new' ? '+' : 'open'}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="home-panel">
+              <div className="home-panel-header">
+                <span className="home-panel-title">overview</span>
+                <span className="home-panel-hint">{tabs.length} workspace{tabs.length === 1 ? '' : 's'}</span>
+              </div>
+              <div className="home-preview-grid">
+                {tabs.length === 0 ? (
+                  <div className="home-empty">{error ?? busy ?? (ready ? 'no workspaces yet' : 'starting ttym-native...')}</div>
+                ) : (
+                  tabs.map((tab, index) => {
+                    const preview = previews[tab.workspaceId];
+                    const attach = workspaceAttachState(tab);
+                    const previewPanels = tab.panels
+                      .map((panel) => panel.sessionId)
+                      .filter((id): id is number => id !== undefined)
+                      .slice(0, 4);
+
+                    return (
+                      <button
+                        key={tab.workspaceId}
+                        className={index === homeSelection - 1 ? 'preview-card selected' : 'preview-card'}
+                        onClick={() => {
+                          setHomeSelection(index + 1);
+                          enterWorkspace(index);
+                        }}
+                      >
+                        <div className="preview-card-head">
+                          <div className="preview-card-title-group">
+                            <span className="preview-card-title">{tab.name || `workspace ${index + 1}`}</span>
+                            <span className={`preview-badge ${attach.label}`}>{attach.label}</span>
+                          </div>
+                          <span className="preview-card-meta">{attach.detail}</span>
+                        </div>
+                        <div
+                          className="preview-card-grid"
+                          style={{ gridTemplateColumns: `repeat(${Math.max(1, Math.min(previewPanels.length || 1, 2))}, minmax(0, 1fr))` }}
+                        >
+                          {previewPanels.length === 0 ? (
+                            <div className="preview-pane empty">new workspace</div>
+                          ) : (
+                            previewPanels.map((sessionId) => (
+                              <div key={sessionId} className="preview-pane">
+                                <div className="preview-pane-bar">#{sessionId}</div>
+                                <pre className="preview-pane-screen">
+                                  {preview?.screens[sessionId] ?? 'loading preview...'}
+                                </pre>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="app-shell">
+    <div
+      className={fontSmoothing ? 'app-shell' : 'app-shell font-smoothing-off'}
+      style={{ ['--ui-scale' as any]: uiScale }}
+    >
       <div className="window-chrome">
         <div className="chrome-drag chrome-drag-left" data-tauri-drag-region />
         <div className="chrome-tabs">
@@ -450,11 +919,7 @@ export function App() {
           </div>
         </div>
         <div className="chrome-actions">
-          <button
-            className="chrome-settings"
-            onClick={() => setSettingsOpen((open) => !open)}
-            title="Workspace settings"
-          >
+          <button className="chrome-settings" onClick={() => setSettingsOpen((open) => !open)} title="Workspace settings">
             settings
           </button>
         </div>
@@ -464,7 +929,7 @@ export function App() {
         <div className="settings-popover" role="dialog" aria-modal="false">
           <div className="settings-popover-title">workspace settings</div>
           <label className="settings-field">
-            <span className="settings-label">max panels</span>
+            <span className="settings-label">max columns</span>
             <div className="settings-control">
               <input
                 className="settings-input"
@@ -474,11 +939,26 @@ export function App() {
                 value={maxPanels}
                 onChange={(event) => handleMaxPanelsChange(Number(event.target.value))}
               />
-              <span className="settings-hint">query: `maxPanels`</span>
+              <span className="settings-hint">query: `maxPanels` (columns per row)</span>
             </div>
           </label>
           <div className="settings-footnote">
-            current workspace uses {currentTab?.panels.length ?? 0} / {maxPanels}
+            current workspace uses {currentPanelCount} pane{currentPanelCount === 1 ? '' : 's'} across {gridRows} row{gridRows === 1 ? '' : 's'}
+          </div>
+          <label className="settings-toggle">
+            <span className="settings-label">font smoothing</span>
+            <button
+              className={fontSmoothing ? 'settings-switch on' : 'settings-switch'}
+              type="button"
+              onClick={() => handleFontSmoothingChange(!fontSmoothing)}
+              aria-pressed={fontSmoothing}
+              title="Toggle font smoothing and WebGL terminal rendering"
+            >
+              <span className="settings-switch-thumb" />
+            </button>
+          </label>
+          <div className="settings-footnote">
+            {fontSmoothing ? 'webgl + smoothing on' : 'canvas fallback + smoothing off'}
           </div>
         </div>
       ) : null}
@@ -486,11 +966,13 @@ export function App() {
       <div
         className="workspace-grid"
         style={{
-          gridTemplateColumns: `repeat(${Math.min(currentTab?.panels.length ?? 1, maxPanels)}, minmax(0, 1fr))`,
+          gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${gridRows}, minmax(0, 1fr))`,
         }}
       >
         {currentTab?.panels.map((panel, index) => {
           const isFocused = index === currentTab.focused;
+          const panelSessionId = panel.sessionId;
           return (
             <div
               key={panel.key}
@@ -504,14 +986,14 @@ export function App() {
               <div className="pane-titlebar">
                 <span className="pane-title-group">
                   <span className="pane-title">{panel.sessionId !== undefined ? `#${panel.sessionId}` : 'new'}</span>
-                  {panel.sessionId !== undefined ? (
+                  {panelSessionId !== undefined ? (
                     <button
                       className="pane-copy"
                       onClick={async (event) => {
                         event.stopPropagation();
-                        await copySessionUrl(panel.sessionId!);
+                        await copySessionUrl(panelSessionId);
                       }}
-                      title={`Copy ${getSessionUrl(panel.sessionId)}`}
+                      title={`Copy ${getSessionUrl(panelSessionId)}`}
                     >
                       copy
                     </button>
@@ -544,6 +1026,8 @@ export function App() {
                     key={panel.key}
                     mux={muxRef.current}
                     attachId={panel.sessionId}
+                    fontSize={terminalFontSize}
+                    enableWebgl={fontSmoothing}
                     onCreated={(sessionId) => handleCreated(panel.key, sessionId)}
                     onExit={() => handleExit(panel.key)}
                     onBell={() => handleBell(panel.key)}

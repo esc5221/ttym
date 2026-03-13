@@ -15,6 +15,7 @@ export interface TerminalProps {
   mode?: 'readwrite' | 'readonly';
   /** xterm 폰트 크기 (기본 14) */
   fontSize?: number;
+  enableWebgl?: boolean;
   className?: string;
   style?: React.CSSProperties;
   onCreated?: (sessionId: number) => void;
@@ -26,9 +27,11 @@ export interface TerminalProps {
 const PAUSE_HIGH = 1024 * 1024; // 1MB pending → PAUSE
 const RESUME_LOW = 256 * 1024;  // 256KB remaining → RESUME
 
-export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14, className, style, onCreated, onExit, onBell }: TerminalProps) {
+export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14, enableWebgl = true, className, style, onCreated, onExit, onBell }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<number | null>(null);
+  const termRef = useRef<XTerm | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
 
@@ -50,19 +53,23 @@ export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14
 
     const fit = new FitAddon();
     let webgl: WebglAddon | undefined;
+    termRef.current = term;
+    fitRef.current = fit;
 
     el.style.visibility = 'hidden';
     term.loadAddon(fit);
     term.open(el);
-    try {
-      webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        // Fallback to canvas renderer on WebGL context loss (e.g., browser zoom)
-        webgl?.dispose();
-        webgl = undefined;
-      });
-      term.loadAddon(webgl);
-    } catch {}
+    if (enableWebgl) {
+      try {
+        webgl = new WebglAddon();
+        webgl.onContextLoss(() => {
+          // Fallback to canvas renderer on WebGL context loss.
+          webgl?.dispose();
+          webgl = undefined;
+        });
+        term.loadAddon(webgl);
+      } catch {}
+    }
     fit.fit();
     requestAnimationFrame(() => { if (!disposed) el.style.visibility = 'visible'; });
 
@@ -187,8 +194,24 @@ export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14
       webgl?.dispose();
       fit.dispose();
       term.dispose();
+      fitRef.current = null;
+      termRef.current = null;
     };
-  }, [mux, attachId, mode]);
+  }, [mux, attachId, mode, enableWebgl]);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    if (term.options.fontSize === fontSize) return;
+
+    term.options.fontSize = fontSize;
+    requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit();
+        term.refresh(0, Math.max(0, term.rows - 1));
+      } catch {}
+    });
+  }, [fontSize]);
 
   return (
     <div

@@ -182,6 +182,34 @@ fn log(id: u32, msg: &str) {
     eprintln!("[holder s={id} t={ts}] {msg}");
 }
 
+fn flush_pending_input(master_fd: RawFd, pending_input: &mut Vec<u8>) -> io::Result<()> {
+    while !pending_input.is_empty() {
+        let wn = unsafe { libc::write(master_fd, pending_input.as_ptr() as *const _, pending_input.len()) };
+        if wn > 0 {
+            let written = wn as usize;
+            if written >= pending_input.len() {
+                pending_input.clear();
+            } else {
+                pending_input.copy_within(written.., 0);
+                pending_input.truncate(pending_input.len() - written);
+            }
+            continue;
+        }
+
+        if wn == 0 {
+            break;
+        }
+
+        let err = io::Error::last_os_error();
+        if err.kind() == ErrorKind::WouldBlock {
+            return Ok(());
+        }
+        return Err(err);
+    }
+
+    Ok(())
+}
+
 // ───── Main ─────
 
 fn main() {
@@ -273,6 +301,7 @@ fn main() {
     let mut exit_code: Option<i32> = None;
     let mut linger_deadline: Option<Instant> = None;
     let mut read_buf = vec![0u8; 65536];
+    let mut pending_input = Vec::new();
 
     // Keep master OwnedFd alive
     let _master_keep: OwnedFd = master;
@@ -288,7 +317,13 @@ fn main() {
         let listener_fd = listener.as_raw_fd();
         let client_fd = client.as_ref().map(|c| c.as_raw_fd()).unwrap_or(-1);
         let mut fds = [
-            libc::pollfd { fd: master_fd, events: if pty_alive { libc::POLLIN } else { 0 }, revents: 0 },
+            libc::pollfd {
+                fd: master_fd,
+                events: if pty_alive {
+                    libc::POLLIN | if pending_input.is_empty() { 0 } else { libc::POLLOUT }
+                } else { 0 },
+                revents: 0,
+            },
             libc::pollfd { fd: listener_fd, events: libc::POLLIN, revents: 0 },
             libc::pollfd { fd: client_fd, events: if client_fd >= 0 { libc::POLLIN } else { 0 }, revents: 0 },
         ];
@@ -338,6 +373,12 @@ fn main() {
                     pty_exit(&mut pty_alive, &mut exit_code, &mut linger_deadline, child_pid, config.id, &mut client);
                     break;
                 }
+            }
+        }
+
+        if pty_alive && !pending_input.is_empty() && fds[0].revents & libc::POLLOUT != 0 {
+            if let Err(err) = flush_pending_input(master_fd, &mut pending_input) {
+                log(config.id, &format!("pty input flush err kind={:?}", err.kind()));
             }
         }
 
@@ -399,7 +440,10 @@ fn main() {
             match cmd {
                 CMD_DATA_IN => {
                     if pty_alive {
-                        unsafe { libc::write(master_fd, payload.as_ptr() as *const _, payload.len()); }
+                        pending_input.extend_from_slice(&payload);
+                        if let Err(err) = flush_pending_input(master_fd, &mut pending_input) {
+                            log(config.id, &format!("pty input write err kind={:?}", err.kind()));
+                        }
                     }
                 }
                 CMD_RESIZE => {

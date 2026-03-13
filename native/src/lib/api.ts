@@ -37,6 +37,11 @@ export async function listWorkspaces(port: number): Promise<WorkspaceInfo[]> {
   return asJson(await fetch(`http://127.0.0.1:${port}/api/workspaces`));
 }
 
+export async function getSessionScreen(port: number, sessionId: number): Promise<string> {
+  const data = await asJson<{ screen: string }>(await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/screen`));
+  return data.screen;
+}
+
 export function layoutToSessionIds(node: LayoutNode): number[] {
   if (node.type === 'pane') return [node.sessionId];
   return node.children.flatMap(layoutToSessionIds);

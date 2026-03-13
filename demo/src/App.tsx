@@ -442,13 +442,12 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   }, [workspaceId]);
 
   const add = useCallback(() => {
-    if (panels.length >= maxPanels) return;
     setPanels((p) => {
       const next = [...p, { key: uuid() }];
       setFocused(next.length - 1);
       return next;
     });
-  }, [panels.length, maxPanels]);
+  }, []);
 
   const removeAt = useCallback((index: number) => {
     setPanels((prev) => {
@@ -509,16 +508,17 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     if (panels.length === 0) navigate({ page: 'dashboard' });
   }, [panels.length]);
 
-  const cols = Math.min(panels.length, maxPanels);
+  const cols = Math.max(1, Math.min(panels.length || 1, maxPanels));
+  const rows = Math.max(1, Math.ceil((panels.length || 1) / maxPanels));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
         <span style={{ color: '#aaa', fontSize: 12 }}>{wsName}</span>
-        <button onClick={add} style={btnStyle} disabled={panels.length >= maxPanels}>+ split</button>
+        <button onClick={add} style={btnStyle}>+ split</button>
         <span style={{ color: '#666', fontSize: 12 }}>
-          {panels.length} / {maxPanels} session{panels.length > 1 ? 's' : ''}
+          {panels.length} pane{panels.length > 1 ? 's' : ''} across {rows} row{rows > 1 ? 's' : ''}
         </span>
         <span style={{ color: '#444', fontSize: 11, marginLeft: 'auto' }}>
           {'\u2318\\ split \u2003 \u2318W close \u2003 \u2318\u2190\u2192 navigate'}
@@ -526,7 +526,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
       </div>
 
       {panels.length === 0 ? null : (
-        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 0, background: '#1e1e1e', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`, gap: 0, background: '#1e1e1e', overflow: 'hidden' }}>
           {panels.map((panel, i) => {
             const isFocused = i === focused;
             return (
@@ -617,7 +617,7 @@ function SettingsOverlay({
         <div style={settingsPopoverStyle}>
           <div style={settingsTitleStyle}>workspace settings</div>
           <label style={settingsFieldStyle}>
-            <span style={settingsLabelStyle}>max panels</span>
+            <span style={settingsLabelStyle}>max columns</span>
             <input
               type="number"
               min={MIN_MAX_PANELS}
@@ -627,7 +627,7 @@ function SettingsOverlay({
               style={settingsInputStyle}
             />
           </label>
-          <div style={settingsHintStyle}>query: `maxPanels`</div>
+          <div style={settingsHintStyle}>query: `maxPanels` (columns per row)</div>
         </div>
       ) : null}
     </div>

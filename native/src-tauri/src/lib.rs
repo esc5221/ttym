@@ -15,6 +15,12 @@ struct ServerBootstrap {
     bin_path: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowOpenResult {
+    label: String,
+}
+
 fn check_server(port: u16) -> bool {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(250)) else {
@@ -109,10 +115,37 @@ fn ensure_local_server(app: tauri::AppHandle, port: Option<u16>) -> Result<Serve
     })
 }
 
+#[tauri::command]
+async fn create_native_window(app: tauri::AppHandle, search: Option<String>) -> Result<WindowOpenResult, String> {
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|err| err.to_string())?
+        .as_millis();
+    let label = format!("main-{suffix}");
+    let route = match search {
+        Some(search) if !search.is_empty() => format!("index.html{search}"),
+        _ => "index.html".to_string(),
+    };
+
+    tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App(route.into()))
+        .title("ttym-native")
+        .inner_size(1480.0, 920.0)
+        .min_inner_size(1080.0, 700.0)
+        .resizable(true)
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::PhysicalPosition::new(14.0, 14.0))
+        .zoom_hotkeys_enabled(false)
+        .build()
+        .map_err(|err| format!("failed to open native window: {err}"))?;
+
+    Ok(WindowOpenResult { label })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![ensure_local_server])
+        .invoke_handler(tauri::generate_handler![ensure_local_server, create_native_window])
         .run(tauri::generate_context!())
         .expect("error while running ttym-native");
 }
