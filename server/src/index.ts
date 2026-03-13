@@ -21,9 +21,26 @@ if (isMain()) {
     writeFileSync(pidFile, String(process.pid));
     console.log(`ttym server listening on port ${PORT} (pid ${process.pid})`);
 
-    const shutdown = () => {
+    let shuttingDown = false;
+    const shutdown = async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
       try { unlinkSync(pidFile); } catch {}
-      server.close().finally(() => process.exit(0));
+
+      // Persist all sessions before closing (workspace restore on reboot)
+      const deadline = setTimeout(() => {
+        console.error('[shutdown] persist deadline exceeded, force exit');
+        process.exit(1);
+      }, 5000);
+
+      try {
+        await server.close();
+      } catch (e) {
+        console.error('[shutdown] error:', e);
+      }
+
+      clearTimeout(deadline);
+      process.exit(0);
     };
 
     process.on('SIGINT', shutdown);

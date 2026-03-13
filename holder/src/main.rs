@@ -135,6 +135,7 @@ struct Config {
     rows: u16,
     runtime_dir: PathBuf,
     ring_size: usize,
+    cwd: Option<String>,
 }
 
 fn parse_args() -> Config {
@@ -144,6 +145,7 @@ fn parse_args() -> Config {
     let mut rows = 24u16;
     let mut runtime_dir = PathBuf::from("/tmp/ttym");
     let mut ring_size: usize = 1 << 20; // 1MB
+    let mut cwd: Option<String> = None;
     let mut cmd = Vec::new();
 
     let mut i = 1;
@@ -154,6 +156,7 @@ fn parse_args() -> Config {
             "--rows" => { i += 1; rows = args[i].parse().expect("--rows"); }
             "--runtime-dir" => { i += 1; runtime_dir = PathBuf::from(&args[i]); }
             "--ring-size" => { i += 1; ring_size = args[i].parse().expect("--ring-size"); }
+            "--cwd" => { i += 1; cwd = Some(args[i].clone()); }
             "--" => { cmd = args[i + 1..].to_vec(); break; }
             other => { eprintln!("unknown arg: {other}"); process::exit(1); }
         }
@@ -162,7 +165,7 @@ fn parse_args() -> Config {
     if cmd.is_empty() {
         cmd = vec![env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())];
     }
-    Config { id, cmd, cols, rows, runtime_dir, ring_size }
+    Config { id, cmd, cols, rows, runtime_dir, ring_size, cwd }
 }
 
 // ───── Helpers ─────
@@ -203,6 +206,28 @@ fn main() {
                 b"xterm-256color\0".as_ptr() as *const _,
                 1,
             ); }
+            // Inject session ID so child processes (e.g. Claude Code hooks) can identify this ttym session
+            {
+                let val = std::ffi::CString::new(config.id.to_string()).unwrap();
+                unsafe { libc::setenv(
+                    b"TTYM_SESSION_ID\0".as_ptr() as *const _,
+                    val.as_ptr() as *const _,
+                    1,
+                ); }
+            }
+            // Clean inherited env vars that prevent nesting (e.g. Claude Code sets CLAUDECODE=1)
+            for key in &[
+                "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
+                "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+            ] {
+                let ckey = CString::new(*key).unwrap();
+                unsafe { libc::unsetenv(ckey.as_ptr()); }
+            }
+            // Change working directory if --cwd was specified
+            if let Some(ref cwd) = config.cwd {
+                let c_cwd = CString::new(cwd.as_str()).unwrap();
+                unsafe { libc::chdir(c_cwd.as_ptr()); }
+            }
             let c_cmd = CString::new(config.cmd[0].as_str()).unwrap();
             let c_args: Vec<CString> = config.cmd.iter()
                 .map(|a| CString::new(a.as_str()).unwrap()).collect();

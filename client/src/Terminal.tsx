@@ -53,7 +53,15 @@ export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14
     el.style.visibility = 'hidden';
     term.loadAddon(fit);
     term.open(el);
-    try { webgl = new WebglAddon(); term.loadAddon(webgl); } catch {}
+    try {
+      webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        // Fallback to canvas renderer on WebGL context loss (e.g., browser zoom)
+        webgl?.dispose();
+        webgl = undefined;
+      });
+      term.loadAddon(webgl);
+    } catch {}
     fit.fit();
     requestAnimationFrame(() => { if (!disposed) el.style.visibility = 'visible'; });
 

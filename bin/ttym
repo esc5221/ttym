@@ -47,6 +47,26 @@ function fetchJson(port, path) {
   });
 }
 
+function fetchPatch(port, path, body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body);
+    const req = http.request(`http://127.0.0.1:${port}${path}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+    }, (res) => {
+      let buf = '';
+      res.on('data', (c) => buf += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(buf)); } catch { resolve(null); }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(2000, () => { req.destroy(); reject(new Error('timeout')); });
+    req.write(data);
+    req.end();
+  });
+}
+
 // ───── Commands ─────
 
 function cmdStart() {
@@ -155,6 +175,270 @@ function cmdLog() {
   tail.on('exit', (code) => process.exit(code ?? 0));
 }
 
+async function cmdMeta() {
+  const sessionId = process.argv[3];
+  if (!sessionId || isNaN(parseInt(sessionId, 10))) {
+    console.error('usage: ttym meta <session-id> [--set key=value ...] [--claude-session <id>] [--codex-session <id>]');
+    process.exit(1);
+  }
+  const id = parseInt(sessionId, 10);
+  const port = getPort();
+
+  // Collect --set key=value pairs and --claude-session shorthand
+  const patch = {};
+  let hasPatch = false;
+  const args = process.argv.slice(4);
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--set' && args[i + 1]) {
+      const [k, ...vParts] = args[i + 1].split('=');
+      if (k && vParts.length > 0) {
+        patch[k] = vParts.join('=');
+        hasPatch = true;
+      }
+      i++;
+    } else if (args[i] === '--claude-session' && args[i + 1]) {
+      patch.claudeSessionId = args[i + 1];
+      hasPatch = true;
+      i++;
+    } else if (args[i] === '--codex-session' && args[i + 1]) {
+      patch.codexSessionId = args[i + 1];
+      hasPatch = true;
+      i++;
+    }
+  }
+
+  try {
+    if (hasPatch) {
+      const result = await fetchPatch(port, `/api/sessions/${id}/meta`, patch);
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      const result = await fetchJson(port, `/api/sessions/${id}/meta`);
+      console.log(JSON.stringify(result, null, 2));
+    }
+  } catch {
+    console.error('failed to connect to ttym server');
+    process.exit(1);
+  }
+}
+
+// ───── Agent Integration ─────
+
+const AGENTS = {
+  claude: {
+    name: 'Claude Code',
+    settingsPath: resolve(process.env.HOME || '/tmp', '.claude', 'settings.json'),
+    hookEvent: 'SessionStart',
+    hookCommand: '[ -z "$TTYM_SESSION_ID" ] && exit 0; jq -r .session_id | xargs -I{} ttym meta $TTYM_SESSION_ID --claude-session {}',
+    metaKey: 'claudeSessionId',
+    resumeArgs: (sid) => ['claude', '--resume', sid],
+  },
+  codex: {
+    name: 'Codex CLI (experimental)',
+    settingsPath: resolve(process.env.HOME || '/tmp', '.codex', 'hooks.json'),
+    hookEvent: 'SessionStart',
+    hookCommand: '[ -z "$TTYM_SESSION_ID" ] && exit 0; jq -r .session_id | xargs -I{} ttym meta $TTYM_SESSION_ID --codex-session {}',
+    metaKey: 'codexSessionId',
+    resumeArgs: (sid) => ['codex', 'resume', sid],
+  },
+};
+
+function isttymHook(command) {
+  return command.includes('TTYM_SESSION_ID') && command.includes('ttym meta');
+}
+
+function isHookInstalled(cfg) {
+  try {
+    const settings = JSON.parse(readFileSync(cfg.settingsPath, 'utf8'));
+    const entries = settings?.hooks?.[cfg.hookEvent] || [];
+    return entries.some(e => e.hooks?.some(h => isttymHook(h.command || '')));
+  } catch { return false; }
+}
+
+function agentInstall(cfg) {
+  let settings = {};
+  try { settings = JSON.parse(readFileSync(cfg.settingsPath, 'utf8')); } catch {}
+
+  if (!settings.hooks) settings.hooks = {};
+  if (!Array.isArray(settings.hooks[cfg.hookEvent])) settings.hooks[cfg.hookEvent] = [];
+
+  // Find existing matcher="" entry or create one
+  let target = settings.hooks[cfg.hookEvent].find(e => e.matcher === '' || e.matcher === undefined);
+  if (!target) {
+    target = { hooks: [] };
+    settings.hooks[cfg.hookEvent].push(target);
+  }
+  if (!Array.isArray(target.hooks)) target.hooks = [];
+
+  // Idempotent
+  if (target.hooks.some(h => isttymHook(h.command || ''))) {
+    console.log(`${cfg.name} hook already installed`);
+    return;
+  }
+
+  // Backup + write
+  if (existsSync(cfg.settingsPath)) {
+    writeFileSync(cfg.settingsPath + '.bak', readFileSync(cfg.settingsPath));
+  }
+  target.hooks.push({ type: 'command', command: cfg.hookCommand, timeout: 5 });
+  mkdirSync(dirname(cfg.settingsPath), { recursive: true });
+  writeFileSync(cfg.settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  console.log(`${cfg.name} hook installed`);
+  console.log(`  event: ${cfg.hookEvent}`);
+  console.log(`  file:  ${cfg.settingsPath}`);
+}
+
+function agentUninstall(cfg) {
+  let settings = {};
+  try { settings = JSON.parse(readFileSync(cfg.settingsPath, 'utf8')); } catch {}
+
+  const entries = settings?.hooks?.[cfg.hookEvent] || [];
+  let removed = false;
+  for (const entry of entries) {
+    if (!Array.isArray(entry.hooks)) continue;
+    const before = entry.hooks.length;
+    entry.hooks = entry.hooks.filter(h => !isttymHook(h.command || ''));
+    if (entry.hooks.length < before) removed = true;
+  }
+
+  if (!removed) {
+    console.log(`${cfg.name} hook not found`);
+    return;
+  }
+
+  if (existsSync(cfg.settingsPath)) {
+    writeFileSync(cfg.settingsPath + '.bak', readFileSync(cfg.settingsPath));
+  }
+  writeFileSync(cfg.settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  console.log(`${cfg.name} hook uninstalled`);
+}
+
+function resolveAgent(name) {
+  if (name && !AGENTS[name]) {
+    console.error(`unknown agent: ${name}`);
+    console.error(`available: ${Object.keys(AGENTS).join(', ')}`);
+    process.exit(1);
+  }
+  return name ? AGENTS[name] : null;
+}
+
+async function cmdAgent() {
+  const action = process.argv[3];
+  const agentName = process.argv[4];
+
+  // ── status ──
+  if (action === 'status') {
+    for (const [key, cfg] of Object.entries(AGENTS)) {
+      const installed = isHookInstalled(cfg);
+      console.log(`  ${key}: ${installed ? 'installed' : 'not installed'} (${cfg.settingsPath})`);
+    }
+    return;
+  }
+
+  // ── install / uninstall ──
+  if (action === 'install' || action === 'uninstall') {
+    if (!agentName) {
+      console.error(`usage: ttym agent ${action} <${Object.keys(AGENTS).join('|')}>`);
+      process.exit(1);
+    }
+    const cfg = resolveAgent(agentName);
+    return action === 'install' ? agentInstall(cfg) : agentUninstall(cfg);
+  }
+
+  // ── info ──
+  if (action === 'info') {
+    const sid = agentName || process.env.TTYM_SESSION_ID;
+    if (!sid || isNaN(parseInt(sid, 10))) {
+      console.error('usage: ttym agent info [session-id]');
+      console.error('  (or run inside a ttym session)');
+      process.exit(1);
+    }
+    const port = getPort();
+    try {
+      const meta = await fetchJson(port, `/api/sessions/${parseInt(sid, 10)}/meta`);
+      if (!meta || (!meta.claudeSessionId && !meta.codexSessionId)) {
+        console.log('no agent session linked');
+        return;
+      }
+      for (const [key, cfg] of Object.entries(AGENTS)) {
+        if (meta[cfg.metaKey]) {
+          console.log(`  ${key}: ${meta[cfg.metaKey]}`);
+        }
+      }
+    } catch {
+      console.error('failed to connect to ttym server');
+      process.exit(1);
+    }
+    return;
+  }
+
+  // ── resume ──
+  if (action === 'resume') {
+    const sid = process.env.TTYM_SESSION_ID;
+    if (!sid) {
+      console.error('ttym agent resume must be run inside a ttym session');
+      process.exit(1);
+    }
+    const port = getPort();
+    let meta;
+    try {
+      meta = await fetchJson(port, `/api/sessions/${parseInt(sid, 10)}/meta`);
+    } catch {
+      console.error('failed to connect to ttym server');
+      process.exit(1);
+    }
+
+    // Find which agent to resume
+    let targetCfg = null;
+    let targetSessionId = null;
+
+    if (agentName) {
+      // Explicit agent
+      const cfg = resolveAgent(agentName);
+      targetSessionId = meta?.[cfg.metaKey];
+      if (!targetSessionId) {
+        console.error(`no ${cfg.name} session linked to this ttym session`);
+        process.exit(1);
+      }
+      targetCfg = cfg;
+    } else {
+      // Auto-detect: try each agent in order
+      for (const [, cfg] of Object.entries(AGENTS)) {
+        if (meta?.[cfg.metaKey]) {
+          targetCfg = cfg;
+          targetSessionId = meta[cfg.metaKey];
+          break;
+        }
+      }
+      if (!targetCfg) {
+        console.error('no agent session linked to this ttym session');
+        process.exit(1);
+      }
+    }
+
+    const args = targetCfg.resumeArgs(targetSessionId);
+    console.log(`resuming ${targetCfg.name}: ${args.join(' ')}`);
+    const child = spawn(args[0], args.slice(1), { stdio: 'inherit' });
+    child.on('exit', (code) => process.exit(code ?? 0));
+    return;
+  }
+
+  // ── usage ──
+  console.log('usage: ttym agent <command>');
+  console.log('');
+  console.log('commands:');
+  console.log('  install <agent>       Install SessionStart hook');
+  console.log('  uninstall <agent>     Remove hook');
+  console.log('  status                Show installed hooks');
+  console.log('  resume [agent]        Resume agent session (auto-detect or specify)');
+  console.log('  info [session-id]     Show linked agent sessions');
+  console.log('');
+  console.log('agents:');
+  for (const [key, cfg] of Object.entries(AGENTS)) {
+    console.log(`  ${key}    ${cfg.name}`);
+  }
+  process.exit(1);
+}
+
 // ───── Main ─────
 
 const cmd = process.argv[2];
@@ -164,15 +448,24 @@ switch (cmd) {
   case 'stop':    cmdStop(); break;
   case 'restart': cmdRestart(); break;
   case 'status':  await cmdStatus(); break;
+  case 'meta':    await cmdMeta(); break;
+  case 'agent':   await cmdAgent(); break;
+  case 'hook':    await cmdAgent(); break; // legacy alias
   case 'log':     cmdLog(); break;
   default:
-    console.log(`usage: ttym <start|stop|restart|status|log>`);
+    console.log(`usage: ttym <command>`);
     console.log('');
     console.log('commands:');
-    console.log('  start [--port 7690]   Start server in background');
-    console.log('  stop                  Stop server (holders survive)');
-    console.log('  restart               Restart server');
-    console.log('  status                Show server & session info');
-    console.log('  log [-f]              Show server log');
+    console.log('  start [--port 7690]          Start server in background');
+    console.log('  stop                         Stop server (holders survive)');
+    console.log('  restart                      Restart server');
+    console.log('  status                       Show server & session info');
+    console.log('  meta <id> [--set k=v]        Session metadata (get/set)');
+    console.log('  agent install <agent>        Install agent hook (claude, codex)');
+    console.log('  agent uninstall <agent>      Remove agent hook');
+    console.log('  agent status                 Show installed agent hooks');
+    console.log('  agent resume [agent]         Resume agent session');
+    console.log('  agent info [session-id]      Show linked agent sessions');
+    console.log('  log [-f]                     Show server log');
     process.exit(cmd ? 1 : 0);
 }

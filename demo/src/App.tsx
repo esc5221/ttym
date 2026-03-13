@@ -3,25 +3,71 @@ import { TerminalMux, Terminal } from '@ttym/client';
 import type { SessionInfo } from '@ttym/client';
 import '@xterm/xterm/css/xterm.css';
 
-// ───── Workspace 타입 + localStorage 관리 ─────
+// ───── Workspace 타입 + Server API ─────
+
+interface PaneNode { type: 'pane'; sessionId: number; }
+interface SplitNode { type: 'split'; axis: 'row' | 'col'; sizes: number[]; children: LayoutNode[]; }
+type LayoutNode = PaneNode | SplitNode;
 
 interface Workspace {
   id: string;
   name: string;
-  sessionIds: number[];
+  layout: LayoutNode;
+  createdAt: number;
+  updatedAt: number;
 }
 
-const STORAGE_KEY = 'ttym-workspaces';
+const API_BASE = `http://${window.location.hostname}:7690`;
 
-function loadWorkspaces(): Workspace[] {
+/** Extract flat sessionId list from layout tree */
+function layoutToSessionIds(node: LayoutNode): number[] {
+  if (node.type === 'pane') return [node.sessionId];
+  return node.children.flatMap(layoutToSessionIds);
+}
+
+/** Build flat row layout from sessionId list */
+function sessionIdsToLayout(ids: number[]): LayoutNode {
+  if (ids.length === 0) return { type: 'pane', sessionId: 0 };
+  if (ids.length === 1) return { type: 'pane', sessionId: ids[0] };
+  return {
+    type: 'split', axis: 'row',
+    sizes: ids.map(() => 1 / ids.length),
+    children: ids.map((id) => ({ type: 'pane' as const, sessionId: id })),
+  };
+}
+
+async function fetchWorkspaces(): Promise<Workspace[]> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const res = await fetch(`${API_BASE}/api/workspaces`);
+    if (!res.ok) return [];
+    return await res.json();
   } catch { return []; }
 }
 
-function saveWorkspaces(ws: Workspace[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(ws));
+async function apiCreateWorkspace(ws: { id: string; name: string; layout: LayoutNode }): Promise<Workspace | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/workspaces`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(ws),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+async function apiUpdateWorkspace(id: string, patch: { name?: string; layout?: LayoutNode }): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(id)}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+  } catch {}
+}
+
+async function apiDeleteWorkspace(id: string): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch {}
 }
 
 // ───── 해시 라우팅 ─────
@@ -59,14 +105,15 @@ function navigate(route: Route) {
 
 function DashboardPage({ mux }: { mux: TerminalMux }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(loadWorkspaces);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await mux.listSessions();
+      const [list, wsList] = await Promise.all([mux.listSessions(), fetchWorkspaces()]);
       setSessions(list.filter((s) => s.status !== 'dead'));
+      setWorkspaces(wsList);
     } catch {}
     setLoading(false);
   }, [mux]);
@@ -77,15 +124,18 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
   useEffect(() => {
     if (loading || sessions.length === 0) return;
     const aliveIds = new Set(sessions.map((s) => s.id));
-    const updated = workspaces.map((w) => ({
-      ...w,
-      sessionIds: w.sessionIds.filter((id) => aliveIds.has(id)),
-    }));
-    const changed = updated.some((w, i) => w.sessionIds.length !== workspaces[i].sessionIds.length);
-    if (changed) {
-      setWorkspaces(updated);
-      saveWorkspaces(updated);
+    let changed = false;
+    for (const ws of workspaces) {
+      const ids = layoutToSessionIds(ws.layout);
+      const liveIds = ids.filter((id) => aliveIds.has(id));
+      if (liveIds.length !== ids.length) {
+        const newLayout = sessionIdsToLayout(liveIds);
+        apiUpdateWorkspace(ws.id, { layout: newLayout });
+        ws.layout = newLayout;
+        changed = true;
+      }
     }
+    if (changed) setWorkspaces([...workspaces]);
   }, [sessions, loading]);
 
   const createSession = useCallback(async () => {
@@ -101,23 +151,21 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
     }
   }, [mux]);
 
-  const createWorkspace = useCallback(() => {
-    const ws: Workspace = {
-      id: crypto.randomUUID().slice(0, 8),
-      name: `workspace ${workspaces.length + 1}`,
-      sessionIds: [],
-    };
-    const next = [...workspaces, ws];
-    setWorkspaces(next);
-    saveWorkspaces(next);
-    navigate({ page: 'workspace', id: ws.id });
+  const createWorkspace = useCallback(async () => {
+    const id = crypto.randomUUID().slice(0, 8);
+    const name = `workspace ${workspaces.length + 1}`;
+    const layout: LayoutNode = { type: 'pane', sessionId: 0 }; // placeholder
+    const ws = await apiCreateWorkspace({ id, name, layout });
+    if (ws) {
+      setWorkspaces((prev) => [...prev, ws]);
+      navigate({ page: 'workspace', id });
+    }
   }, [workspaces]);
 
-  const deleteWorkspace = useCallback((wsId: string) => {
-    const next = workspaces.filter((w) => w.id !== wsId);
-    setWorkspaces(next);
-    saveWorkspaces(next);
-  }, [workspaces]);
+  const deleteWorkspace = useCallback(async (wsId: string) => {
+    await apiDeleteWorkspace(wsId);
+    setWorkspaces((prev) => prev.filter((w) => w.id !== wsId));
+  }, []);
 
   return (
     <div style={{ padding: 32, fontFamily: 'monospace', color: '#ccc', maxWidth: 700 }}>
@@ -155,7 +203,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
               >
                 <span style={{ color: '#eee', flex: 1 }}>{ws.name}</span>
                 <span style={{ color: '#666', fontSize: 11 }}>
-                  {ws.sessionIds.length} session{ws.sessionIds.length !== 1 ? 's' : ''}
+                  {layoutToSessionIds(ws.layout).filter((id) => id > 0).length} session{layoutToSessionIds(ws.layout).filter((id) => id > 0).length !== 1 ? 's' : ''}
                 </span>
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteWorkspace(ws.id); }}
@@ -269,25 +317,33 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
 // ───── 워크스페이스 페이지 (분할 터미널) ─────
 
 function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: string }) {
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(loadWorkspaces);
-  const ws = workspaces.find((w) => w.id === workspaceId);
-
-  const [panels, setPanels] = useState<{ key: string; sessionId?: number }[]>(() => {
-    if (!ws || ws.sessionIds.length === 0) return [{ key: crypto.randomUUID() }];
-    return ws.sessionIds.map((id) => ({ key: crypto.randomUUID(), sessionId: id }));
-  });
+  const [wsName, setWsName] = useState(workspaceId);
+  const [panels, setPanels] = useState<{ key: string; sessionId?: number }[]>([{ key: crypto.randomUUID() }]);
   const [focused, setFocused] = useState(0);
   const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const initialized = useRef(false);
 
-  // 워크스페이스에 세션 ID 동기화
+  // 서버에서 workspace 로드
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+    fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((ws: Workspace | null) => {
+        if (!ws) return;
+        setWsName(ws.name);
+        const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+        if (ids.length > 0) {
+          setPanels(ids.map((id) => ({ key: crypto.randomUUID(), sessionId: id })));
+        }
+      })
+      .catch(() => {});
+  }, [workspaceId]);
+
+  // 워크스페이스에 세션 ID 동기화 (서버)
   const syncWorkspace = useCallback((sessionIds: number[]) => {
-    const all = loadWorkspaces();
-    const idx = all.findIndex((w) => w.id === workspaceId);
-    if (idx !== -1) {
-      all[idx].sessionIds = sessionIds;
-      saveWorkspaces(all);
-      setWorkspaces(all);
-    }
+    const layout = sessionIdsToLayout(sessionIds);
+    apiUpdateWorkspace(workspaceId, { layout });
   }, [workspaceId]);
 
   const add = useCallback(() => {
@@ -358,7 +414,6 @@ function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: st
   }, [panels.length]);
 
   const cols = Math.min(panels.length, 3);
-  const wsName = ws?.name ?? workspaceId;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -430,21 +485,22 @@ function WorkspacePage({ mux, workspaceId }: { mux: TerminalMux; workspaceId: st
 
 function OverviewPage({ mux }: { mux: TerminalMux }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>(loadWorkspaces);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    mux.listSessions().then((list) => {
+    Promise.all([mux.listSessions(), fetchWorkspaces()]).then(([list, wsList]) => {
       if (cancelled) return;
       setSessions(list.filter((s) => s.status !== 'dead'));
+      setWorkspaces(wsList);
       setLoading(false);
     }).catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [mux]);
 
   // 워크스페이스에 속한 세션 ID 집합
-  const assignedIds = new Set(workspaces.flatMap((w) => w.sessionIds));
+  const assignedIds = new Set(workspaces.flatMap((w) => layoutToSessionIds(w.layout)));
   const aliveIds = new Set(sessions.map((s) => s.id));
   const standalone = sessions.filter((s) => !assignedIds.has(s.id));
 
@@ -452,7 +508,7 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
   const workspacesWithSessions = workspaces
     .map((ws) => ({
       ...ws,
-      liveSessions: ws.sessionIds.filter((id) => aliveIds.has(id)),
+      liveSessions: layoutToSessionIds(ws.layout).filter((id) => aliveIds.has(id)),
     }))
     .filter((ws) => ws.liveSessions.length > 0);
 

@@ -6,8 +6,8 @@ import { rmSync } from 'node:fs';
 const TEST_RUNTIME_DIR = resolve('/tmp', `ttym-mgr-test-${process.pid}`);
 const managers: SessionManager[] = [];
 
-function createManager(detachedTtl?: number): SessionManager {
-  const manager = new SessionManager(TEST_RUNTIME_DIR, detachedTtl);
+function createManager(): SessionManager {
+  const manager = new SessionManager(TEST_RUNTIME_DIR);
   managers.push(manager);
   return manager;
 }

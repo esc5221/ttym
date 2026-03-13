@@ -2,12 +2,14 @@ import { createServer as createHttpServer, IncomingMessage, ServerResponse } fro
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
+import { WorkspaceStore } from './workspace-store.js';
 import { CMD, encode, encodeData, decode, toBuffer, jsonPayload, parseJson } from './protocol.js';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
-const BATCH_MS = 16;
+const BATCH_MS = 12;
 const MAX_BATCH_BYTES = 64 * 1024;
+const IMMEDIATE_THRESHOLD = 256; // bytes — flush immediately for interactive typing
 const WS_HIGH_WATER = 1 << 20;
 const WS_LOW_WATER = 1 << 18;
 
@@ -68,13 +70,13 @@ export interface TtymServer {
 
 // ───── HTTP API ─────
 
-function handleHttpApi(manager: SessionManager, req: IncomingMessage, res: ServerResponse): boolean {
+function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, req: IncomingMessage, res: ServerResponse): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
 
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
 
@@ -106,8 +108,9 @@ function handleHttpApi(manager: SessionManager, req: IncomingMessage, res: Serve
         const session = await manager.create(cmd, cols, rows);
         log(`HTTP CREATE session=${session.id} pid=${session.pid}`);
         json(201, session.info());
-      } catch {
-        json(400, { error: 'invalid body' });
+      } catch (e) {
+        console.error('HTTP CREATE error:', e);
+        json(500, { error: String(e) });
       }
     });
     return true;
@@ -164,6 +167,33 @@ function handleHttpApi(manager: SessionManager, req: IncomingMessage, res: Serve
     return true;
   }
 
+  // GET /api/sessions/:id/meta
+  const metaMatch = path.match(/^\/api\/sessions\/(\d+)\/meta$/);
+  if (metaMatch) {
+    const id = parseInt(metaMatch[1], 10);
+
+    if (req.method === 'GET') {
+      manager.getMeta(id).then((meta) => json(200, meta));
+      return true;
+    }
+
+    // PATCH /api/sessions/:id/meta — merge key-value pairs
+    if (req.method === 'PATCH') {
+      readBody().then(async (body) => {
+        try {
+          const patch = JSON.parse(body);
+          if (typeof patch !== 'object' || patch === null) { json(400, { error: 'body must be object' }); return; }
+          const merged = await manager.setMeta(id, patch);
+          log(`META session=${id} keys=${Object.keys(patch).join(',')}`);
+          json(200, merged);
+        } catch {
+          json(400, { error: 'invalid body' });
+        }
+      });
+      return true;
+    }
+  }
+
   // POST /api/sessions/:id/resize
   const resizeMatch = path.match(/^\/api\/sessions\/(\d+)\/resize$/);
   if (resizeMatch && req.method === 'POST') {
@@ -182,6 +212,65 @@ function handleHttpApi(manager: SessionManager, req: IncomingMessage, res: Serve
     return true;
   }
 
+  // ───── Workspace API ─────
+
+  // GET /api/workspaces
+  if (path === '/api/workspaces' && req.method === 'GET') {
+    json(200, workspaceStore.list());
+    return true;
+  }
+
+  // POST /api/workspaces
+  if (path === '/api/workspaces' && req.method === 'POST') {
+    readBody().then((body) => {
+      try {
+        const { id, name, layout } = JSON.parse(body);
+        if (!id || !name || !layout) { json(400, { error: 'id, name, layout required' }); return; }
+        const ws = workspaceStore.create(id, name, layout);
+        log(`WORKSPACE CREATE id=${id} name=${name}`);
+        json(201, ws);
+      } catch {
+        json(400, { error: 'invalid body' });
+      }
+    });
+    return true;
+  }
+
+  // PATCH /api/workspaces/:id
+  const wsMatch = path.match(/^\/api\/workspaces\/([^/]+)$/);
+  if (wsMatch) {
+    const wsId = decodeURIComponent(wsMatch[1]);
+
+    if (req.method === 'GET') {
+      const ws = workspaceStore.get(wsId);
+      if (!ws) { json(404, { error: 'not found' }); return true; }
+      json(200, ws);
+      return true;
+    }
+
+    if (req.method === 'PATCH') {
+      readBody().then((body) => {
+        try {
+          const patch = JSON.parse(body);
+          const ws = workspaceStore.update(wsId, patch);
+          if (!ws) { json(404, { error: 'not found' }); return; }
+          log(`WORKSPACE UPDATE id=${wsId}`);
+          json(200, ws);
+        } catch {
+          json(400, { error: 'invalid body' });
+        }
+      });
+      return true;
+    }
+
+    if (req.method === 'DELETE') {
+      const deleted = workspaceStore.delete(wsId);
+      log(`WORKSPACE DELETE id=${wsId} found=${deleted}`);
+      json(200, { ok: true });
+      return true;
+    }
+  }
+
   return false; // not handled
 }
 
@@ -190,8 +279,16 @@ function handleHttpApi(manager: SessionManager, req: IncomingMessage, res: Serve
 export async function createServer(port: number): Promise<TtymServer> {
   const manager = new SessionManager();
   await manager.boot();
+  const workspaceStore = new WorkspaceStore(manager.runtimeDir);
+  await workspaceStore.load();
+
+  // Remap workspace layout sessionIds after reboot restore
+  if (manager.lastIdMap.size > 0) {
+    workspaceStore.remapSessionIds(manager.lastIdMap);
+  }
+
   const httpServer = createHttpServer((req, res) => {
-    if (handleHttpApi(manager, req, res)) return;
+    if (handleHttpApi(manager, workspaceStore, req, res)) return;
     res.writeHead(404);
     res.end('not found');
   });
@@ -201,6 +298,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     const viewerId = randomUUID();
     const clientSessions = new Set<number>();
     const batchers = new Map<number, SessionBatcher>();
+    const exitWired = new Set<number>(); // prevent duplicate onExit per session
 
     function getBatcher(sessionId: number): SessionBatcher {
       let batcher = batchers.get(sessionId);
@@ -274,6 +372,13 @@ export async function createServer(port: number): Promise<TtymServer> {
         flush(sessionId, batcher);
         return;
       }
+
+      // Small data (typing echo): flush immediately, no batching delay
+      if (batcher.pendingBytes <= IMMEDIATE_THRESHOLD && !batcher.timer) {
+        queueMicrotask(() => flush(sessionId, batcher));
+        return;
+      }
+
       if (!batcher.timer) batcher.timer = setTimeout(() => flush(sessionId, batcher), BATCH_MS);
     }
 
@@ -292,21 +397,22 @@ export async function createServer(port: number): Promise<TtymServer> {
       session.addViewer(viewerId, dataCb, mode);
       clientSessions.add(sessionId);
 
-      session.onExit((code) => {
-        log(`EXIT session=${sessionId} code=${code}`);
-        if (batcher.timer) {
-          clearTimeout(batcher.timer);
-          batcher.timer = null;
-        }
-        if (batcher.drainTimer) {
-          clearInterval(batcher.drainTimer);
-          batcher.drainTimer = null;
-        }
-        flush(sessionId, batcher);
-        clientSessions.delete(sessionId);
-        batchers.delete(sessionId);
-        safeSend(ws, encode(sessionId, CMD.DESTROY));
-      });
+      if (!exitWired.has(sessionId)) {
+        exitWired.add(sessionId);
+        session.onExit((code) => {
+          log(`EXIT session=${sessionId} code=${code}`);
+          const b = batchers.get(sessionId);
+          if (b) {
+            if (b.timer) { clearTimeout(b.timer); b.timer = null; }
+            if (b.drainTimer) { clearInterval(b.drainTimer); b.drainTimer = null; }
+            flush(sessionId, b);
+          }
+          clientSessions.delete(sessionId);
+          batchers.delete(sessionId);
+          exitWired.delete(sessionId);
+          safeSend(ws, encode(sessionId, CMD.DESTROY));
+        });
+      }
     }
 
     function cleanupBatcher(sessionId: number) {
@@ -529,7 +635,8 @@ export async function createServer(port: number): Promise<TtymServer> {
     wss,
     httpServer,
     close: async () => {
-      manager.shutdown(); // don't kill holders — they survive restart
+      await manager.shutdown(); // persist + don't kill holders
+      await workspaceStore.save(); // persist workspace layouts
       await new Promise<void>((resolve, reject) => {
         wss.close((error) => {
           if (error) reject(error);

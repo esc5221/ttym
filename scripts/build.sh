@@ -15,6 +15,10 @@ echo "[1/3] Building holder (Rust)..."
 cd "$ROOT/holder"
 cargo build --release 2>&1 | tail -1
 cp target/release/ttym-holder "$DIST/"
+# macOS: cp invalidates ad-hoc code signature; re-sign so forkpty works
+if [ "$(uname)" = "Darwin" ]; then
+  codesign -f -s - "$DIST/ttym-holder" 2>/dev/null
+fi
 echo "      $(du -h "$DIST/ttym-holder" | cut -f1) ttym-holder"
 
 # 2. Server bundle

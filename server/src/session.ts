@@ -133,6 +133,14 @@ export class Session {
   private exitCbs: ExitCb[] = [];
   private _cols: number;
   private _rows: number;
+  private _dirty = false;
+  private _lastDirtyAt = 0;
+  private _diedAt = 0;
+
+  get dirty(): boolean { return this._dirty; }
+  get lastDirtyAt(): number { return this._lastDirtyAt; }
+  get diedAt(): number { return this._diedAt; }
+  markClean(): void { this._dirty = false; }
 
   private constructor(
     id: number, cmd: string[], cols: number, rows: number,
@@ -147,7 +155,7 @@ export class Session {
     this._rows = rows;
 
     // Layer 2
-    this.term = new Terminal({ cols, rows, scrollback: 1000, allowProposedApi: true });
+    this.term = new Terminal({ cols, rows, scrollback: 3000, allowProposedApi: true });
     this.serializer = new SerializeAddon();
     this.term.loadAddon(this.serializer as any);
 
@@ -158,19 +166,22 @@ export class Session {
   /** Create a new session: spawn holder, connect */
   static async create(
     id: number, cmd: string[], cols: number, rows: number,
-    runtimeDir: string,
+    runtimeDir: string, cwd?: string,
   ): Promise<Session> {
     const socketPath = resolve(runtimeDir, `session-${id}.sock`);
 
     // Spawn holder (detached, survives server exit)
     // stdio must be 'ignore' — pipe would kill holder on SIGPIPE when server exits
-    const proc = spawn(holderBin(), [
+    const args = [
       '--id', String(id),
       '--cols', String(cols),
       '--rows', String(rows),
       '--runtime-dir', runtimeDir,
-      '--', ...cmd,
-    ], {
+    ];
+    if (cwd) args.push('--cwd', cwd);
+    args.push('--', ...cmd);
+
+    const proc = spawn(holderBin(), args, {
       detached: true,
       stdio: 'ignore',
     });
@@ -271,6 +282,7 @@ export class Session {
       sock.on('close', () => {
         if (!this.closed) {
           this.closed = true;
+          this._diedAt = Date.now();
           for (const cb of this.exitCbs) cb(-1);
           this.exitCbs = [];
         }
@@ -290,6 +302,8 @@ export class Session {
 
         // Layer 2: headless xterm
         this.term.write(data);
+        this._dirty = true;
+        this._lastDirtyAt = Date.now();
 
         // Layer 3: ring (for viewer delta replay)
         this.ring.push(data); // ring assigns its own seq for viewers
@@ -306,6 +320,7 @@ export class Session {
       case H_CMD_EXIT: {
         const code = payload.length >= 4 ? payload.readInt32LE(0) : -1;
         this.closed = true;
+        this._diedAt = Date.now();
         for (const cb of this.exitCbs) cb(code);
         this.exitCbs = [];
         break;
@@ -354,6 +369,11 @@ export class Session {
 
   snapshot(): string {
     return this.serializer.serialize();
+  }
+
+  /** Seed headless xterm with a previously saved snapshot (for reboot restore) */
+  seedSnapshot(ansi: string): void {
+    this.term.write(ansi);
   }
 
   info(): SessionInfo {
