@@ -31,6 +31,16 @@ export interface WorkspaceMemberInfo {
   tags?: string[];
 }
 
+export interface SessionMeta {
+  claudeSessionId?: string | null;
+  claudeLastSessionId?: string | null;
+  claudeActive?: boolean | null;
+  codexSessionId?: string | null;
+  codexLastSessionId?: string | null;
+  codexActive?: boolean | null;
+  [key: string]: unknown;
+}
+
 async function asJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
@@ -51,6 +61,10 @@ export async function listWorkspaces(port: number, project?: string): Promise<Wo
 export async function getSessionScreen(port: number, sessionId: number): Promise<string> {
   const data = await asJson<{ screen: string }>(await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/screen`));
   return data.screen;
+}
+
+export async function getSessionMeta(port: number, sessionId: number): Promise<SessionMeta> {
+  return asJson(await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/meta`));
 }
 
 export function layoutToSessionIds(node: LayoutNode): number[] {

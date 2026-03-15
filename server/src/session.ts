@@ -170,7 +170,7 @@ export class Session {
   /** Create a new session: spawn holder, connect */
   static async create(
     id: number, cmd: string[], cols: number, rows: number,
-    runtimeDir: string, cwd?: string,
+    runtimeDir: string, cwd?: string, extraEnv?: Record<string, string>,
   ): Promise<Session> {
     const socketPath = resolve(runtimeDir, `session-${id}.sock`);
 
@@ -186,9 +186,11 @@ export class Session {
     args.push('--', ...cmd);
 
     const holderLogFd = openSync(resolve(getHomeDir(), 'ttym.log'), 'a');
+    const env = extraEnv ? { ...process.env, ...extraEnv } : undefined;
     const proc = spawn(holderBin(), args, {
       detached: true,
       stdio: ['ignore', holderLogFd, holderLogFd],
+      ...(env ? { env } : {}),
     });
     proc.unref();
 

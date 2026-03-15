@@ -167,6 +167,61 @@ export class WorkspaceStore {
     return ws;
   }
 
+  addMember(id: string, member: Omit<WorkspaceMemberInfo, 'createdAt' | 'updatedAt'>): WorkspaceInfo | null {
+    const ws = this.workspaces.get(id);
+    if (!ws) return null;
+    this.assertUniqueMemberName(ws, member.name, member.sessionId);
+
+    const now = Date.now();
+    const existing = ws.members.find((entry) => entry.sessionId === member.sessionId);
+    if (existing) {
+      existing.name = member.name;
+      existing.role = member.role;
+      existing.tags = member.tags ?? existing.tags ?? [];
+      existing.updatedAt = now;
+    } else {
+      ws.members.push({
+        sessionId: member.sessionId,
+        name: member.name,
+        role: member.role,
+        tags: member.tags ?? [],
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    ws.layout = appendSessionToLayout(ws.layout, member.sessionId);
+    this.reconcileWorkspace(ws);
+    ws.updatedAt = now;
+    this.scheduleSave();
+    return ws;
+  }
+
+  removeMember(id: string, sessionId: number): WorkspaceInfo | null {
+    const ws = this.workspaces.get(id);
+    if (!ws) return null;
+    ws.members = ws.members.filter((entry) => entry.sessionId !== sessionId);
+    ws.layout = removeSessionFromLayout(ws.layout, sessionId);
+    this.reconcileWorkspace(ws);
+    ws.updatedAt = Date.now();
+    this.scheduleSave();
+    return ws;
+  }
+
+  renameMember(id: string, sessionId: number, name: string): WorkspaceInfo | null {
+    const ws = this.workspaces.get(id);
+    if (!ws) return null;
+    this.assertUniqueMemberName(ws, name, sessionId);
+    const member = ws.members.find((entry) => entry.sessionId === sessionId);
+    if (!member) return null;
+    member.name = name;
+    member.updatedAt = Date.now();
+    this.reconcileWorkspace(ws);
+    ws.updatedAt = Date.now();
+    this.scheduleSave();
+    return ws;
+  }
+
   delete(id: string): boolean {
     const deleted = this.workspaces.delete(id);
     if (deleted) this.scheduleSave();
@@ -233,11 +288,39 @@ export class WorkspaceStore {
     while (usedNames.has(`term-${index}`)) index += 1;
     return `term-${index}`;
   }
+
+  private assertUniqueMemberName(ws: WorkspaceInfo, name: string, sessionId: number): void {
+    const duplicate = ws.members.find((member) => member.name === name && member.sessionId !== sessionId);
+    if (duplicate) throw new Error(`member name already exists: ${name}`);
+  }
 }
 
 function layoutToSessionIds(node: LayoutNode): number[] {
   if (node.type === 'pane') return [node.sessionId];
   return node.children.flatMap(layoutToSessionIds);
+}
+
+function appendSessionToLayout(node: LayoutNode, sessionId: number): LayoutNode {
+  const sessionIds = layoutToSessionIds(node).filter((id) => id > 0);
+  if (sessionIds.includes(sessionId)) return node;
+  sessionIds.push(sessionId);
+  return sessionIdsToLayout(sessionIds);
+}
+
+function removeSessionFromLayout(node: LayoutNode, sessionId: number): LayoutNode {
+  const sessionIds = layoutToSessionIds(node).filter((id) => id > 0 && id !== sessionId);
+  return sessionIdsToLayout(sessionIds);
+}
+
+function sessionIdsToLayout(ids: number[]): LayoutNode {
+  if (ids.length === 0) return { type: 'pane', sessionId: 0 };
+  if (ids.length === 1) return { type: 'pane', sessionId: ids[0] };
+  return {
+    type: 'split',
+    axis: 'row',
+    sizes: ids.map(() => 1 / ids.length),
+    children: ids.map((id) => ({ type: 'pane' as const, sessionId: id })),
+  };
 }
 
 /** Recursively remap sessionIds in a layout tree. Returns true if anything changed. */

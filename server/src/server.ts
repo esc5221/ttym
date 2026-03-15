@@ -106,8 +106,29 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         const cmd = Array.isArray(opts.cmd) ? opts.cmd : [DEFAULT_SHELL];
         const cols = opts.cols || 80;
         const rows = opts.rows || 24;
+        const verify = opts.verify === true;
         const session = await manager.create(cmd, cols, rows);
-        log(`HTTP CREATE session=${session.id} pid=${session.pid}`);
+        log(`HTTP CREATE session=${session.id} pid=${session.pid} verify=${verify}`);
+
+        if (verify) {
+          // Wait up to 2s to detect early PTY exit (invalid command)
+          const earlyExit = await new Promise<boolean>((resolve) => {
+            if (session.isDead) { resolve(true); return; }
+            const timer = setTimeout(() => resolve(false), 2000);
+            session.onExit(() => {
+              clearTimeout(timer);
+              resolve(true);
+            });
+          });
+
+          if (earlyExit) {
+            log(`HTTP CREATE session=${session.id} early exit detected, cleaning up`);
+            manager.destroy(session.id);
+            json(422, { error: 'command exited immediately', sessionId: session.id });
+            return;
+          }
+        }
+
         json(201, session.info());
       } catch (e) {
         console.error('HTTP CREATE error:', e);
@@ -279,6 +300,59 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     }
   }
 
+  const memberMatch = path.match(/^\/api\/workspaces\/([^/]+)\/members\/(\d+)$/);
+  if (memberMatch) {
+    const wsId = decodeURIComponent(memberMatch[1]);
+    const sessionId = parseInt(memberMatch[2], 10);
+
+    if (req.method === 'PATCH') {
+      readBody().then((body) => {
+        try {
+          const { name } = JSON.parse(body);
+          if (!name || typeof name !== 'string') { json(400, { error: 'name required' }); return; }
+          const ws = workspaceStore.renameMember(wsId, sessionId, name);
+          if (!ws) { json(404, { error: 'not found' }); return; }
+          log(`WORKSPACE MEMBER RENAME id=${wsId} session=${sessionId} name=${name}`);
+          json(200, ws);
+        } catch (error) {
+          json(400, { error: error instanceof Error ? error.message : 'invalid body' });
+        }
+      });
+      return true;
+    }
+
+    if (req.method === 'DELETE') {
+      const ws = workspaceStore.removeMember(wsId, sessionId);
+      if (!ws) { json(404, { error: 'not found' }); return true; }
+      log(`WORKSPACE MEMBER REMOVE id=${wsId} session=${sessionId}`);
+      json(200, ws);
+      return true;
+    }
+  }
+
+  const membersCollectionMatch = path.match(/^\/api\/workspaces\/([^/]+)\/members$/);
+  if (membersCollectionMatch && req.method === 'POST') {
+    const wsId = decodeURIComponent(membersCollectionMatch[1]);
+    readBody().then((body) => {
+      try {
+        const { sessionId, name, role, tags } = JSON.parse(body);
+        if (!sessionId || !name) { json(400, { error: 'sessionId and name required' }); return; }
+        const ws = workspaceStore.addMember(wsId, {
+          sessionId: Number(sessionId),
+          name,
+          role,
+          tags: Array.isArray(tags) ? tags : [],
+        });
+        if (!ws) { json(404, { error: 'not found' }); return; }
+        log(`WORKSPACE MEMBER ADD id=${wsId} session=${sessionId} name=${name}`);
+        json(201, ws);
+      } catch (error) {
+        json(400, { error: error instanceof Error ? error.message : 'invalid body' });
+      }
+    });
+    return true;
+  }
+
   return false; // not handled
 }
 
@@ -291,9 +365,9 @@ export async function createServer(port: number): Promise<TtymServer> {
   await workspaceStore.load();
 
   // Agent Bus is optional and currently disabled in the bundled server path.
-  const agentBus: unknown | null = null;
-  const fileBridge: { stop?: () => void } | null = null;
-  const handleAgentRequest: ((req: IncomingMessage, res: ServerResponse) => boolean) | null = null;
+  const agentBus = null as { close?: () => void } | null;
+  const fileBridge = null as { stop?: () => void } | null;
+  const handleAgentRequest = null as ((req: IncomingMessage, res: ServerResponse) => boolean) | null;
 
   // Inject TTYM_BUS_URL into SessionManager for holder env
   manager.setBusUrl(`http://127.0.0.1:${port}/api`);
@@ -653,8 +727,8 @@ export async function createServer(port: number): Promise<TtymServer> {
     wss,
     httpServer,
     close: async () => {
-      fileBridge?.stop();
-      agentBus?.close();
+      fileBridge?.stop?.();
+      agentBus?.close?.();
       await manager.shutdown(); // persist + don't kill holders
       await workspaceStore.save(); // persist workspace layouts
       await new Promise<void>((resolve, reject) => {

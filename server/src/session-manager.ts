@@ -40,6 +40,7 @@ export class SessionManager {
   readonly runtimeDir: string;
   private _ready = false;
   private _lastIdMap = new Map<number, number>(); // old → new (from last restore)
+  private _busUrl: string | null = null;
 
   constructor(runtimeDir?: string) {
     this.runtimeDir = runtimeDir ?? getRuntimeDir();
@@ -49,6 +50,9 @@ export class SessionManager {
 
   get ready(): boolean { return this._ready; }
   get lastIdMap(): Map<number, number> { return this._lastIdMap; }
+
+  /** Set bus URL — injected by server after port is known */
+  setBusUrl(url: string): void { this._busUrl = url; }
 
   /** Boot: create runtime dir, recover existing holders, then mark ready */
   async boot(): Promise<void> {
@@ -277,7 +281,10 @@ export class SessionManager {
     const id = this.nextId++;
     await this.persistNextId();
 
-    const session = await Session.create(id, cmd, cols, rows, this.runtimeDir, cwd);
+    const extraEnv: Record<string, string> = { TTYM_SESSION_ID: String(id) };
+    if (this._busUrl) extraEnv.TTYM_BUS_URL = this._busUrl;
+
+    const session = await Session.create(id, cmd, cols, rows, this.runtimeDir, cwd, extraEnv);
     this.sessions.set(id, session);
 
     session.onExit(() => {

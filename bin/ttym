@@ -295,17 +295,6 @@ async function cmdMeta() {
   }
 }
 
-function sessionIdsToLayout(ids) {
-  if (ids.length === 0) return { type: 'pane', sessionId: 0 };
-  if (ids.length === 1) return { type: 'pane', sessionId: ids[0] };
-  return {
-    type: 'split',
-    axis: 'row',
-    sizes: ids.map(() => 1 / ids.length),
-    children: ids.map((id) => ({ type: 'pane', sessionId: id })),
-  };
-}
-
 async function listProjects(port) {
   return await fetchJson(port, '/api/projects');
 }
@@ -405,14 +394,6 @@ function requireMember(workspace, token) {
 
   console.error(`member not found: ${token}`);
   process.exit(1);
-}
-
-function updateWorkspaceMembers(workspace, members) {
-  return {
-    ...workspace,
-    members,
-    layout: sessionIdsToLayout(members.map((member) => member.sessionId)),
-  };
 }
 
 async function patchSessionMeta(port, sessionId, patch) {
@@ -565,8 +546,7 @@ async function cmdWorkspace() {
     const role = readOption(args, '--role');
     const cmdIndex = args.indexOf('--cmd');
     const cmd = cmdIndex !== -1 ? args.slice(cmdIndex + 1).filter((value) => value !== '--json') : [process.env.SHELL || '/bin/bash'];
-    const latestWorkspace = await getWorkspaceById(port, workspace.id) || workspace;
-    const usedNames = new Set((latestWorkspace.members || []).map((member) => member.name));
+    const usedNames = new Set((workspace.members || []).map((member) => member.name));
     let memberName = name || 'term-1';
     if (!name) {
       let index = 1;
@@ -576,14 +556,17 @@ async function cmdWorkspace() {
       console.error(`member name already exists: ${name}`);
       process.exit(1);
     }
-    const created = await fetchPost(port, '/api/sessions', { cmd, cols: 80, rows: 24 });
-    const nextMembers = [
-      ...(latestWorkspace.members || []),
-      { sessionId: created.id, name: memberName, role: role || undefined, tags: [], createdAt: Date.now(), updatedAt: Date.now() },
-    ];
-    const updated = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(latestWorkspace.id)}`, {
-      members: nextMembers,
-      layout: sessionIdsToLayout(nextMembers.map((member) => member.sessionId)),
+    const created = await fetchPost(port, '/api/sessions', { cmd, cols: 80, rows: 24, verify: true });
+    if (created.error) {
+      if (asJson) return printOutput({ error: created.error, cmd }, true);
+      console.error(`workspace add failed: ${created.error}`);
+      process.exit(1);
+    }
+    const updated = await fetchPost(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members`, {
+      sessionId: created.id,
+      name: memberName,
+      role: role || undefined,
+      tags: [],
     });
     await patchSessionMeta(port, created.id, {
       project: updated.project,
@@ -609,13 +592,8 @@ async function cmdWorkspace() {
 
   if (action === 'remove' || action === 'detach' || action === 'terminate') {
     const workspace = await resolveWorkspace(port, args[0]);
-    const latestWorkspace = await getWorkspaceById(port, workspace.id) || workspace;
-    const member = requireMember(latestWorkspace, args[1]);
-    const nextMembers = (latestWorkspace.members || []).filter((entry) => entry.sessionId !== member.sessionId);
-    await fetchPatch(port, `/api/workspaces/${encodeURIComponent(latestWorkspace.id)}`, {
-      members: nextMembers,
-      layout: sessionIdsToLayout(nextMembers.map((entry) => entry.sessionId)),
-    });
+    const member = requireMember(workspace, args[1]);
+    await fetchDelete(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members/${member.sessionId}`);
     if (action === 'detach') {
       await patchSessionMeta(port, member.sessionId, {
         project: null,
@@ -626,9 +604,9 @@ async function cmdWorkspace() {
     if (action === 'remove' || action === 'terminate') {
       await fetchDelete(port, `/api/sessions/${member.sessionId}`);
     }
-    const result = { ok: true, action, workspace: `${latestWorkspace.project}/${latestWorkspace.name}`, member: member.name, sessionId: member.sessionId };
+    const result = { ok: true, action, workspace: `${workspace.project}/${workspace.name}`, member: member.name, sessionId: member.sessionId };
     if (asJson) return printOutput(result, true);
-    console.log(`${action}d ${latestWorkspace.project}/${latestWorkspace.name}/${member.name} (#${member.sessionId})`);
+    console.log(`${action}d ${workspace.project}/${workspace.name}/${member.name} (#${member.sessionId})`);
     return;
   }
 
@@ -644,6 +622,65 @@ async function cmdWorkspace() {
     const result = await fetchPost(port, `/api/sessions/${member.sessionId}/send`, { data: payload });
     if (asJson) return printOutput(result, true);
     console.log(`sent to ${workspace.project}/${workspace.name}/${member.name}`);
+    return;
+  }
+
+  if (action === 'await') {
+    const workspace = await resolveWorkspace(port, args[0]);
+    const member = requireMember(workspace, args[1]);
+    const sep = args.indexOf('--');
+    const payload = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
+    const timeoutMs = parseInt(readOption(args, '--timeout') || '120000', 10);
+
+    // 1. Bump seq
+    const prevMeta = await fetchJson(port, `/api/sessions/${member.sessionId}/meta`);
+    const nextSeq = String((parseInt(prevMeta?.seq || '0', 10) || 0) + 1);
+    await fetchPatch(port, `/api/sessions/${member.sessionId}/meta`, { seq: nextSeq });
+
+    // 2. Send prompt then submit (split text and CR for TUI compatibility)
+    if (payload) {
+      const text = payload.replace(/[\r\n]+$/, '');
+      await fetchPost(port, `/api/sessions/${member.sessionId}/send`, { data: text });
+      await new Promise((r) => setTimeout(r, 50));
+      await fetchPost(port, `/api/sessions/${member.sessionId}/send`, { data: '\r' });
+    }
+
+    // 3. Poll meta.stopSeq until it matches nextSeq
+    const deadline = Date.now() + timeoutMs;
+    let completed = false;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const meta = await fetchJson(port, `/api/sessions/${member.sessionId}/meta`).catch(() => null);
+      if (meta && String(meta.stopSeq) === nextSeq) {
+        completed = true;
+        break;
+      }
+    }
+
+    // 4. Read screen
+    const screen = await fetchJson(port, `/api/sessions/${member.sessionId}/screen`).catch(() => null);
+    const rawScreen = screen?.screen ?? '';
+    const stripAnsi = (s) => s
+      .replace(/\u001b\[\d+C/g, ' ')              // cursor forward → space
+      .replace(/\u001b\[\d+D/g, '')               // cursor back → remove
+      .replace(/\u001b\[[0-9;?]*[a-zA-Z]/g, '')   // other CSI sequences
+      .replace(/\u001b\][^\u0007]*\u0007/g, '')    // OSC sequences
+      .replace(/\u001b[()][0-9A-B]/g, '')          // charset switches
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
+    const cleanScreen = stripAnsi(rawScreen);
+    const useRaw = hasFlag('--raw');
+    const result = {
+      workspace: `${workspace.project}/${workspace.name}`,
+      member: member.name,
+      sessionId: member.sessionId,
+      seq: nextSeq,
+      completed,
+      screen: useRaw ? rawScreen : cleanScreen,
+    };
+    if (asJson) return printOutput(result, true);
+    if (!completed) console.error(`timeout: response not completed within ${timeoutMs}ms`);
+    process.stdout.write(result.screen);
     return;
   }
 
@@ -663,21 +700,13 @@ async function cmdWorkspace() {
 
   if (action === 'member' && args[0] === 'rename') {
     const workspace = await resolveWorkspace(port, args[1]);
-    const latestWorkspace = await getWorkspaceById(port, workspace.id) || workspace;
-    const member = requireMember(latestWorkspace, args[2]);
+    const member = requireMember(workspace, args[2]);
     const name = readOption(args, '--name');
     if (!name) {
       console.error('usage: ttym workspace member rename <workspace|--current> <member> --name <name>');
       process.exit(1);
     }
-    if ((latestWorkspace.members || []).some((entry) => entry.sessionId !== member.sessionId && entry.name === name)) {
-      console.error(`member name already exists: ${name}`);
-      process.exit(1);
-    }
-    const nextMembers = (latestWorkspace.members || []).map((entry) => entry.sessionId === member.sessionId
-      ? { ...entry, name, updatedAt: Date.now() }
-      : entry);
-    const updated = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(latestWorkspace.id)}`, { members: nextMembers });
+    const updated = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members/${member.sessionId}`, { name });
     await patchSessionMeta(port, member.sessionId, {
       project: updated.project,
       workspaceId: updated.id,
@@ -704,6 +733,7 @@ async function cmdWorkspace() {
   console.log('  detach <workspace|--current> <member> [--json]');
   console.log('  terminate <workspace|--current> <member> [--json]');
   console.log('  send <workspace|--current> <member> -- \"command\\\\n\"');
+  console.log('  await <workspace|--current> <member> [-- \"prompt\"] [--timeout ms] [--json]');
   console.log('  screen <workspace|--current> <member> [--json]');
   console.log('  member rename <workspace|--current> <member> --name <name>');
   process.exit(1);
@@ -739,6 +769,11 @@ const AGENTS = {
         event: 'SessionStart',
         matcher: '',
         command: '[ -z "$TTYM_SESSION_ID" ] && exit 0; jq -r .session_id | xargs -I{} ttym meta $TTYM_SESSION_ID --codex-session {}',
+      },
+      {
+        event: 'Stop',
+        matcher: '',
+        command: resolve(__dirname, '..', 'scripts', 'ttym-codex-stop-hook.sh'),
       },
     ],
     resumeArgs: (sid) => ['codex', 'resume', sid],

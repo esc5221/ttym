@@ -112,6 +112,38 @@ function sessionIdsToLayout(ids: number[]): LayoutNode {
   };
 }
 
+function reconcileWorkspacePanels(
+  prevPanels: { key: string; sessionId?: number; memberName?: string }[],
+  sessionIds: number[],
+  memberNames: Map<number, string>,
+): { key: string; sessionId?: number; memberName?: string }[] {
+  const unusedPrev = [...prevPanels];
+  const nextPanels = (sessionIds.length > 0 ? sessionIds : [undefined]).map((sessionId) => {
+    if (sessionId !== undefined) {
+      const matchedIndex = unusedPrev.findIndex((panel) => panel.sessionId === sessionId);
+      if (matchedIndex >= 0) {
+        const [matched] = unusedPrev.splice(matchedIndex, 1);
+        return { ...matched, sessionId, memberName: memberNames.get(sessionId) };
+      }
+    }
+
+    const fallback = unusedPrev.shift();
+    if (fallback) {
+      return { ...fallback, sessionId, memberName: sessionId !== undefined ? memberNames.get(sessionId) : fallback.memberName };
+    }
+
+    return sessionId === undefined
+      ? { key: uuid() }
+      : { key: uuid(), sessionId, memberName: memberNames.get(sessionId) };
+  });
+
+  const pendingPanels = unusedPrev.filter((panel) => panel.sessionId === undefined);
+  if (pendingPanels.length > 0 && nextPanels.every((panel) => panel.sessionId !== undefined)) {
+    return [...nextPanels, ...pendingPanels];
+  }
+  return nextPanels;
+}
+
 async function fetchWorkspaces(): Promise<Workspace[]> {
   try {
     const res = await fetch(`${API_BASE}/api/workspaces`);
@@ -473,6 +505,11 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   const [focused, setFocused] = useState(0);
   const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const initialized = useRef(false);
+  const panelsRef = useRef(panels);
+
+  useEffect(() => {
+    panelsRef.current = panels;
+  }, [panels]);
 
   const refreshWorkspaceMeta = useCallback(async () => {
     try {
@@ -507,6 +544,36 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
         }
       })
       .catch(() => {});
+  }, [workspaceId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const tick = async () => {
+      const hasPendingLocalPane = panelsRef.current.some((panel) => panel.sessionId === undefined);
+      if (hasPendingLocalPane) return;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}`);
+        if (!res.ok) return;
+        const ws: Workspace = await res.json();
+        if (cancelled) return;
+
+        const names = memberNameBySession(ws);
+        const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+        setWsName(ws.name);
+        setWsProject(ws.project || 'default');
+        setMemberNames(Object.fromEntries(names));
+        setPanels((prev) => reconcileWorkspacePanels(prev, ids, names));
+        setFocused((current) => Math.min(current, Math.max(0, Math.max(ids.length, 1) - 1)));
+      } catch {}
+    };
+
+    const interval = window.setInterval(() => { void tick(); }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [workspaceId]);
 
   // 워크스페이스에 세션 ID 동기화 (서버)
@@ -587,7 +654,6 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     const handler = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
       if (meta && e.key === '\\') { e.preventDefault(); add(); return; }
-      if (meta && e.key.toLowerCase() === 'd') { e.preventDefault(); terminateAt(focused); return; }
       if (meta && e.code === 'ArrowLeft') { e.preventDefault(); focusPrev(); return; }
       if (meta && e.code === 'ArrowRight') { e.preventDefault(); focusNext(); return; }
     };
@@ -685,7 +751,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                     <button
                       onClick={(e) => { e.stopPropagation(); terminateAt(i); }}
                       style={closeBtnStyle}
-                      title="Terminate (⌘D)"
+                      title="Terminate"
                     >
                       ×
                     </button>

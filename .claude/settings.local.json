@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./bin/ttym --help 2>&1 || cat bin/ttym)",
+      "Bash(./bin/ttym --help)",
+      "Bash(chmod +x bin/ttym && bin/ttym --help)",
+      "Bash(bin/ttym status:*)",
+      "Bash(top -l 1 -s 0 -o cpu -n 20 2>/dev/null | head -30)",
+      "Bash(ps aux:*)",
+      "Bash(vm_stat)"
+    ]
+  }
+}

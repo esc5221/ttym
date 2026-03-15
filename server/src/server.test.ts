@@ -89,6 +89,27 @@ describe('createServer', () => {
     delete process.env.TTYM_RUNTIME_DIR;
   });
 
+  it('returns error and cleans up when verify detects early exit', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+
+    // Create session with invalid command and verify: true
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cmd: ['__nonexistent_command_xyz__'], cols: 80, rows: 24, verify: true }),
+    });
+
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.error).toContain('exited immediately');
+
+    // Verify session was cleaned up
+    const listRes = await fetch(`http://127.0.0.1:${port}/api/sessions`);
+    const sessions = await listRes.json();
+    const found = sessions.find((s: any) => s.id === body.sessionId);
+    expect(found).toBeUndefined();
+  });
+
   it('creates session and attaches with snapshot', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);

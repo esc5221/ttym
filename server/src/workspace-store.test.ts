@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorkspaceStore } from './workspace-store.js';
@@ -86,5 +86,457 @@ describe('WorkspaceStore', () => {
       [22, 'devserver'],
     ]);
     expect(store.listProjects()).toEqual([{ name: 'ttym', workspaceCount: 1, memberCount: 3 }]);
+  });
+
+  it('supports atomic member add, rename, and remove without clobbering siblings', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const created = store.create('ws1', 'workspace 1', { type: 'pane', sessionId: 0 }, 'pilot', []);
+
+    const first = store.addMember(created.id, { sessionId: 31, name: 'lead', role: 'agent', tags: [] });
+    expect(first?.members.map((member) => member.name)).toEqual(['lead']);
+    const second = store.addMember(created.id, { sessionId: 32, name: 'devserver', role: 'server', tags: [] });
+
+    expect(second?.members.map((member) => member.name)).toEqual(['lead', 'devserver']);
+    expect(second?.layout).toEqual({
+      type: 'split',
+      axis: 'row',
+      sizes: [0.5, 0.5],
+      children: [
+        { type: 'pane', sessionId: 31 },
+        { type: 'pane', sessionId: 32 },
+      ],
+    });
+
+    const renamed = store.renameMember(created.id, 32, 'api');
+    expect(renamed?.members.map((member) => [member.sessionId, member.name])).toEqual([
+      [31, 'lead'],
+      [32, 'api'],
+    ]);
+
+    const removed = store.removeMember(created.id, 31);
+    expect(removed?.members.map((member) => [member.sessionId, member.name])).toEqual([[32, 'api']]);
+    expect(removed?.layout).toEqual({ type: 'pane', sessionId: 32 });
+  });
+
+  // ───── Load edge cases ─────
+
+  it('loads v2 format correctly', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    writeFileSync(join(dir, 'workspaces.json'), JSON.stringify({
+      version: 2,
+      workspaces: [
+        {
+          id: 'ws1',
+          project: 'myproj',
+          name: 'workspace 1',
+          layout: { type: 'pane', sessionId: 42 },
+          members: [{ sessionId: 42, name: 'lead', role: 'agent', tags: ['ai'], createdAt: 1, updatedAt: 2 }],
+          createdAt: 1,
+          updatedAt: 2,
+        },
+      ],
+    }));
+
+    const store = new WorkspaceStore(dir);
+    await store.load();
+
+    const ws = store.get('ws1');
+    expect(ws).toBeDefined();
+    expect(ws!.project).toBe('myproj');
+    expect(ws!.members[0].name).toBe('lead');
+    expect(ws!.members[0].role).toBe('agent');
+  });
+
+  it('handles missing file gracefully (empty store)', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    await store.load();
+    expect(store.list()).toEqual([]);
+  });
+
+  it('handles corrupted JSON gracefully', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    writeFileSync(join(dir, 'workspaces.json'), '{invalid json!!!');
+    const store = new WorkspaceStore(dir);
+    await store.load();
+    expect(store.list()).toEqual([]);
+  });
+
+  it('handles file with unknown version (no crash, empty store)', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    writeFileSync(join(dir, 'workspaces.json'), JSON.stringify({ version: 99, workspaces: [] }));
+    const store = new WorkspaceStore(dir);
+    await store.load();
+    expect(store.list()).toEqual([]);
+  });
+
+  it('handles file with missing workspaces array', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    writeFileSync(join(dir, 'workspaces.json'), JSON.stringify({ version: 2 }));
+    const store = new WorkspaceStore(dir);
+    await store.load();
+    expect(store.list()).toEqual([]);
+  });
+
+  // ───── Save / debounce ─────
+
+  it('save() writes atomic file (tmp + rename)', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
+    await store.save();
+
+    const raw = readFileSync(join(dir, 'workspaces.json'), 'utf8');
+    const data = JSON.parse(raw);
+    expect(data.version).toBe(2);
+    expect(data.workspaces).toHaveLength(1);
+    expect(data.workspaces[0].id).toBe('ws1');
+    // tmp file should not remain
+    expect(existsSync(join(dir, 'workspaces.json.tmp'))).toBe(false);
+  });
+
+  it('scheduleSave batches rapid mutations into a single write', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const saveSpy = vi.spyOn(store, 'save');
+
+    store.create('ws1', 'a', { type: 'pane', sessionId: 1 });
+    store.create('ws2', 'b', { type: 'pane', sessionId: 2 });
+    store.create('ws3', 'c', { type: 'pane', sessionId: 3 });
+
+    // Wait for microtask to flush
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    // One extra tick to let the save microtask run
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // scheduleSave should batch: only 1 save despite 3 creates
+    expect(saveSpy).toHaveBeenCalledTimes(1);
+    saveSpy.mockRestore();
+  });
+
+  it('save persists data that can be reloaded', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store1 = new WorkspaceStore(dir);
+    store1.create('ws1', 'roundtrip', { type: 'pane', sessionId: 7 }, 'proj');
+    await store1.save();
+
+    const store2 = new WorkspaceStore(dir);
+    await store2.load();
+    const ws = store2.get('ws1');
+    expect(ws).toBeDefined();
+    expect(ws!.name).toBe('roundtrip');
+    expect(ws!.project).toBe('proj');
+  });
+
+  // ───── get / delete / list ─────
+
+  it('get returns undefined for non-existing workspace', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    expect(store.get('nope')).toBeUndefined();
+  });
+
+  it('delete returns false for non-existing workspace', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    expect(store.delete('nope')).toBe(false);
+  });
+
+  it('delete removes workspace and returns true', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
+    expect(store.delete('ws1')).toBe(true);
+    expect(store.get('ws1')).toBeUndefined();
+    expect(store.list()).toEqual([]);
+  });
+
+  it('list returns empty array for fresh store', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    expect(store.list()).toEqual([]);
+  });
+
+  // ───── listProjects ─────
+
+  it('listProjects aggregates across multiple projects sorted by name', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'a', { type: 'pane', sessionId: 1 }, 'bravo');
+    store.create('ws2', 'b', {
+      type: 'split', axis: 'row', sizes: [0.5, 0.5],
+      children: [{ type: 'pane', sessionId: 2 }, { type: 'pane', sessionId: 3 }],
+    }, 'alpha');
+    store.create('ws3', 'c', { type: 'pane', sessionId: 4 }, 'bravo');
+
+    expect(store.listProjects()).toEqual([
+      { name: 'alpha', workspaceCount: 1, memberCount: 2 },
+      { name: 'bravo', workspaceCount: 2, memberCount: 2 },
+    ]);
+  });
+
+  it('listProjects returns empty array for empty store', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    expect(store.listProjects()).toEqual([]);
+  });
+
+  // ───── create edge cases ─────
+
+  it('create defaults project to "default" when omitted', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const ws = store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
+    expect(ws.project).toBe('default');
+  });
+
+  it('create normalizes workspace with missing members to empty array', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const ws = store.create('ws1', 'test', { type: 'pane', sessionId: 5 });
+    // reconcile should auto-generate member from layout
+    expect(ws.members).toHaveLength(1);
+    expect(ws.members[0].sessionId).toBe(5);
+    expect(ws.members[0].name).toBe('term-1');
+  });
+
+  // ───── update edge cases ─────
+
+  it('update returns null for non-existing workspace', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    expect(store.update('nope', { name: 'x' })).toBeNull();
+  });
+
+  it('update can change project', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 1 }, 'old');
+    const updated = store.update('ws1', { project: 'new' });
+    expect(updated!.project).toBe('new');
+  });
+
+  // ───── addMember edge cases ─────
+
+  it('addMember returns null for non-existing workspace', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    expect(store.addMember('nope', { sessionId: 1, name: 'x' })).toBeNull();
+  });
+
+  it('addMember updates existing member when sessionId matches', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, 'proj', []);
+    store.addMember('ws1', { sessionId: 50, name: 'first', role: 'agent', tags: ['a'] });
+    const ws = store.addMember('ws1', { sessionId: 50, name: 'updated', role: 'executor' });
+    // Should not duplicate — still one member with that sessionId
+    expect(ws!.members.filter((m) => m.sessionId === 50)).toHaveLength(1);
+    expect(ws!.members.find((m) => m.sessionId === 50)!.name).toBe('updated');
+    expect(ws!.members.find((m) => m.sessionId === 50)!.role).toBe('executor');
+  });
+
+  it('addMember throws on duplicate member name', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, 'proj', []);
+    store.addMember('ws1', { sessionId: 50, name: 'lead' });
+    expect(() => store.addMember('ws1', { sessionId: 51, name: 'lead' }))
+      .toThrow('member name already exists: lead');
+  });
+
+  it('addMember is idempotent for same sessionId (no layout duplication)', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, 'proj', []);
+    store.addMember('ws1', { sessionId: 60, name: 'worker' });
+    const ws = store.addMember('ws1', { sessionId: 60, name: 'worker-v2' });
+    // sessionId 60 should appear only once in layout
+    const paneCount = JSON.stringify(ws!.layout).split('"sessionId":60').length - 1;
+    expect(paneCount).toBe(1);
+  });
+
+  // ───── renameMember edge cases ─────
+
+  it('renameMember returns null for non-existing workspace', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    expect(store.renameMember('nope', 1, 'x')).toBeNull();
+  });
+
+  it('renameMember returns null for non-existing member', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
+    expect(store.renameMember('ws1', 999, 'x')).toBeNull();
+  });
+
+  it('renameMember throws on duplicate name', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', {
+      type: 'split', axis: 'row', sizes: [0.5, 0.5],
+      children: [{ type: 'pane', sessionId: 1 }, { type: 'pane', sessionId: 2 }],
+    }, 'proj', [
+      { sessionId: 1, name: 'alpha', createdAt: 1, updatedAt: 1 },
+      { sessionId: 2, name: 'beta', createdAt: 1, updatedAt: 1 },
+    ]);
+    expect(() => store.renameMember('ws1', 2, 'alpha')).toThrow('member name already exists: alpha');
+  });
+
+  // ───── removeMember edge cases ─────
+
+  it('removeMember returns null for non-existing workspace', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    expect(store.removeMember('nope', 1)).toBeNull();
+  });
+
+  it('removeMember produces empty pane when last member removed', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
+    const ws = store.removeMember('ws1', 1);
+    expect(ws!.members).toEqual([]);
+    expect(ws!.layout).toEqual({ type: 'pane', sessionId: 0 });
+  });
+
+  // ───── remapSessionIds ─────
+
+  it('remapSessionIds updates layout and member sessionIds', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', {
+      type: 'split', axis: 'row', sizes: [0.5, 0.5],
+      children: [{ type: 'pane', sessionId: 100 }, { type: 'pane', sessionId: 200 }],
+    }, 'proj', [
+      { sessionId: 100, name: 'a', createdAt: 1, updatedAt: 1 },
+      { sessionId: 200, name: 'b', createdAt: 1, updatedAt: 1 },
+    ]);
+
+    const idMap = new Map([[100, 300], [200, 400]]);
+    store.remapSessionIds(idMap);
+
+    const ws = store.get('ws1')!;
+    expect(ws.members.map((m) => m.sessionId)).toEqual([300, 400]);
+    expect(ws.members.map((m) => m.name)).toEqual(['a', 'b']);
+    // Layout should also be remapped
+    const layout = ws.layout as { type: 'split'; children: Array<{ sessionId: number }> };
+    expect(layout.children.map((c) => c.sessionId)).toEqual([300, 400]);
+  });
+
+  it('remapSessionIds with empty map is a no-op', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const ws = store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
+    const originalUpdatedAt = ws.updatedAt;
+    store.remapSessionIds(new Map());
+    expect(store.get('ws1')!.updatedAt).toBe(originalUpdatedAt);
+  });
+
+  it('remapSessionIds ignores IDs not in the map', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 5 });
+    store.remapSessionIds(new Map([[999, 1000]]));
+    expect(store.get('ws1')!.members[0].sessionId).toBe(5);
+  });
+
+  // ───── reconcileWorkspace: auto-name collision ─────
+
+  it('reconcile auto-renames members when names collide', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    // Two members with the same name — reconcile should de-dup
+    const ws = store.create('ws1', 'test', {
+      type: 'split', axis: 'row', sizes: [0.5, 0.5],
+      children: [{ type: 'pane', sessionId: 1 }, { type: 'pane', sessionId: 2 }],
+    }, 'proj', [
+      { sessionId: 1, name: 'dupe', createdAt: 1, updatedAt: 1 },
+      { sessionId: 2, name: 'dupe', createdAt: 1, updatedAt: 1 },
+    ]);
+    const names = ws.members.map((m) => m.name);
+    // All names should be unique
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  // ───── Layout helpers: empty, single pane, zero-filtered ─────
+
+  it('layout with sessionId 0 is filtered (placeholder pane)', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    // sessionId: 0 is treated as placeholder — should produce no members
+    const ws = store.create('ws1', 'test', { type: 'pane', sessionId: 0 });
+    expect(ws.members).toEqual([]);
+  });
+
+  it('removing all members from a split produces empty pane layout', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'test', {
+      type: 'split', axis: 'row', sizes: [0.5, 0.5],
+      children: [{ type: 'pane', sessionId: 10 }, { type: 'pane', sessionId: 20 }],
+    });
+    store.removeMember('ws1', 10);
+    const ws = store.removeMember('ws1', 20)!;
+    expect(ws.layout).toEqual({ type: 'pane', sessionId: 0 });
+    expect(ws.members).toEqual([]);
+  });
+
+  // ───── normalizeWorkspace: missing/null members ─────
+
+  it('load handles workspace with null members field', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    writeFileSync(join(dir, 'workspaces.json'), JSON.stringify({
+      version: 2,
+      workspaces: [{
+        id: 'ws1', project: 'p', name: 'test',
+        layout: { type: 'pane', sessionId: 3 },
+        members: null,
+        createdAt: 1, updatedAt: 2,
+      }],
+    }));
+    const store = new WorkspaceStore(dir);
+    await store.load();
+    const ws = store.get('ws1')!;
+    // Should auto-generate member from layout
+    expect(ws.members).toHaveLength(1);
+    expect(ws.members[0].sessionId).toBe(3);
   });
 });

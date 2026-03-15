@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal, TerminalMux, type SessionInfo } from '@ttym/client';
 import {
   createWorkspace,
+  getSessionMeta,
   deleteWorkspace,
   getSessionScreen,
   layoutToSessionIds,
   listSessions,
   listWorkspaces,
   sessionIdsToLayout,
+  type SessionMeta,
   updateWorkspace,
   type WorkspaceMemberInfo,
   type WorkspaceInfo,
@@ -36,6 +38,11 @@ interface WorkspacePreview {
   workspaceId: string;
   screens: Record<number, string>;
   updatedAt: number;
+}
+
+interface RestoreAction {
+  label: string;
+  command: string;
 }
 
 type AppMode = 'home' | 'workspace';
@@ -381,6 +388,7 @@ export function App() {
   const [port, setPort] = useState<number | null>(null);
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionMetas, setSessionMetas] = useState<Record<number, SessionMeta>>({});
   const [previews, setPreviews] = useState<Record<string, WorkspacePreview>>({});
   const [activeTab, setActiveTab] = useState(0);
   const [ready, setReady] = useState(false);
@@ -414,6 +422,32 @@ export function App() {
     [tabs],
   );
   const sessionById = useMemo(() => new Map(sessions.map((session) => [session.id, session])), [sessions]);
+
+  const restoreActionForSession = useMemo(() => {
+    return (sessionId?: number): RestoreAction | null => {
+      if (sessionId === undefined) return null;
+      const meta = sessionMetas[sessionId];
+      if (!meta) return null;
+
+      const claudeSid = (meta.claudeLastSessionId || meta.claudeSessionId) as string | undefined | null;
+      if (claudeSid) {
+        return {
+          label: 'restore claude',
+          command: `claude --dangerously-skip-permissions --resume ${claudeSid}\r`,
+        };
+      }
+
+      const codexSid = (meta.codexLastSessionId || meta.codexSessionId) as string | undefined | null;
+      if (codexSid) {
+        return {
+          label: 'restore codex',
+          command: `codex --dangerously-bypass-approvals-and-sandbox resume ${codexSid}\r`,
+        };
+      }
+
+      return null;
+    };
+  }, [sessionMetas]);
 
   useEffect(() => {
     tabsRef.current = tabs;
@@ -600,6 +634,62 @@ export function App() {
   }, [appMode, port, ready]);
 
   useEffect(() => {
+    if (appMode !== 'workspace' || port === null || !ready) return;
+    let cancelled = false;
+
+    const tick = async () => {
+      const hasPendingLocalPane = tabsRef.current.some((tab) => tab.panels.some((panel) => panel.sessionId === undefined));
+      if (hasPendingLocalPane) return;
+
+      const [workspaceList, sessionList] = await Promise.all([
+        listWorkspaces(port),
+        listSessions(port).catch(() => []),
+      ]);
+      if (cancelled) return;
+
+      setTabs((prev) => reconcileWorkspaceTabs(prev, workspaceList));
+      setSessions(sessionList.filter((session) => session.status !== 'dead'));
+    };
+
+    const interval = window.setInterval(() => { void tick(); }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [appMode, port, ready]);
+
+  useEffect(() => {
+    if (port === null) return;
+    const sessionIds = Array.from(new Set(
+      tabs.flatMap((tab) => tab.panels.map((panel) => panel.sessionId).filter((id): id is number => id !== undefined)),
+    ));
+    if (sessionIds.length === 0) return;
+
+    let cancelled = false;
+    void Promise.all(sessionIds.map(async (sessionId) => {
+      try {
+        const meta = await getSessionMeta(port, sessionId);
+        return [sessionId, meta] as const;
+      } catch {
+        return [sessionId, null] as const;
+      }
+    })).then((entries) => {
+      if (cancelled) return;
+      setSessionMetas((prev) => {
+        const next = { ...prev };
+        for (const [sessionId, meta] of entries) {
+          if (meta) next[sessionId] = meta;
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [tabs, port]);
+
+  useEffect(() => {
     if (appMode !== 'workspace') return;
     setTabs((prev) => {
       const tab = prev[activeTab];
@@ -735,11 +825,6 @@ export function App() {
       const nextPanels = [...tab.panels, makePanel()];
       return { ...tab, panels: nextPanels, focused: nextPanels.length - 1 };
     });
-  }
-
-  function terminateFocusedPane() {
-    if (!currentTab) return;
-    removePaneAt(currentTab.focused, { terminate: true });
   }
 
   function focusPrevPane() {
@@ -880,12 +965,6 @@ export function App() {
       if (key === '\\') {
         event.preventDefault();
         addSplit();
-        return;
-      }
-
-      if (key === 'd') {
-        event.preventDefault();
-        terminateFocusedPane();
         return;
       }
 
@@ -1217,6 +1296,7 @@ export function App() {
         {currentTab?.panels.map((panel, index) => {
           const isFocused = index === currentTab.focused;
           const panelSessionId = panel.sessionId;
+          const restoreAction = restoreActionForSession(panelSessionId);
           return (
             <div
               key={panel.key}
@@ -1232,6 +1312,19 @@ export function App() {
                   <span className="pane-title">{panelPrimaryLabel(panel, index)}</span>
                   {panelSecondaryLabel(panel) ? (
                     <span className="pane-title-meta">{panelSecondaryLabel(panel)}</span>
+                  ) : null}
+                  {panelSessionId !== undefined && restoreAction ? (
+                    <button
+                      className="pane-copy"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (!panelSessionId) return;
+                        muxRef.current?.send(panelSessionId, restoreAction.command);
+                      }}
+                      title={restoreAction.command.trim()}
+                    >
+                      {restoreAction.label}
+                    </button>
                   ) : null}
                   {panelSessionId !== undefined ? (
                     <button
@@ -1265,7 +1358,7 @@ export function App() {
                     event.stopPropagation();
                     removePaneAt(index, { terminate: true });
                   }}
-                  title="Terminate pane (Ctrl/Cmd+D)"
+                  title="Terminate pane"
                 >
                   ×
                 </button>
