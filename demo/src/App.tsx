@@ -228,9 +228,14 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
   }, [workspaces]);
 
   const deleteWorkspace = useCallback(async (wsId: string) => {
+    const workspace = workspaces.find((w) => w.id === wsId);
+    if (!workspace) return;
+    for (const sessionId of layoutToSessionIds(workspace.layout).filter((id) => id > 0)) {
+      mux.destroySession(sessionId);
+    }
     await apiDeleteWorkspace(wsId);
     setWorkspaces((prev) => prev.filter((w) => w.id !== wsId));
-  }, []);
+  }, [mux, workspaces]);
 
   return (
     <div style={{ padding: 32, fontFamily: 'monospace', color: '#ccc', maxWidth: 700 }}>
@@ -273,7 +278,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteWorkspace(ws.id); }}
                   style={{ ...closeBtnStyle, color: '#555', fontSize: 12 }}
-                  title="Delete workspace"
+                  title="Terminate workspace"
                 >
                   ×
                 </button>
@@ -449,22 +454,45 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     });
   }, []);
 
-  const removeAt = useCallback((index: number) => {
-    setPanels((prev) => {
-      const next = prev.filter((_, i) => i !== index);
-      setFocused((f) => {
-        if (next.length === 0) return 0;
-        if (f >= next.length) return next.length - 1;
-        if (f > index) return f - 1;
-        if (f === index) return Math.min(f, next.length - 1);
-        return f;
-      });
-      // sync surviving session ids
-      const ids = next.map((p) => p.sessionId).filter((id): id is number => id !== undefined);
-      syncWorkspace(ids);
-      return next;
+  const updatePanelsAfterRemoval = useCallback((prev: { key: string; sessionId?: number }[], index: number) => {
+    const next = prev.filter((_, i) => i !== index);
+    setFocused((f) => {
+      if (next.length === 0) return 0;
+      if (f >= next.length) return next.length - 1;
+      if (f > index) return f - 1;
+      if (f === index) return Math.min(f, next.length - 1);
+      return f;
     });
+    const ids = next.map((p) => p.sessionId).filter((id): id is number => id !== undefined);
+    syncWorkspace(ids);
+    return next.length === 0 ? [{ key: uuid() }] : next;
   }, [syncWorkspace]);
+
+  const detachAt = useCallback((index: number) => {
+    setPanels((prev) => {
+      const panel = prev[index];
+      if (panel?.sessionId !== undefined) mux.detachSession(panel.sessionId);
+      return updatePanelsAfterRemoval(prev, index);
+    });
+  }, [mux, updatePanelsAfterRemoval]);
+
+  const terminateAt = useCallback((index: number) => {
+    setPanels((prev) => {
+      const panel = prev[index];
+      if (panel?.sessionId !== undefined) mux.destroySession(panel.sessionId);
+      return updatePanelsAfterRemoval(prev, index);
+    });
+  }, [mux, updatePanelsAfterRemoval]);
+
+  const detachWorkspace = useCallback(() => {
+    setPanels((prev) => {
+      for (const panel of prev) {
+        if (panel.sessionId !== undefined) mux.detachSession(panel.sessionId);
+      }
+      syncWorkspace([]);
+      return [{ key: uuid() }];
+    });
+  }, [mux, syncWorkspace]);
 
   const handleCreated = useCallback((index: number, sessionId: number) => {
     setPanels((prev) => {
@@ -486,13 +514,13 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     const handler = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
       if (meta && e.key === '\\') { e.preventDefault(); add(); return; }
-      if (meta && e.key === 'w') { e.preventDefault(); removeAt(focused); return; }
+      if (meta && e.key.toLowerCase() === 'd') { e.preventDefault(); terminateAt(focused); return; }
       if (meta && e.code === 'ArrowLeft') { e.preventDefault(); focusPrev(); return; }
       if (meta && e.code === 'ArrowRight') { e.preventDefault(); focusNext(); return; }
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [add, removeAt, focusPrev, focusNext, focused]);
+  }, [add, terminateAt, focusPrev, focusNext, focused]);
 
   // 포커스 시 xterm textarea에 포커스
   useEffect(() => {
@@ -517,11 +545,12 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
         <span style={{ color: '#aaa', fontSize: 12 }}>{wsName}</span>
         <button onClick={add} style={btnStyle}>+ split</button>
+        <button onClick={detachWorkspace} style={btnStyle}>detach</button>
         <span style={{ color: '#666', fontSize: 12 }}>
           {panels.length} pane{panels.length > 1 ? 's' : ''} across {rows} row{rows > 1 ? 's' : ''}
         </span>
         <span style={{ color: '#444', fontSize: 11, marginLeft: 'auto' }}>
-          {'\u2318\\ split \u2003 \u2318W close \u2003 \u2318\u2190\u2192 navigate'}
+          {'\u2318\\ split \u2003 \u2318D terminate \u2003 \u2318\u2190\u2192 navigate'}
         </span>
       </div>
 
@@ -553,6 +582,18 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                     </span>
                     {panel.sessionId ? (
                       <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          detachAt(i);
+                        }}
+                        style={miniLinkBtnStyle}
+                        title="Detach pane"
+                      >
+                        detach
+                      </button>
+                    ) : null}
+                    {panel.sessionId ? (
+                      <button
                         onClick={async (e) => {
                           e.stopPropagation();
                           await copySessionUrl(panel.sessionId!);
@@ -564,11 +605,11 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                       </button>
                     ) : null}
                   </span>
-                  {panels.length > 1 && (
+                  {panel.sessionId !== undefined && (
                     <button
-                      onClick={(e) => { e.stopPropagation(); removeAt(i); }}
+                      onClick={(e) => { e.stopPropagation(); terminateAt(i); }}
                       style={closeBtnStyle}
-                      title="Close (⌘W)"
+                      title="Terminate (⌘D)"
                     >
                       ×
                     </button>

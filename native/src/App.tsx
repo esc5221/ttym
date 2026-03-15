@@ -83,7 +83,7 @@ function writeFontSmoothing(value: boolean) {
 
 function readAppMode(): AppMode {
   const raw = new URLSearchParams(window.location.search).get('mode');
-  return raw === 'home' ? 'home' : 'workspace';
+  return raw === 'workspace' ? 'workspace' : 'home';
 }
 
 function writeAppMode(mode: AppMode) {
@@ -146,15 +146,149 @@ function stripAnsi(value: string): string {
   return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[@-Z\\-_]/g, '');
 }
 
-function summarizeScreen(value: string): string {
-  const stripped = stripAnsi(value).replace(/\r/g, '');
-  const lines = stripped
-    .split('\n')
-    .map((line) => line.replace(/\s+$/g, ''))
-    .filter((line, index, array) => line.length > 0 || index < array.length - 1)
-    .slice(0, 12)
-    .map((line) => line.slice(0, 52));
-  return lines.join('\n').trim() || 'idle';
+function xterm256Color(code: number): string {
+  if (code < 16) {
+    const base = [
+      '#000000', '#cd3131', '#0dbc79', '#e5e510',
+      '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
+      '#666666', '#f14c4c', '#23d18b', '#f5f543',
+      '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
+    ];
+    return base[code] ?? '#d8e4f0';
+  }
+  if (code >= 16 && code <= 231) {
+    const n = code - 16;
+    const r = Math.floor(n / 36);
+    const g = Math.floor((n % 36) / 6);
+    const b = n % 6;
+    const channel = [0, 95, 135, 175, 215, 255];
+    return `rgb(${channel[r]}, ${channel[g]}, ${channel[b]})`;
+  }
+  const gray = 8 + (code - 232) * 10;
+  return `rgb(${gray}, ${gray}, ${gray})`;
+}
+
+function ansiToHtml(value: string): string {
+  let result = '';
+  let index = 0;
+  let column = 0;
+  let fg = '#d8e4f0';
+  let bg = 'transparent';
+  let bold = false;
+  let open = false;
+
+  const close = () => {
+    if (open) {
+      result += '</span>';
+      open = false;
+    }
+  };
+
+  const openSpan = () => {
+    close();
+    result += `<span style="color:${fg};background:${bg};font-weight:${bold ? 600 : 400}">`;
+    open = true;
+  };
+
+  openSpan();
+
+  while (index < value.length) {
+    const char = value[index];
+    if (char === '\u001b') {
+      const cursorForward = /^\u001b\[([0-9]*)C/.exec(value.slice(index));
+      if (cursorForward) {
+        const amount = Number(cursorForward[1] || '1');
+        result += ' '.repeat(Math.max(0, amount));
+        column += Math.max(0, amount);
+        index += cursorForward[0].length;
+        continue;
+      }
+
+      const cursorBackward = /^\u001b\[([0-9]*)D/.exec(value.slice(index));
+      if (cursorBackward) {
+        const amount = Number(cursorBackward[1] || '1');
+        column = Math.max(0, column - Math.max(0, amount));
+        index += cursorBackward[0].length;
+        continue;
+      }
+
+      const cursorAbsolute = /^\u001b\[([0-9]*)G/.exec(value.slice(index));
+      if (cursorAbsolute) {
+        const target = Math.max(0, Number(cursorAbsolute[1] || '1') - 1);
+        if (target > column) {
+          result += ' '.repeat(target - column);
+        }
+        column = target;
+        index += cursorAbsolute[0].length;
+        continue;
+      }
+
+      const match = /^\u001b\[([0-9;]*)m/.exec(value.slice(index));
+      if (match) {
+        const codes = match[1]
+          .split(';')
+          .filter(Boolean)
+          .map((code) => Number(code));
+        if (codes.length === 0) codes.push(0);
+
+        for (let i = 0; i < codes.length; i += 1) {
+          const code = codes[i];
+          if (code === 0) {
+            fg = '#d8e4f0';
+            bg = 'transparent';
+            bold = false;
+          } else if (code === 1) {
+            bold = true;
+          } else if (code === 22) {
+            bold = false;
+          } else if (code === 39) {
+            fg = '#d8e4f0';
+          } else if (code === 49) {
+            bg = 'transparent';
+          } else if (code >= 30 && code <= 37) {
+            fg = xterm256Color(code - 30);
+          } else if (code >= 90 && code <= 97) {
+            fg = xterm256Color(code - 82);
+          } else if (code >= 40 && code <= 47) {
+            bg = xterm256Color(code - 40);
+          } else if (code >= 100 && code <= 107) {
+            bg = xterm256Color(code - 92);
+          } else if (code === 38 && codes[i + 1] === 5 && typeof codes[i + 2] === 'number') {
+            fg = xterm256Color(codes[i + 2]);
+            i += 2;
+          } else if (code === 48 && codes[i + 1] === 5 && typeof codes[i + 2] === 'number') {
+            bg = xterm256Color(codes[i + 2]);
+            i += 2;
+          }
+        }
+
+        openSpan();
+        index += match[0].length;
+        continue;
+      }
+
+      const otherEscape = /^\u001b(?:[@-Z\\-_]|\[[0-9;?]*[ -/]*[@-~])/.exec(value.slice(index));
+      if (otherEscape) {
+        index += otherEscape[0].length;
+        continue;
+      }
+    }
+
+    if (char === '&') result += '&amp;';
+    else if (char === '<') result += '&lt;';
+    else if (char === '>') result += '&gt;';
+    else if (char === '\n') {
+      result += '\n';
+      column = 0;
+    } else if (char !== '\r') {
+      result += char;
+      column += 1;
+    }
+    index += 1;
+  }
+
+  close();
+  return result;
 }
 
 function reconcileWorkspaceTabs(prevTabs: WorkspaceTab[], workspaces: WorkspaceInfo[]): WorkspaceTab[] {
@@ -197,6 +331,7 @@ function reconcileWorkspaceTabs(prevTabs: WorkspaceTab[], workspaces: WorkspaceI
 export function App() {
   const muxRef = useRef<TerminalMux | null>(null);
   const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const tabsRef = useRef<WorkspaceTab[]>([]);
   const [port, setPort] = useState<number | null>(null);
   const [tabs, setTabs] = useState<WorkspaceTab[]>([]);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -233,6 +368,10 @@ export function App() {
     [tabs],
   );
   const sessionById = useMemo(() => new Map(sessions.map((session) => [session.id, session])), [sessions]);
+
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
 
   useEffect(() => {
     const syncFromLocation = () => {
@@ -287,7 +426,7 @@ export function App() {
       const screens = await Promise.all(previewIds.map(async (sessionId) => {
         try {
           const screen = await getSessionScreen(portValue, sessionId);
-          return [sessionId, summarizeScreen(screen)] as const;
+          return [sessionId, screen] as const;
         } catch {
           return [sessionId, 'unavailable'] as const;
         }
@@ -393,11 +532,8 @@ export function App() {
       if (cancelled) return;
 
       const liveSessions = sessionList.filter((session) => session.status !== 'dead');
-      let reconciledTabs: WorkspaceTab[] = [];
-      setTabs((prev) => {
-        reconciledTabs = reconcileWorkspaceTabs(prev, workspaceList);
-        return reconciledTabs;
-      });
+      const reconciledTabs = reconcileWorkspaceTabs(tabsRef.current, workspaceList);
+      setTabs(reconciledTabs);
       setSessions(liveSessions);
       void refreshWorkspacePreviews(port, reconciledTabs, liveSessions);
     };
@@ -440,6 +576,12 @@ export function App() {
     writeAppMode('workspace');
   }
 
+  function sessionIdsForTab(tab: WorkspaceTab): number[] {
+    return tab.panels
+      .map((panel) => panel.sessionId)
+      .filter((id): id is number => id !== undefined);
+  }
+
   async function openNativeWindow() {
     await createNativeWindow(buildWindowSearch('home'));
   }
@@ -467,24 +609,31 @@ export function App() {
     }
   }
 
-  async function closeWorkspaceTab(index: number) {
+  async function closeWorkspaceTab(index: number, options?: { terminate?: boolean }) {
     if (port === null) return;
     const tab = tabs[index];
     if (!tab) return;
+    const terminate = options?.terminate ?? false;
 
-    setBusy('closing workspace');
+    setBusy(terminate ? 'terminating workspace' : 'detaching workspace');
     setError(null);
     try {
+      if (terminate) {
+        for (const sessionId of sessionIdsForTab(tab)) {
+          muxRef.current?.destroySession(sessionId);
+        }
+      } else {
+        for (const sessionId of sessionIdsForTab(tab)) {
+          muxRef.current?.detachSession(sessionId);
+        }
+      }
+
       if (tabs.length === 1) {
         await deleteWorkspace(port, tab.workspaceId);
-        if (appMode === 'workspace') {
-          const replacement = await createWorkspace(port, workspaceNameForIndex(0), []);
-          setTabs([tabFromWorkspace(replacement)]);
-          setActiveTab(0);
-        } else {
-          setTabs([]);
-          setActiveTab(0);
-        }
+        setTabs([]);
+        setActiveTab(0);
+        setAppMode('home');
+        writeAppMode('home');
       } else {
         await deleteWorkspace(port, tab.workspaceId);
         setTabs((prev) => {
@@ -505,6 +654,29 @@ export function App() {
     }
   }
 
+  function updatePanelsAfterRemoval(tab: WorkspaceTab, index: number): WorkspaceTab {
+    const nextPanels = tab.panels.filter((_, i) => i !== index);
+    if (nextPanels.length === 0) {
+      return { ...tab, panels: [makePanel()], focused: 0 };
+    }
+    const nextFocused = Math.min(tab.focused, nextPanels.length - 1);
+    return { ...tab, panels: nextPanels, focused: nextFocused };
+  }
+
+  function removePaneAt(index: number, options?: { terminate?: boolean }) {
+    if (!currentTab) return;
+    const panel = currentTab.panels[index];
+    if (!panel) return;
+    const terminate = options?.terminate ?? false;
+
+    if (panel.sessionId !== undefined) {
+      if (terminate) muxRef.current?.destroySession(panel.sessionId);
+      else muxRef.current?.detachSession(panel.sessionId);
+    }
+
+    updateTab(activeTab, (tab) => updatePanelsAfterRemoval(tab, index));
+  }
+
   function addSplit() {
     if (!currentTab) return;
     updateTab(activeTab, (tab) => {
@@ -513,18 +685,9 @@ export function App() {
     });
   }
 
-  function removeFocusedPane() {
+  function terminateFocusedPane() {
     if (!currentTab) return;
-    if (currentTab.panels.length <= 1) {
-      void closeWorkspaceTab(activeTab);
-      return;
-    }
-
-    updateTab(activeTab, (tab) => {
-      const nextPanels = tab.panels.filter((_, i) => i !== tab.focused);
-      const nextFocused = Math.min(tab.focused, nextPanels.length - 1);
-      return { ...tab, panels: nextPanels, focused: nextFocused };
-    });
+    removePaneAt(currentTab.focused, { terminate: true });
   }
 
   function focusPrevPane() {
@@ -668,9 +831,9 @@ export function App() {
         return;
       }
 
-      if (key === 'w') {
+      if (key === 'd') {
         event.preventDefault();
-        removeFocusedPane();
+        terminateFocusedPane();
         return;
       }
 
@@ -831,45 +994,66 @@ export function App() {
                   tabs.map((tab, index) => {
                     const preview = previews[tab.workspaceId];
                     const attach = workspaceAttachState(tab);
-                    const previewPanels = tab.panels
-                      .map((panel) => panel.sessionId)
-                      .filter((id): id is number => id !== undefined)
-                      .slice(0, 4);
+                    const previewPanelCount = Math.max(1, Math.min(tab.panels.length, 4));
+                    const previewColumns = Math.max(1, Math.min(previewPanelCount, maxPanels));
+                    const previewRows = Math.max(1, Math.ceil(previewPanelCount / maxPanels));
 
                     return (
-                      <button
+                      <div
                         key={tab.workspaceId}
                         className={index === homeSelection - 1 ? 'preview-card selected' : 'preview-card'}
                         onClick={() => {
                           setHomeSelection(index + 1);
                           enterWorkspace(index);
                         }}
+                        role="button"
+                        tabIndex={0}
                       >
                         <div className="preview-card-head">
                           <div className="preview-card-title-group">
                             <span className="preview-card-title">{tab.name || `workspace ${index + 1}`}</span>
-                            <span className={`preview-badge ${attach.label}`}>{attach.label}</span>
+                            <span className="preview-card-actions">
+                              <span className={`preview-badge ${attach.label}`}>{attach.label}</span>
+                              <button
+                                className="preview-card-close"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void closeWorkspaceTab(index, { terminate: true });
+                                }}
+                                title="Terminate workspace"
+                              >
+                                ×
+                              </button>
+                            </span>
                           </div>
                           <span className="preview-card-meta">{attach.detail}</span>
                         </div>
                         <div
                           className="preview-card-grid"
-                          style={{ gridTemplateColumns: `repeat(${Math.max(1, Math.min(previewPanels.length || 1, 2))}, minmax(0, 1fr))` }}
+                          style={{
+                            gridTemplateColumns: `repeat(${previewColumns}, minmax(0, 1fr))`,
+                            gridTemplateRows: `repeat(${previewRows}, minmax(0, 1fr))`,
+                          }}
                         >
-                          {previewPanels.length === 0 ? (
+                          {tab.panels.length === 0 ? (
                             <div className="preview-pane empty">new workspace</div>
                           ) : (
-                            previewPanels.map((sessionId) => (
-                              <div key={sessionId} className="preview-pane">
-                                <div className="preview-pane-bar">#{sessionId}</div>
-                                <pre className="preview-pane-screen">
-                                  {preview?.screens[sessionId] ?? 'loading preview...'}
-                                </pre>
+                            tab.panels.slice(0, 4).map((panel, paneIndex) => (
+                              <div key={panel.key} className="preview-pane">
+                                <div className="preview-pane-bar">{panel.sessionId !== undefined ? `#${panel.sessionId}` : `pane ${paneIndex + 1}`}</div>
+                                {panel.sessionId !== undefined ? (
+                                  <div
+                                    className="preview-pane-screen"
+                                    dangerouslySetInnerHTML={{ __html: ansiToHtml(preview?.screens[panel.sessionId] ?? 'loading preview...') }}
+                                  />
+                                ) : (
+                                  <div className="preview-pane-screen empty">new pane</div>
+                                )}
                               </div>
                             ))
                           )}
                         </div>
-                      </button>
+                      </div>
                     );
                   })
                 )}
@@ -904,7 +1088,7 @@ export function App() {
                       className="tab-close"
                       onClick={(event) => {
                         event.stopPropagation();
-                        void closeWorkspaceTab(index);
+                        void closeWorkspaceTab(index, { terminate: true });
                       }}
                     >
                       ×
@@ -919,6 +1103,11 @@ export function App() {
           </div>
         </div>
         <div className="chrome-actions">
+          {currentTab ? (
+            <button className="chrome-settings" onClick={() => void closeWorkspaceTab(activeTab)} title="Detach workspace sessions">
+              detach
+            </button>
+          ) : null}
           <button className="chrome-settings" onClick={() => setSettingsOpen((open) => !open)} title="Workspace settings">
             settings
           </button>
@@ -989,6 +1178,18 @@ export function App() {
                   {panelSessionId !== undefined ? (
                     <button
                       className="pane-copy"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removePaneAt(index);
+                      }}
+                      title="Detach pane"
+                    >
+                      detach
+                    </button>
+                  ) : null}
+                  {panelSessionId !== undefined ? (
+                    <button
+                      className="pane-copy"
                       onClick={async (event) => {
                         event.stopPropagation();
                         await copySessionUrl(panelSessionId);
@@ -1000,25 +1201,16 @@ export function App() {
                   ) : null}
                   {panel.hasBell ? <span className="pane-bell" aria-label="Unread terminal bell" /> : null}
                 </span>
-                {currentTab.panels.length > 1 ? (
-                  <button
-                    className="pane-close"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      updateTab(activeTab, (tab) => {
-                        const nextPanels = tab.panels.filter((item) => item.key !== panel.key);
-                        if (nextPanels.length === 0) {
-                          return { ...tab, panels: [makePanel()], focused: 0 };
-                        }
-                        const nextFocused = Math.min(tab.focused, nextPanels.length - 1);
-                        return { ...tab, panels: nextPanels, focused: nextFocused };
-                      });
-                    }}
-                    title="Close pane (Ctrl/Cmd+W)"
-                  >
-                    ×
-                  </button>
-                ) : null}
+                <button
+                  className="pane-close"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    removePaneAt(index, { terminate: true });
+                  }}
+                  title="Terminate pane (Ctrl/Cmd+D)"
+                >
+                  ×
+                </button>
               </div>
               <div className="pane-terminal">
                 {ready && muxRef.current ? (

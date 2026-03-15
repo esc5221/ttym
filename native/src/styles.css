@@ -327,8 +327,8 @@ button {
 
 .home-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-  gap: calc(16px * var(--ui-scale));
+  grid-template-columns: minmax(calc(260px * var(--ui-scale)), calc(300px * var(--ui-scale))) minmax(0, 1fr);
+  gap: calc(18px * var(--ui-scale));
   min-height: 0;
 }
 
@@ -376,8 +376,8 @@ button {
 
 .home-preview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(calc(240px * var(--ui-scale)), 1fr));
-  gap: calc(10px * var(--ui-scale));
+  grid-template-columns: 1fr;
+  gap: calc(12px * var(--ui-scale));
   min-height: 0;
   padding: calc(8px * var(--ui-scale));
   overflow: auto;
@@ -447,7 +447,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: calc(10px * var(--ui-scale));
-  min-height: calc(220px * var(--ui-scale));
+  min-height: calc(430px * var(--ui-scale));
   padding: calc(12px * var(--ui-scale));
   border: none;
   background: rgba(17, 23, 31, 0.82);
@@ -478,6 +478,12 @@ button {
   gap: calc(10px * var(--ui-scale));
 }
 
+.preview-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(8px * var(--ui-scale));
+}
+
 .preview-card-title {
   color: var(--text);
   font-size: calc(14px * var(--ui-scale));
@@ -487,6 +493,24 @@ button {
 .preview-card-meta {
   color: var(--text-dim);
   font-size: calc(11px * var(--ui-scale));
+}
+
+.preview-card-close {
+  border: none;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+  width: calc(20px * var(--ui-scale));
+  height: calc(20px * var(--ui-scale));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 4px;
+}
+
+.preview-card-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
 }
 
 .preview-badge {
@@ -524,7 +548,7 @@ button {
 .preview-pane {
   display: flex;
   flex-direction: column;
-  min-height: calc(132px * var(--ui-scale));
+  min-height: calc(170px * var(--ui-scale));
   background: #0c1117;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
   overflow: hidden;
@@ -553,12 +577,21 @@ button {
   padding: calc(9px * var(--ui-scale));
   color: #d8e4f0;
   font-family: "SF Mono", Menlo, monospace;
-  font-size: calc(9px * var(--ui-scale));
-  line-height: 1.22;
+  font-size: calc(10px * var(--ui-scale));
+  line-height: 1.28;
   white-space: pre-wrap;
   word-break: break-word;
   overflow: hidden;
   flex: 1;
+  background: linear-gradient(180deg, rgba(6, 11, 17, 0.96), rgba(4, 9, 15, 0.98));
+  text-rendering: optimizeLegibility;
+}
+
+.preview-pane-screen.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
 }
 
 .home-session {
