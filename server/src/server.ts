@@ -63,6 +63,7 @@ function minAckTrim(manager: SessionManager, sessionId: number) {
 
 export interface TtymServer {
   manager: SessionManager;
+  agentBus: unknown | null;
   wss: WebSocketServer;
   httpServer: ReturnType<typeof createHttpServer>;
   close: () => Promise<void>;
@@ -214,9 +215,16 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
 
   // ───── Workspace API ─────
 
+  // GET /api/projects
+  if (path === '/api/projects' && req.method === 'GET') {
+    json(200, workspaceStore.listProjects());
+    return true;
+  }
+
   // GET /api/workspaces
   if (path === '/api/workspaces' && req.method === 'GET') {
-    json(200, workspaceStore.list());
+    const project = url.searchParams.get('project');
+    json(200, project ? workspaceStore.list().filter((workspace) => workspace.project === project) : workspaceStore.list());
     return true;
   }
 
@@ -224,10 +232,10 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
   if (path === '/api/workspaces' && req.method === 'POST') {
     readBody().then((body) => {
       try {
-        const { id, name, layout } = JSON.parse(body);
+        const { id, project, name, layout, members } = JSON.parse(body);
         if (!id || !name || !layout) { json(400, { error: 'id, name, layout required' }); return; }
-        const ws = workspaceStore.create(id, name, layout);
-        log(`WORKSPACE CREATE id=${id} name=${name}`);
+        const ws = workspaceStore.create(id, name, layout, project || 'default', members || []);
+        log(`WORKSPACE CREATE id=${id} project=${ws.project} name=${name}`);
         json(201, ws);
       } catch {
         json(400, { error: 'invalid body' });
@@ -282,12 +290,21 @@ export async function createServer(port: number): Promise<TtymServer> {
   const workspaceStore = new WorkspaceStore(manager.runtimeDir);
   await workspaceStore.load();
 
+  // Agent Bus is optional and currently disabled in the bundled server path.
+  const agentBus: unknown | null = null;
+  const fileBridge: { stop?: () => void } | null = null;
+  const handleAgentRequest: ((req: IncomingMessage, res: ServerResponse) => boolean) | null = null;
+
+  // Inject TTYM_BUS_URL into SessionManager for holder env
+  manager.setBusUrl(`http://127.0.0.1:${port}/api`);
+
   // Remap workspace layout sessionIds after reboot restore
   if (manager.lastIdMap.size > 0) {
     workspaceStore.remapSessionIds(manager.lastIdMap);
   }
 
   const httpServer = createHttpServer((req, res) => {
+    if (handleAgentRequest && handleAgentRequest(req, res)) return;
     if (handleHttpApi(manager, workspaceStore, req, res)) return;
     res.writeHead(404);
     res.end('not found');
@@ -632,9 +649,12 @@ export async function createServer(port: number): Promise<TtymServer> {
 
   return {
     manager,
+    agentBus,
     wss,
     httpServer,
     close: async () => {
+      fileBridge?.stop();
+      agentBus?.close();
       await manager.shutdown(); // persist + don't kill holders
       await workspaceStore.save(); // persist workspace layouts
       await new Promise<void>((resolve, reject) => {

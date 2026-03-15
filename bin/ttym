@@ -6,6 +6,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOME_DIR = resolve(process.env.HOME || '/tmp', '.ttym');
@@ -48,11 +49,23 @@ function fetchJson(port, path) {
 }
 
 function fetchPatch(port, path, body) {
+  return fetchRequest(port, 'PATCH', path, body);
+}
+
+function fetchPost(port, path, body) {
+  return fetchRequest(port, 'POST', path, body);
+}
+
+function fetchDelete(port, path) {
+  return fetchRequest(port, 'DELETE', path);
+}
+
+function fetchRequest(port, method, path, body) {
   return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body);
+    const data = body === undefined ? null : JSON.stringify(body);
     const req = http.request(`http://127.0.0.1:${port}${path}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+      method,
+      headers: data === null ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
     }, (res) => {
       let buf = '';
       res.on('data', (c) => buf += c);
@@ -62,9 +75,27 @@ function fetchPatch(port, path, body) {
     });
     req.on('error', reject);
     req.setTimeout(2000, () => { req.destroy(); reject(new Error('timeout')); });
-    req.write(data);
+    if (data !== null) req.write(data);
     req.end();
   });
+}
+
+function hasFlag(flag) {
+  return process.argv.includes(flag);
+}
+
+function readOption(args, name) {
+  const index = args.indexOf(name);
+  if (index === -1) return null;
+  return args[index + 1] ?? null;
+}
+
+function printOutput(value, asJson = false) {
+  if (asJson) {
+    console.log(JSON.stringify(value, null, 2));
+    return;
+  }
+  console.log(value);
 }
 
 // ───── Commands ─────
@@ -262,6 +293,420 @@ async function cmdMeta() {
     console.error('failed to connect to ttym server');
     process.exit(1);
   }
+}
+
+function sessionIdsToLayout(ids) {
+  if (ids.length === 0) return { type: 'pane', sessionId: 0 };
+  if (ids.length === 1) return { type: 'pane', sessionId: ids[0] };
+  return {
+    type: 'split',
+    axis: 'row',
+    sizes: ids.map(() => 1 / ids.length),
+    children: ids.map((id) => ({ type: 'pane', sessionId: id })),
+  };
+}
+
+async function listProjects(port) {
+  return await fetchJson(port, '/api/projects');
+}
+
+async function listWorkspaces(port, project = null) {
+  const suffix = project ? `?project=${encodeURIComponent(project)}` : '';
+  return await fetchJson(port, `/api/workspaces${suffix}`);
+}
+
+async function getWorkspaceById(port, id) {
+  return await fetchJson(port, `/api/workspaces/${encodeURIComponent(id)}`);
+}
+
+function normalizeAddressToken(value) {
+  if (!value) return null;
+  return value.replace(/^\/+|\/+$/g, '');
+}
+
+function getSessionIdsFromLayout(node) {
+  if (!node) return [];
+  if (node.type === 'pane') return node.sessionId > 0 ? [node.sessionId] : [];
+  return Array.isArray(node.children) ? node.children.flatMap(getSessionIdsFromLayout) : [];
+}
+
+function findWorkspaceBySessionId(workspaces, sessionId) {
+  return workspaces.find((workspace) => getSessionIdsFromLayout(workspace.layout).includes(sessionId)) || null;
+}
+
+async function resolveCurrentWorkspace(port) {
+  const sid = process.env.TTYM_SESSION_ID;
+  if (!sid || isNaN(parseInt(sid, 10))) {
+    console.error('current workspace resolution requires TTYM_SESSION_ID');
+    process.exit(1);
+  }
+  const sessionId = parseInt(sid, 10);
+  const workspaces = await listWorkspaces(port);
+  const workspace = findWorkspaceBySessionId(workspaces, sessionId);
+  if (!workspace) {
+    console.error(`current session #${sessionId} is not assigned to a workspace`);
+    process.exit(1);
+  }
+  return workspace;
+}
+
+async function resolveWorkspace(port, token) {
+  if (!token || token === '--current') {
+    return resolveCurrentWorkspace(port);
+  }
+
+  const normalized = normalizeAddressToken(token);
+  if (!normalized) {
+    console.error('workspace target is required');
+    process.exit(1);
+  }
+
+  const direct = await getWorkspaceById(port, normalized);
+  if (direct?.id) return direct;
+
+  const workspaces = await listWorkspaces(port);
+  const slash = normalized.indexOf('/');
+  if (slash !== -1) {
+    const [project, name] = [normalized.slice(0, slash), normalized.slice(slash + 1)];
+    const match = workspaces.find((workspace) => workspace.project === project && workspace.name === name);
+    if (match) return match;
+  } else {
+    const exact = workspaces.filter((workspace) => workspace.name === normalized);
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1) {
+      console.error(`workspace name is ambiguous: ${normalized}`);
+      process.exit(1);
+    }
+  }
+
+  console.error(`workspace not found: ${token}`);
+  process.exit(1);
+}
+
+function requireMember(workspace, token) {
+  const normalized = normalizeAddressToken(token);
+  if (!normalized) {
+    console.error('member target is required');
+    process.exit(1);
+  }
+
+  const byName = (workspace.members || []).filter((member) => member.name === normalized);
+  if (byName.length === 1) return byName[0];
+  if (byName.length > 1) {
+    console.error(`member name is ambiguous: ${normalized}`);
+    process.exit(1);
+  }
+
+  if (/^\d+$/.test(normalized)) {
+    const sessionId = parseInt(normalized, 10);
+    const byId = (workspace.members || []).find((member) => member.sessionId === sessionId);
+    if (byId) return byId;
+  }
+
+  console.error(`member not found: ${token}`);
+  process.exit(1);
+}
+
+function updateWorkspaceMembers(workspace, members) {
+  return {
+    ...workspace,
+    members,
+    layout: sessionIdsToLayout(members.map((member) => member.sessionId)),
+  };
+}
+
+async function patchSessionMeta(port, sessionId, patch) {
+  return await fetchPatch(port, `/api/sessions/${sessionId}/meta`, patch);
+}
+
+function memberAddress(workspace, member) {
+  return `${workspace.project}/${workspace.name}/${member.name}`;
+}
+
+async function cmdCurrent() {
+  const port = getPort();
+  const asJson = hasFlag('--json');
+  const workspace = await resolveCurrentWorkspace(port);
+  const sessionId = parseInt(process.env.TTYM_SESSION_ID, 10);
+  const member = (workspace.members || []).find((entry) => entry.sessionId === sessionId) || null;
+  const result = {
+    project: workspace.project,
+    workspace: {
+      id: workspace.id,
+      name: workspace.name,
+      address: `${workspace.project}/${workspace.name}`,
+    },
+    member: member ? {
+      name: member.name,
+      role: member.role || null,
+      sessionId: member.sessionId,
+      address: memberAddress(workspace, member),
+    } : null,
+    sessionId,
+  };
+  if (asJson) return printOutput(result, true);
+  console.log(`project:   ${result.project}`);
+  console.log(`workspace: ${result.workspace.address}`);
+  if (result.member) console.log(`member:    ${result.member.name} (#${result.member.sessionId})`);
+  console.log(`session:   #${result.sessionId}`);
+}
+
+async function cmdProject() {
+  const action = process.argv[3];
+  const port = getPort();
+  const asJson = hasFlag('--json');
+
+  if (action === 'list') {
+    const projects = await listProjects(port);
+    if (asJson) return printOutput(projects, true);
+    for (const project of projects) {
+      console.log(`${project.name}  workspaces=${project.workspaceCount} members=${project.memberCount}`);
+    }
+    return;
+  }
+
+  console.log('usage: ttym project list [--json]');
+  process.exit(1);
+}
+
+async function cmdWorkspace() {
+  const action = process.argv[3];
+  const args = process.argv.slice(4);
+  const port = getPort();
+  const asJson = hasFlag('--json');
+
+  if (action === 'list') {
+    const targetProject = args[0] && !args[0].startsWith('--') ? args[0] : null;
+    const workspaces = await listWorkspaces(port, targetProject);
+    if (asJson) return printOutput(workspaces, true);
+    for (const workspace of workspaces) {
+      console.log(`${workspace.project}/${workspace.name}  id=${workspace.id}  members=${workspace.members.length}`);
+    }
+    return;
+  }
+
+  if (action === 'info') {
+    const token = args[0];
+    const workspace = await resolveWorkspace(port, token);
+    const result = {
+      workspaceId: workspace.id,
+      project: workspace.project,
+      name: workspace.name,
+      address: `${workspace.project}/${workspace.name}`,
+      members: (workspace.members || []).map((member) => ({
+        name: member.name,
+        role: member.role || null,
+        sessionId: member.sessionId,
+        status: null,
+      })),
+    };
+    const sessions = await fetchJson(port, '/api/sessions').catch(() => []);
+    const sessionById = new Map((Array.isArray(sessions) ? sessions : []).map((session) => [session.id, session]));
+    result.members = result.members.map((member) => ({
+      ...member,
+      status: sessionById.get(member.sessionId)?.status ?? 'missing',
+      cmd: sessionById.get(member.sessionId)?.cmd ?? [],
+    }));
+    if (asJson) return printOutput(result, true);
+    console.log(`${result.address} (${result.workspaceId})`);
+    for (const member of result.members) {
+      console.log(`  - ${member.name}  #${member.sessionId}  [${member.status}] ${member.cmd.join(' ')}`);
+    }
+    return;
+  }
+
+  if (action === 'create') {
+    const project = args[0] && !args[0].startsWith('--') ? args[0] : 'default';
+    const name = readOption(args, '--name');
+    if (!name) {
+      console.error('usage: ttym workspace create <project> --name <name> [--json]');
+      process.exit(1);
+    }
+    const id = randomUUID().slice(0, 8);
+    const workspace = await fetchPost(port, '/api/workspaces', {
+      id,
+      project,
+      name,
+      layout: { type: 'pane', sessionId: 0 },
+      members: [],
+    });
+    if (asJson) return printOutput(workspace, true);
+    console.log(`${workspace.project}/${workspace.name} (${workspace.id})`);
+    return;
+  }
+
+  if (action === 'delete') {
+    const workspace = await resolveWorkspace(port, args[0]);
+    for (const member of workspace.members || []) {
+      await fetchDelete(port, `/api/sessions/${member.sessionId}`);
+    }
+    await fetchDelete(port, `/api/workspaces/${encodeURIComponent(workspace.id)}`);
+    if (asJson) return printOutput({ ok: true, deleted: workspace.id }, true);
+    console.log(`deleted ${workspace.project}/${workspace.name}`);
+    return;
+  }
+
+  if (action === 'rename') {
+    const workspace = await resolveWorkspace(port, args[0]);
+    const name = readOption(args, '--name');
+    if (!name) {
+      console.error('usage: ttym workspace rename <workspace|--current> --name <name>');
+      process.exit(1);
+    }
+    const next = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(workspace.id)}`, { name });
+    if (asJson) return printOutput(next, true);
+    console.log(`${next.project}/${next.name}`);
+    return;
+  }
+
+  if (action === 'add') {
+    const workspace = await resolveWorkspace(port, args[0]);
+    const name = readOption(args, '--name');
+    const role = readOption(args, '--role');
+    const cmdIndex = args.indexOf('--cmd');
+    const cmd = cmdIndex !== -1 ? args.slice(cmdIndex + 1).filter((value) => value !== '--json') : [process.env.SHELL || '/bin/bash'];
+    const latestWorkspace = await getWorkspaceById(port, workspace.id) || workspace;
+    const usedNames = new Set((latestWorkspace.members || []).map((member) => member.name));
+    let memberName = name || 'term-1';
+    if (!name) {
+      let index = 1;
+      while (usedNames.has(`term-${index}`)) index += 1;
+      memberName = `term-${index}`;
+    } else if (usedNames.has(name)) {
+      console.error(`member name already exists: ${name}`);
+      process.exit(1);
+    }
+    const created = await fetchPost(port, '/api/sessions', { cmd, cols: 80, rows: 24 });
+    const nextMembers = [
+      ...(latestWorkspace.members || []),
+      { sessionId: created.id, name: memberName, role: role || undefined, tags: [], createdAt: Date.now(), updatedAt: Date.now() },
+    ];
+    const updated = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(latestWorkspace.id)}`, {
+      members: nextMembers,
+      layout: sessionIdsToLayout(nextMembers.map((member) => member.sessionId)),
+    });
+    await patchSessionMeta(port, created.id, {
+      project: updated.project,
+      workspaceId: updated.id,
+      workspaceName: updated.name,
+      memberName,
+      role: role || null,
+      name: memberName,
+    });
+    const member = updated.members.find((entry) => entry.sessionId === created.id);
+    const result = {
+      workspace: `${updated.project}/${updated.name}`,
+      member: {
+        ...member,
+        address: memberAddress(updated, member),
+      },
+      session: created,
+    };
+    if (asJson) return printOutput(result, true);
+    console.log(`added ${result.member.address} -> #${created.id}`);
+    return;
+  }
+
+  if (action === 'remove' || action === 'detach' || action === 'terminate') {
+    const workspace = await resolveWorkspace(port, args[0]);
+    const latestWorkspace = await getWorkspaceById(port, workspace.id) || workspace;
+    const member = requireMember(latestWorkspace, args[1]);
+    const nextMembers = (latestWorkspace.members || []).filter((entry) => entry.sessionId !== member.sessionId);
+    await fetchPatch(port, `/api/workspaces/${encodeURIComponent(latestWorkspace.id)}`, {
+      members: nextMembers,
+      layout: sessionIdsToLayout(nextMembers.map((entry) => entry.sessionId)),
+    });
+    if (action === 'detach') {
+      await patchSessionMeta(port, member.sessionId, {
+        project: null,
+        workspaceId: null,
+        workspaceName: null,
+      });
+    }
+    if (action === 'remove' || action === 'terminate') {
+      await fetchDelete(port, `/api/sessions/${member.sessionId}`);
+    }
+    const result = { ok: true, action, workspace: `${latestWorkspace.project}/${latestWorkspace.name}`, member: member.name, sessionId: member.sessionId };
+    if (asJson) return printOutput(result, true);
+    console.log(`${action}d ${latestWorkspace.project}/${latestWorkspace.name}/${member.name} (#${member.sessionId})`);
+    return;
+  }
+
+  if (action === 'send') {
+    const sep = args.indexOf('--');
+    const payload = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
+    const workspace = await resolveWorkspace(port, args[0]);
+    const member = requireMember(workspace, args[1]);
+    if (!payload) {
+      console.error('usage: ttym workspace send <workspace|--current> <member> -- "command\\n"');
+      process.exit(1);
+    }
+    const result = await fetchPost(port, `/api/sessions/${member.sessionId}/send`, { data: payload });
+    if (asJson) return printOutput(result, true);
+    console.log(`sent to ${workspace.project}/${workspace.name}/${member.name}`);
+    return;
+  }
+
+  if (action === 'screen') {
+    const workspace = await resolveWorkspace(port, args[0]);
+    const member = requireMember(workspace, args[1]);
+    const result = await fetchJson(port, `/api/sessions/${member.sessionId}/screen`);
+    if (asJson) return printOutput({
+      workspace: `${workspace.project}/${workspace.name}`,
+      member: member.name,
+      sessionId: member.sessionId,
+      screen: result?.screen ?? '',
+    }, true);
+    process.stdout.write(result?.screen ?? '');
+    return;
+  }
+
+  if (action === 'member' && args[0] === 'rename') {
+    const workspace = await resolveWorkspace(port, args[1]);
+    const latestWorkspace = await getWorkspaceById(port, workspace.id) || workspace;
+    const member = requireMember(latestWorkspace, args[2]);
+    const name = readOption(args, '--name');
+    if (!name) {
+      console.error('usage: ttym workspace member rename <workspace|--current> <member> --name <name>');
+      process.exit(1);
+    }
+    if ((latestWorkspace.members || []).some((entry) => entry.sessionId !== member.sessionId && entry.name === name)) {
+      console.error(`member name already exists: ${name}`);
+      process.exit(1);
+    }
+    const nextMembers = (latestWorkspace.members || []).map((entry) => entry.sessionId === member.sessionId
+      ? { ...entry, name, updatedAt: Date.now() }
+      : entry);
+    const updated = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(latestWorkspace.id)}`, { members: nextMembers });
+    await patchSessionMeta(port, member.sessionId, {
+      project: updated.project,
+      workspaceId: updated.id,
+      workspaceName: updated.name,
+      memberName: name,
+      name,
+    });
+    const renamed = updated.members.find((entry) => entry.sessionId === member.sessionId);
+    if (asJson) return printOutput(renamed, true);
+    console.log(`${updated.project}/${updated.name}/${renamed.name}`);
+    return;
+  }
+
+  console.log('usage: ttym workspace <command>');
+  console.log('');
+  console.log('commands:');
+  console.log('  list [project] [--json]');
+  console.log('  info <workspace|--current> [--json]');
+  console.log('  create <project> --name <name> [--json]');
+  console.log('  rename <workspace|--current> --name <name>');
+  console.log('  delete <workspace|--current> [--json]');
+  console.log('  add <workspace|--current> [--name <name>] [--role <role>] [--cmd ...] [--json]');
+  console.log('  remove <workspace|--current> <member> [--json]');
+  console.log('  detach <workspace|--current> <member> [--json]');
+  console.log('  terminate <workspace|--current> <member> [--json]');
+  console.log('  send <workspace|--current> <member> -- \"command\\\\n\"');
+  console.log('  screen <workspace|--current> <member> [--json]');
+  console.log('  member rename <workspace|--current> <member> --name <name>');
+  process.exit(1);
 }
 
 // ───── Agent Integration ─────
@@ -522,6 +967,9 @@ switch (cmd) {
   case 'stop':    cmdStop(); break;
   case 'restart': cmdRestart(); break;
   case 'status':  await cmdStatus(); break;
+  case 'current': await cmdCurrent(); break;
+  case 'project': await cmdProject(); break;
+  case 'workspace': await cmdWorkspace(); break;
   case 'meta':    await cmdMeta(); break;
   case 'agent':   await cmdAgent(); break;
   case 'hook':    await cmdAgent(); break; // legacy alias
@@ -534,6 +982,9 @@ switch (cmd) {
     console.log('  stop                         Stop server (holders survive)');
     console.log('  restart                      Restart server');
     console.log('  status                       Show server & session info');
+    console.log('  current                      Show current project/workspace/member context');
+    console.log('  project list                 List projects');
+    console.log('  workspace <command>          Workspace/member control plane');
     console.log('  meta <id> [--set k=v]        Session metadata (get/set)');
     console.log('  agent install <agent>        Install agent hook (claude, codex)');
     console.log('  agent uninstall <agent>      Remove agent hook');

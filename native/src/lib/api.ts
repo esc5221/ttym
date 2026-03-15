@@ -16,10 +16,19 @@ export type LayoutNode = PaneNode | SplitNode;
 
 export interface WorkspaceInfo {
   id: string;
+  project: string;
   name: string;
   layout: LayoutNode;
+  members: WorkspaceMemberInfo[];
   createdAt: number;
   updatedAt: number;
+}
+
+export interface WorkspaceMemberInfo {
+  sessionId: number;
+  name: string;
+  role?: string;
+  tags?: string[];
 }
 
 async function asJson<T>(res: Response): Promise<T> {
@@ -33,8 +42,10 @@ export async function listSessions(port: number): Promise<SessionInfo[]> {
   return asJson(await fetch(`http://127.0.0.1:${port}/api/sessions`));
 }
 
-export async function listWorkspaces(port: number): Promise<WorkspaceInfo[]> {
-  return asJson(await fetch(`http://127.0.0.1:${port}/api/workspaces`));
+export async function listWorkspaces(port: number, project?: string): Promise<WorkspaceInfo[]> {
+  const url = new URL(`http://127.0.0.1:${port}/api/workspaces`);
+  if (project) url.searchParams.set('project', project);
+  return asJson(await fetch(url));
 }
 
 export async function getSessionScreen(port: number, sessionId: number): Promise<string> {
@@ -61,6 +72,7 @@ export function sessionIdsToLayout(ids: number[]): LayoutNode {
 export async function createWorkspace(port: number, name: string, sessionIds: number[] = []): Promise<WorkspaceInfo> {
   const body = {
     id: crypto.randomUUID().slice(0, 8),
+    project: 'default',
     name,
     layout: sessionIdsToLayout(sessionIds),
   };
@@ -75,7 +87,7 @@ export async function createWorkspace(port: number, name: string, sessionIds: nu
 export async function updateWorkspace(
   port: number,
   id: string,
-  patch: { name?: string; layout?: LayoutNode },
+  patch: { name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[] },
 ): Promise<WorkspaceInfo> {
   return asJson(await fetch(`http://127.0.0.1:${port}/api/workspaces/${encodeURIComponent(id)}`, {
     method: 'PATCH',

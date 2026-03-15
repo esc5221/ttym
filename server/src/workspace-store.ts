@@ -19,15 +19,39 @@ export type LayoutNode = PaneNode | SplitNode;
 
 export interface WorkspaceInfo {
   id: string;
+  project: string;
+  name: string;
+  layout: LayoutNode;
+  members: WorkspaceMemberInfo[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkspaceMemberInfo {
+  sessionId: number;
+  name: string;
+  role?: string;
+  tags?: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface StoreFile {
+  version: 2;
+  workspaces: WorkspaceInfo[];
+}
+
+interface LegacyWorkspaceInfo {
+  id: string;
   name: string;
   layout: LayoutNode;
   createdAt: number;
   updatedAt: number;
 }
 
-interface StoreFile {
+interface LegacyStoreFile {
   version: 1;
-  workspaces: WorkspaceInfo[];
+  workspaces: LegacyWorkspaceInfo[];
 }
 
 // ───── WorkspaceStore ─────
@@ -44,17 +68,28 @@ export class WorkspaceStore {
   async load(): Promise<void> {
     try {
       const raw = await readFile(this.filePath, 'utf8');
-      const data: StoreFile = JSON.parse(raw);
-      if (data.version !== 1 || !Array.isArray(data.workspaces)) return;
-      for (const ws of data.workspaces) {
-        this.workspaces.set(ws.id, ws);
+      const data = JSON.parse(raw) as StoreFile | LegacyStoreFile;
+      if ((data as StoreFile).version === 2 && Array.isArray((data as StoreFile).workspaces)) {
+        for (const ws of (data as StoreFile).workspaces) {
+          this.workspaces.set(ws.id, this.normalizeWorkspace(ws));
+        }
+        return;
+      }
+      if ((data as LegacyStoreFile).version === 1 && Array.isArray((data as LegacyStoreFile).workspaces)) {
+        for (const ws of (data as LegacyStoreFile).workspaces) {
+          this.workspaces.set(ws.id, this.normalizeWorkspace({
+            ...ws,
+            project: 'default',
+            members: [],
+          }));
+        }
       }
     } catch {}
   }
 
   async save(): Promise<void> {
     const data: StoreFile = {
-      version: 1,
+      version: 2,
       workspaces: Array.from(this.workspaces.values()),
     };
     const tmpPath = this.filePath + '.tmp';
@@ -77,23 +112,56 @@ export class WorkspaceStore {
     return Array.from(this.workspaces.values());
   }
 
+  listProjects(): Array<{ name: string; workspaceCount: number; memberCount: number }> {
+    const stats = new Map<string, { workspaceCount: number; memberCount: number }>();
+    for (const workspace of this.workspaces.values()) {
+      const entry = stats.get(workspace.project) ?? { workspaceCount: 0, memberCount: 0 };
+      entry.workspaceCount += 1;
+      entry.memberCount += workspace.members.length;
+      stats.set(workspace.project, entry);
+    }
+    return Array.from(stats.entries())
+      .map(([name, entry]) => ({ name, ...entry }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   get(id: string): WorkspaceInfo | undefined {
     return this.workspaces.get(id);
   }
 
-  create(id: string, name: string, layout: LayoutNode): WorkspaceInfo {
+  create(
+    id: string,
+    name: string,
+    layout: LayoutNode,
+    project = 'default',
+    members: WorkspaceMemberInfo[] = [],
+  ): WorkspaceInfo {
     const now = Date.now();
-    const ws: WorkspaceInfo = { id, name, layout, createdAt: now, updatedAt: now };
+    const ws = this.normalizeWorkspace({
+      id,
+      project,
+      name,
+      layout,
+      members,
+      createdAt: now,
+      updatedAt: now,
+    });
     this.workspaces.set(id, ws);
     this.scheduleSave();
     return ws;
   }
 
-  update(id: string, patch: { name?: string; layout?: LayoutNode }): WorkspaceInfo | null {
+  update(
+    id: string,
+    patch: { project?: string; name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[] },
+  ): WorkspaceInfo | null {
     const ws = this.workspaces.get(id);
     if (!ws) return null;
+    if (patch.project !== undefined) ws.project = patch.project;
     if (patch.name !== undefined) ws.name = patch.name;
     if (patch.layout !== undefined) ws.layout = patch.layout;
+    if (patch.members !== undefined) ws.members = patch.members;
+    this.reconcileWorkspace(ws);
     ws.updatedAt = Date.now();
     this.scheduleSave();
     return ws;
@@ -114,9 +182,62 @@ export class WorkspaceStore {
         ws.updatedAt = Date.now();
         changed = true;
       }
+      for (const member of ws.members) {
+        const nextId = idMap.get(member.sessionId);
+        if (nextId !== undefined) {
+          member.sessionId = nextId;
+          member.updatedAt = Date.now();
+          changed = true;
+        }
+      }
+      this.reconcileWorkspace(ws);
     }
     if (changed) this.scheduleSave();
   }
+
+  private normalizeWorkspace(ws: WorkspaceInfo): WorkspaceInfo {
+    const normalized: WorkspaceInfo = {
+      ...ws,
+      project: ws.project || 'default',
+      members: Array.isArray(ws.members) ? ws.members.map((member) => ({ ...member })) : [],
+    };
+    this.reconcileWorkspace(normalized);
+    return normalized;
+  }
+
+  private reconcileWorkspace(ws: WorkspaceInfo): void {
+    const sessionIds = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+    const now = Date.now();
+    const memberBySession = new Map(ws.members.map((member) => [member.sessionId, member]));
+    const usedNames = new Set<string>();
+
+    ws.members = sessionIds.map((sessionId, index) => {
+      const existing = memberBySession.get(sessionId);
+      const preferredName = existing?.name && !usedNames.has(existing.name)
+        ? existing.name
+        : this.nextMemberName(usedNames, index + 1);
+      usedNames.add(preferredName);
+      return {
+        sessionId,
+        name: preferredName,
+        role: existing?.role,
+        tags: existing?.tags ?? [],
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: existing?.updatedAt ?? now,
+      };
+    });
+  }
+
+  private nextMemberName(usedNames: Set<string>, start: number): string {
+    let index = start;
+    while (usedNames.has(`term-${index}`)) index += 1;
+    return `term-${index}`;
+  }
+}
+
+function layoutToSessionIds(node: LayoutNode): number[] {
+  if (node.type === 'pane') return [node.sessionId];
+  return node.children.flatMap(layoutToSessionIds);
 }
 
 /** Recursively remap sessionIds in a layout tree. Returns true if anything changed. */

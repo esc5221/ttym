@@ -15,10 +15,21 @@ interface PaneNode { type: 'pane'; sessionId: number; }
 interface SplitNode { type: 'split'; axis: 'row' | 'col'; sizes: number[]; children: LayoutNode[]; }
 type LayoutNode = PaneNode | SplitNode;
 
+interface WorkspaceMember {
+  sessionId: number;
+  name: string;
+  role?: string;
+  tags?: string[];
+  createdAt?: number;
+  updatedAt?: number;
+}
+
 interface Workspace {
   id: string;
+  project: string;
   name: string;
   layout: LayoutNode;
+  members: WorkspaceMember[];
   createdAt: number;
   updatedAt: number;
 }
@@ -120,6 +131,31 @@ async function apiCreateWorkspace(ws: { id: string; name: string; layout: Layout
   } catch { return null; }
 }
 
+function workspaceLabel(workspace: Workspace): string {
+  return workspace.project && workspace.project !== 'default'
+    ? `${workspace.project}/${workspace.name}`
+    : workspace.name;
+}
+
+function memberNameBySession(workspace: Workspace): Map<number, string> {
+  return new Map((workspace.members || []).map((member) => [member.sessionId, member.name]));
+}
+
+function memberLabel(name: string | undefined, sessionId: number): string {
+  return name ? `${name} · #${sessionId}` : `#${sessionId}`;
+}
+
+function sessionWorkspaceMembership(workspaces: Workspace[]): Map<number, { workspace: Workspace; memberName?: string }> {
+  const membership = new Map<number, { workspace: Workspace; memberName?: string }>();
+  for (const workspace of workspaces) {
+    const names = memberNameBySession(workspace);
+    for (const sessionId of layoutToSessionIds(workspace.layout).filter((id) => id > 0)) {
+      membership.set(sessionId, { workspace, memberName: names.get(sessionId) });
+    }
+  }
+  return membership;
+}
+
 async function apiUpdateWorkspace(id: string, patch: { name?: string; layout?: LayoutNode }): Promise<void> {
   try {
     await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(id)}`, {
@@ -184,6 +220,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
   }, [mux]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  const membership = sessionWorkspaceMembership(workspaces);
 
   // 세션이 죽은 것을 워크스페이스에서 정리 (로딩 완료 후에만)
   useEffect(() => {
@@ -271,7 +308,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                 style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#252525', cursor: 'pointer' }}
                 onClick={() => navigate({ page: 'workspace', id: ws.id })}
               >
-                <span style={{ color: '#eee', flex: 1 }}>{ws.name}</span>
+                <span style={{ color: '#eee', flex: 1 }}>{workspaceLabel(ws)}</span>
                 <span style={{ color: '#666', fontSize: 11 }}>
                   {layoutToSessionIds(ws.layout).filter((id) => id > 0).length} session{layoutToSessionIds(ws.layout).filter((id) => id > 0).length !== 1 ? 's' : ''}
                 </span>
@@ -307,6 +344,11 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             {sessions.map((s) => (
+              (() => {
+                const info = membership.get(s.id);
+                const title = info?.memberName ? info.memberName : `#${s.id}`;
+                const meta = info ? workspaceLabel(info.workspace) : 'standalone';
+                return (
               <div
                 key={s.id}
                 onClick={() => navigate({ page: 'session', id: s.id })}
@@ -329,7 +371,12 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                     copy
                   </button>
                 </span>
-                <span style={{ color: '#aaa', flex: 1 }}>{s.cmd.join(' ')}</span>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+                  <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+                  <span style={{ color: '#666', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {meta} · {s.cmd.join(' ')}
+                  </span>
+                </span>
                 <span style={{
                   fontSize: 11, padding: '1px 6px', borderRadius: 3,
                   background: s.status === 'attached' ? '#0d3a58' : '#333',
@@ -353,6 +400,8 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                   ×
                 </button>
               </div>
+                );
+              })()
             ))}
           </div>
         )}
@@ -418,10 +467,27 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
 
 function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; workspaceId: string; maxPanels: number }) {
   const [wsName, setWsName] = useState(workspaceId);
-  const [panels, setPanels] = useState<{ key: string; sessionId?: number }[]>([{ key: uuid() }]);
+  const [wsProject, setWsProject] = useState('default');
+  const [memberNames, setMemberNames] = useState<Record<number, string>>({});
+  const [panels, setPanels] = useState<{ key: string; sessionId?: number; memberName?: string }[]>([{ key: uuid() }]);
   const [focused, setFocused] = useState(0);
   const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const initialized = useRef(false);
+
+  const refreshWorkspaceMeta = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}`);
+      if (!res.ok) return;
+      const ws: Workspace = await res.json();
+      setWsName(ws.name);
+      setWsProject(ws.project || 'default');
+      const names = memberNameBySession(ws);
+      setMemberNames(Object.fromEntries(names));
+      setPanels((prev) => prev.map((panel) => (
+        panel.sessionId !== undefined ? { ...panel, memberName: names.get(panel.sessionId) } : panel
+      )));
+    } catch {}
+  }, [workspaceId]);
 
   // 서버에서 workspace 로드
   useEffect(() => {
@@ -432,16 +498,20 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
       .then((ws: Workspace | null) => {
         if (!ws) return;
         setWsName(ws.name);
+        setWsProject(ws.project || 'default');
+        setMemberNames(Object.fromEntries((ws.members || []).map((member) => [member.sessionId, member.name])));
         const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
         if (ids.length > 0) {
-          setPanels(ids.map((id) => ({ key: uuid(), sessionId: id })));
+          const names = memberNameBySession(ws);
+          setPanels(ids.map((id) => ({ key: uuid(), sessionId: id, memberName: names.get(id) })));
         }
       })
       .catch(() => {});
   }, [workspaceId]);
 
   // 워크스페이스에 세션 ID 동기화 (서버)
-  const syncWorkspace = useCallback((sessionIds: number[]) => {
+  const syncWorkspace = useCallback((nextPanels: { key: string; sessionId?: number; memberName?: string }[]) => {
+    const sessionIds = nextPanels.map((p) => p.sessionId).filter((id): id is number => id !== undefined);
     const layout = sessionIdsToLayout(sessionIds);
     apiUpdateWorkspace(workspaceId, { layout });
   }, [workspaceId]);
@@ -454,7 +524,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     });
   }, []);
 
-  const updatePanelsAfterRemoval = useCallback((prev: { key: string; sessionId?: number }[], index: number) => {
+  const updatePanelsAfterRemoval = useCallback((prev: { key: string; sessionId?: number; memberName?: string }[], index: number) => {
     const next = prev.filter((_, i) => i !== index);
     setFocused((f) => {
       if (next.length === 0) return 0;
@@ -463,8 +533,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
       if (f === index) return Math.min(f, next.length - 1);
       return f;
     });
-    const ids = next.map((p) => p.sessionId).filter((id): id is number => id !== undefined);
-    syncWorkspace(ids);
+    syncWorkspace(next);
     return next.length === 0 ? [{ key: uuid() }] : next;
   }, [syncWorkspace]);
 
@@ -497,12 +566,16 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   const handleCreated = useCallback((index: number, sessionId: number) => {
     setPanels((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], sessionId };
-      const ids = next.map((p) => p.sessionId).filter((id): id is number => id !== undefined);
-      syncWorkspace(ids);
+      next[index] = { ...next[index], sessionId, memberName: memberNames[sessionId] };
+      syncWorkspace(next);
       return next;
     });
-  }, [syncWorkspace]);
+    window.setTimeout(() => { void refreshWorkspaceMeta(); }, 150);
+  }, [memberNames, refreshWorkspaceMeta, syncWorkspace]);
+
+  const removeAt = useCallback((index: number) => {
+    setPanels((prev) => updatePanelsAfterRemoval(prev, index));
+  }, [updatePanelsAfterRemoval]);
 
   const focusPrev = useCallback(() => setFocused((f) => (f > 0 ? f - 1 : f)), []);
   const focusNext = useCallback(() => {
@@ -543,7 +616,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
-        <span style={{ color: '#aaa', fontSize: 12 }}>{wsName}</span>
+        <span style={{ color: '#aaa', fontSize: 12 }}>{wsProject !== 'default' ? `${wsProject}/${wsName}` : wsName}</span>
         <button onClick={add} style={btnStyle}>+ split</button>
         <button onClick={detachWorkspace} style={btnStyle}>detach</button>
         <span style={{ color: '#666', fontSize: 12 }}>
@@ -578,8 +651,11 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                 }}>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ color: isFocused ? '#ccc' : '#666', fontSize: 11, fontFamily: 'monospace' }}>
-                      {panel.sessionId ? `#${panel.sessionId}` : 'new'}
+                      {panel.sessionId ? (panel.memberName || `#${panel.sessionId}`) : 'new'}
                     </span>
+                    {panel.sessionId && panel.memberName ? (
+                      <span style={{ color: '#555', fontSize: 10, fontFamily: 'monospace' }}>#{panel.sessionId}</span>
+                    ) : null}
                     {panel.sessionId ? (
                       <button
                         onClick={(e) => {
@@ -681,6 +757,7 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
+  const membership = sessionWorkspaceMembership(workspaces);
 
   useEffect(() => {
     let cancelled = false;
@@ -745,7 +822,7 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
                 onClick={() => navigate({ page: 'workspace', id: ws.id })}
               >
                 <span style={{ color: '#ccc', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
-                  {ws.name}
+                  {workspaceLabel(ws)}
                 </span>
                 <span style={{ color: '#555', fontSize: 11, fontFamily: 'monospace' }}>
                   {ws.liveSessions.length} session{ws.liveSessions.length !== 1 ? 's' : ''}
@@ -762,7 +839,8 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
                       key={sid}
                       mux={mux}
                       sessionId={sid}
-                      label={info ? `#${sid} ${info.cmd.join(' ')}` : `#${sid}`}
+                      label={memberLabel((membership.get(sid)?.memberName), sid)}
+                      sublabel={info ? info.cmd.join(' ') : undefined}
                       status={info?.status}
                     />
                   );
@@ -790,7 +868,8 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
                     key={s.id}
                     mux={mux}
                     sessionId={s.id}
-                    label={`#${s.id} ${s.cmd.join(' ')}`}
+                    label={memberLabel(undefined, s.id)}
+                    sublabel={s.cmd.join(' ')}
                     status={s.status}
                   />
                 ))}
@@ -803,10 +882,11 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
   );
 }
 
-function PreviewCard({ mux, sessionId, label, status }: {
+function PreviewCard({ mux, sessionId, label, sublabel, status }: {
   mux: TerminalMux;
   sessionId: number;
   label: string;
+  sublabel?: string;
   status?: string;
 }) {
   return (
@@ -833,8 +913,13 @@ function PreviewCard({ mux, sessionId, label, status }: {
           background: status === 'attached' ? '#4fc3f7' : '#555',
           flexShrink: 0,
         }} />
-        <span style={{ color: '#aaa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {label}
+        <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+          {sublabel ? (
+            <span style={{ color: '#666', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {sublabel}
+            </span>
+          ) : null}
         </span>
       </div>
       <div style={{ height: 220, pointerEvents: 'none' }}>

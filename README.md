@@ -45,6 +45,54 @@ dist/
 
 Runtime files: `~/.ttym/` (pid, log, sockets)
 
+## Workspace Control Plane
+
+`ttym` now exposes a workspace-oriented CLI for agent workflows. The user-facing model is:
+
+- `project`
+- `workspace`
+- `member`
+
+Internally, each member is backed by a session/PTy.
+
+```bash
+# Inspect current context from inside a ttym session
+TTYM_SESSION_ID=233 ./dist/ttym current --json
+
+# List projects and workspaces
+./dist/ttym project list --json
+./dist/ttym workspace list --json
+./dist/ttym workspace info default/workspace\ 1 --json
+
+# Create a workspace under a project
+./dist/ttym workspace create pilot --name core --json
+
+# Add named members
+./dist/ttym workspace add pilot/core --name lead --role agent --cmd /bin/sh -lc 'exec cat' --json
+./dist/ttym workspace add pilot/core --name devserver --role server --cmd /bin/sh -lc 'exec cat' --json
+
+# Send input, inspect screen, detach, terminate
+./dist/ttym workspace send pilot/core lead -- 'echo ready\n'
+./dist/ttym workspace screen pilot/core lead --json
+./dist/ttym workspace detach pilot/core devserver --json
+./dist/ttym workspace remove pilot/core lead --json
+./dist/ttym workspace delete pilot/core --json
+```
+
+Addressing rules:
+
+- project names are globally unique
+- workspace names are unique inside a project
+- member names are unique inside a workspace
+- fully-qualified address is `project/workspace/member`
+- inside the current workspace, short member names are allowed
+
+For a complete smoke test, run:
+
+```bash
+./scripts/pilot-project-workspace-member.sh
+```
+
 ## Development
 
 ```bash

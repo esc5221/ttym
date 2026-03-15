@@ -564,12 +564,19 @@ button {
 .preview-pane-bar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: calc(8px * var(--ui-scale));
   height: calc(24px * var(--ui-scale));
   padding: 0 calc(8px * var(--ui-scale));
   background: rgba(20, 27, 36, 0.96);
   color: var(--text-soft);
   font-size: calc(10px * var(--ui-scale));
   font-family: "SF Mono", Menlo, monospace;
+}
+
+.preview-pane-meta {
+  color: var(--text-dim);
+  font-size: calc(10px * var(--ui-scale));
 }
 
 .preview-pane-screen {
@@ -773,6 +780,12 @@ button {
 .pane-title {
   color: var(--text-soft);
   font-size: var(--pane-title-font-size);
+  font-family: "SF Mono", Menlo, monospace;
+}
+
+.pane-title-meta {
+  color: var(--text-dim);
+  font-size: calc(10px * var(--ui-scale));
   font-family: "SF Mono", Menlo, monospace;
 }
 

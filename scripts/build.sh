@@ -29,8 +29,9 @@ npx esbuild server/src/index.ts \
   --platform=node \
   --format=esm \
   --target=node20 \
+  --external:better-sqlite3 \
   --outfile="$DIST/ttym-server.js" \
-  --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url);' \
+  --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url); const __filename = decodeURIComponent(new URL(import.meta.url).pathname); const __dirname = decodeURIComponent(new URL(".", import.meta.url).pathname).replace(/\/$/, "");' \
   2>&1 | tail -1
 echo "      $(du -h "$DIST/ttym-server.js" | cut -f1) ttym-server.js"
 

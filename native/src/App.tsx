@@ -9,6 +9,7 @@ import {
   listWorkspaces,
   sessionIdsToLayout,
   updateWorkspace,
+  type WorkspaceMemberInfo,
   type WorkspaceInfo,
 } from './lib/api';
 import { ensureLocalServer } from './lib/daemon';
@@ -17,13 +18,16 @@ import { createNativeWindow } from './lib/window';
 interface PanelState {
   key: string;
   sessionId?: number;
+  memberName?: string;
   hasBell?: boolean;
 }
 
 interface WorkspaceTab {
   key: string;
   workspaceId: string;
+  project: string;
   name: string;
+  members: WorkspaceMemberInfo[];
   panels: PanelState[];
   focused: number;
 }
@@ -126,11 +130,32 @@ function makePanel(): PanelState {
   return { key: crypto.randomUUID(), hasBell: false };
 }
 
+function workspaceLabel(project: string, name: string): string {
+  return project && project !== 'default' ? `${project}/${name}` : name;
+}
+
+function memberNameBySession(members: WorkspaceMemberInfo[]): Map<number, string> {
+  return new Map(members.map((member) => [member.sessionId, member.name]));
+}
+
+function panelPrimaryLabel(panel: PanelState, fallbackIndex?: number): string {
+  if (panel.memberName) return panel.memberName;
+  if (panel.sessionId !== undefined) return `#${panel.sessionId}`;
+  return fallbackIndex !== undefined ? `pane ${fallbackIndex + 1}` : 'new';
+}
+
+function panelSecondaryLabel(panel: PanelState): string | null {
+  if (panel.memberName && panel.sessionId !== undefined) return `#${panel.sessionId}`;
+  return null;
+}
+
 function makeTab(workspaceId: string, name: string, sessionIds: number[] = []): WorkspaceTab {
   return {
     key: crypto.randomUUID(),
     workspaceId,
+    project: 'default',
     name,
+    members: [],
     panels: sessionIds.length > 0 ? sessionIds.map((sessionId) => ({ key: crypto.randomUUID(), sessionId })) : [makePanel()],
     focused: 0,
   };
@@ -297,9 +322,21 @@ function reconcileWorkspaceTabs(prevTabs: WorkspaceTab[], workspaces: WorkspaceI
   return workspaces.map((workspace) => {
     const prevTab = prevByWorkspaceId.get(workspace.id);
     const sessionIds = layoutToSessionIds(workspace.layout).filter((id) => id > 0);
+    const namesBySessionId = memberNameBySession(workspace.members);
 
     if (!prevTab) {
-      return makeTab(workspace.id, workspace.name, sessionIds);
+      return clampFocused({
+        ...makeTab(workspace.id, workspace.name, sessionIds),
+        project: workspace.project,
+        members: workspace.members,
+        panels: sessionIds.length > 0
+          ? sessionIds.map((sessionId) => ({
+            key: crypto.randomUUID(),
+            sessionId,
+            memberName: namesBySessionId.get(sessionId),
+          }))
+          : [makePanel()],
+      });
     }
 
     const unusedPrevPanels = [...prevTab.panels];
@@ -308,21 +345,30 @@ function reconcileWorkspaceTabs(prevTabs: WorkspaceTab[], workspaces: WorkspaceI
         const matchedIndex = unusedPrevPanels.findIndex((panel) => panel.sessionId === sessionId);
         if (matchedIndex >= 0) {
           const [matched] = unusedPrevPanels.splice(matchedIndex, 1);
-          return { ...matched, sessionId };
+          return { ...matched, sessionId, memberName: namesBySessionId.get(sessionId) };
         }
       }
 
       const fallback = unusedPrevPanels.shift();
       if (fallback) {
-        return { ...fallback, sessionId, hasBell: fallback.hasBell && fallback.sessionId === sessionId };
+        return {
+          ...fallback,
+          sessionId,
+          memberName: sessionId !== undefined ? namesBySessionId.get(sessionId) : undefined,
+          hasBell: fallback.hasBell && fallback.sessionId === sessionId,
+        };
       }
 
-      return sessionId === undefined ? makePanel() : { key: crypto.randomUUID(), sessionId, hasBell: false };
+      return sessionId === undefined
+        ? makePanel()
+        : { key: crypto.randomUUID(), sessionId, memberName: namesBySessionId.get(sessionId), hasBell: false };
     });
 
     return clampFocused({
       ...prevTab,
+      project: workspace.project,
       name: workspace.name,
+      members: workspace.members,
       panels: nextPanels,
     });
   });
@@ -362,7 +408,7 @@ export function App() {
         id: tab.workspaceId,
         index,
         title: tab.name || `workspace ${index + 1}`,
-        meta: `${tab.panels.length} pane${tab.panels.length === 1 ? '' : 's'}`,
+        meta: `${workspaceLabel(tab.project, tab.name || `workspace ${index + 1}`)} · ${tab.panels.length} pane${tab.panels.length === 1 ? '' : 's'}`,
       })),
     ],
     [tabs],
@@ -394,11 +440,16 @@ export function App() {
   }
 
   function tabFromWorkspace(workspace: WorkspaceInfo): WorkspaceTab {
-    return makeTab(
-      workspace.id,
-      workspace.name,
-      layoutToSessionIds(workspace.layout).filter((id) => id > 0),
-    );
+    const sessionIds = layoutToSessionIds(workspace.layout).filter((id) => id > 0);
+    const namesBySessionId = memberNameBySession(workspace.members);
+    return clampFocused({
+      ...makeTab(workspace.id, workspace.name, sessionIds),
+      project: workspace.project,
+      members: workspace.members,
+      panels: sessionIds.length > 0
+        ? sessionIds.map((id) => ({ key: crypto.randomUUID(), sessionId: id, memberName: namesBySessionId.get(id) }))
+        : [makePanel()],
+    });
   }
 
   async function refreshLauncher(portValue: number) {
@@ -506,6 +557,7 @@ export function App() {
       void updateWorkspace(port, tab.workspaceId, {
         name: tab.name,
         layout: sessionIdsToLayout(sessionIds),
+        members: tab.members,
       }).catch(() => {});
     }
   }, [tabs, port, workspaceReady]);
@@ -712,10 +764,10 @@ export function App() {
     updateTab(activeTab, (tab) => ({
       ...tab,
       panels: tab.panels.map((panel) => (
-        panel.key === panelKey ? { ...panel, sessionId, hasBell: false } : panel
+        panel.key === panelKey ? { ...panel, sessionId, memberName: undefined, hasBell: false } : panel
       )),
     }));
-    if (port !== null) void refreshSessionsOnly(port).catch(() => {});
+    if (port !== null) void refreshLauncher(port).catch(() => {});
   }
 
   function handleExit(panelKey: string) {
@@ -727,7 +779,7 @@ export function App() {
       const nextFocused = Math.min(tab.focused, nextPanels.length - 1);
       return { ...tab, panels: nextPanels, focused: nextFocused };
     });
-    if (port !== null) void refreshSessionsOnly(port).catch(() => {});
+    if (port !== null) void refreshLauncher(port).catch(() => {});
   }
 
   function handleBell(panelKey: string) {
@@ -1011,7 +1063,7 @@ export function App() {
                       >
                         <div className="preview-card-head">
                           <div className="preview-card-title-group">
-                            <span className="preview-card-title">{tab.name || `workspace ${index + 1}`}</span>
+                            <span className="preview-card-title">{workspaceLabel(tab.project, tab.name || `workspace ${index + 1}`)}</span>
                             <span className="preview-card-actions">
                               <span className={`preview-badge ${attach.label}`}>{attach.label}</span>
                               <button
@@ -1026,7 +1078,7 @@ export function App() {
                               </button>
                             </span>
                           </div>
-                          <span className="preview-card-meta">{attach.detail}</span>
+                          <span className="preview-card-meta">{workspaceLabel(tab.project, tab.name)} · {attach.detail}</span>
                         </div>
                         <div
                           className="preview-card-grid"
@@ -1040,7 +1092,10 @@ export function App() {
                           ) : (
                             tab.panels.slice(0, 4).map((panel, paneIndex) => (
                               <div key={panel.key} className="preview-pane">
-                                <div className="preview-pane-bar">{panel.sessionId !== undefined ? `#${panel.sessionId}` : `pane ${paneIndex + 1}`}</div>
+                                <div className="preview-pane-bar">
+                                  <span>{panelPrimaryLabel(panel, paneIndex)}</span>
+                                  {panelSecondaryLabel(panel) ? <span className="preview-pane-meta">{panelSecondaryLabel(panel)}</span> : null}
+                                </div>
                                 {panel.sessionId !== undefined ? (
                                   <div
                                     className="preview-pane-screen"
@@ -1082,7 +1137,7 @@ export function App() {
                   className={index === activeTab ? 'tab-button active' : 'tab-button'}
                   onClick={() => setActiveTab(index)}
                 >
-                  <span className="tab-label">{tab.name || label}</span>
+                  <span className="tab-label">{workspaceLabel(tab.project, tab.name || label)}</span>
                   {tabs.length > 1 ? (
                     <span
                       className="tab-close"
@@ -1174,7 +1229,10 @@ export function App() {
             >
               <div className="pane-titlebar">
                 <span className="pane-title-group">
-                  <span className="pane-title">{panel.sessionId !== undefined ? `#${panel.sessionId}` : 'new'}</span>
+                  <span className="pane-title">{panelPrimaryLabel(panel, index)}</span>
+                  {panelSecondaryLabel(panel) ? (
+                    <span className="pane-title-meta">{panelSecondaryLabel(panel)}</span>
+                  ) : null}
                   {panelSessionId !== undefined ? (
                     <button
                       className="pane-copy"
