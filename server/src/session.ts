@@ -186,11 +186,14 @@ export class Session {
     args.push('--', ...cmd);
 
     const holderLogFd = openSync(resolve(getHomeDir(), 'ttym.log'), 'a');
-    const env = extraEnv ? { ...process.env, ...extraEnv } : undefined;
+    const env = { ...process.env, ...(extraEnv ?? {}) } as Record<string, string>;
+    // Codex parent sessions can export GIT_PAGER=cat, which disables interactive
+    // pagers like `git log` inside ttym PTYs. Drop only that degenerate case.
+    if (env.GIT_PAGER === 'cat') delete env.GIT_PAGER;
     const proc = spawn(holderBin(), args, {
       detached: true,
       stdio: ['ignore', holderLogFd, holderLogFd],
-      ...(env ? { env } : {}),
+      env,
     });
     proc.unref();
 
