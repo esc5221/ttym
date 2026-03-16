@@ -14,6 +14,7 @@ export interface CreateOptions {
   cmd?: string[];
   cols?: number;
   rows?: number;
+  cwd?: string;
 }
 
 export interface SessionInfo {

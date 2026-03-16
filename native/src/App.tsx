@@ -21,6 +21,7 @@ interface PanelState {
   key: string;
   sessionId?: number;
   memberName?: string;
+  cwd?: string;
   hasBell?: boolean;
 }
 
@@ -137,6 +138,11 @@ function makePanel(): PanelState {
   return { key: crypto.randomUUID(), hasBell: false };
 }
 
+function formatCwd(cwd?: string | null): string | null {
+  if (!cwd) return null;
+  return cwd.replace(/^\/Users\/[^/]+\b/, '~');
+}
+
 function workspaceLabel(project: string, name: string): string {
   return project && project !== 'default' ? `${project}/${name}` : name;
 }
@@ -154,6 +160,31 @@ function panelPrimaryLabel(panel: PanelState, fallbackIndex?: number): string {
 function panelSecondaryLabel(panel: PanelState): string | null {
   if (panel.memberName && panel.sessionId !== undefined) return `#${panel.sessionId}`;
   return null;
+}
+
+function panelCwd(panel: PanelState | undefined, metas: Record<number, SessionMeta>): string | undefined {
+  if (!panel) return undefined;
+  if (panel.cwd) return panel.cwd;
+  if (panel.sessionId === undefined) return undefined;
+  const meta = metas[panel.sessionId];
+  return typeof meta?.cwd === 'string' ? meta.cwd : undefined;
+}
+
+function insertPanelRight(panels: PanelState[], focused: number, panel: PanelState): { panels: PanelState[]; focus: number } {
+  const insertAt = Math.min(Math.max(0, focused + 1), panels.length);
+  const nextPanels = [...panels];
+  nextPanels.splice(insertAt, 0, panel);
+  return { panels: nextPanels, focus: insertAt };
+}
+
+function movePanel(panels: PanelState[], fromIndex: number, toIndex: number): PanelState[] {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= panels.length || toIndex >= panels.length) {
+    return panels;
+  }
+  const next = [...panels];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
 }
 
 function makeTab(workspaceId: string, name: string, sessionIds: number[] = []): WorkspaceTab {
@@ -401,6 +432,7 @@ export function App() {
   const [fontSmoothing, setFontSmoothing] = useState(readFontSmoothing);
   const [appMode, setAppMode] = useState<AppMode>(readAppMode);
   const [homeSelection, setHomeSelection] = useState(0);
+  const [draggedPanelKey, setDraggedPanelKey] = useState<string | null>(null);
 
   const currentTab = useMemo(() => tabs[activeTab] ?? null, [tabs, activeTab]);
   const terminalFontSize = BASE_TERMINAL_FONT_SIZE + zoomLevel;
@@ -822,8 +854,19 @@ export function App() {
   function addSplit() {
     if (!currentTab) return;
     updateTab(activeTab, (tab) => {
-      const nextPanels = [...tab.panels, makePanel()];
-      return { ...tab, panels: nextPanels, focused: nextPanels.length - 1 };
+      const source = tab.panels[tab.focused];
+      const inserted = insertPanelRight(tab.panels, tab.focused, makePanel());
+      inserted.panels[inserted.focus] = { ...inserted.panels[inserted.focus], cwd: panelCwd(source, sessionMetas) };
+      return { ...tab, panels: inserted.panels, focused: inserted.focus };
+    });
+  }
+
+  function movePaneTo(fromKey: string, toIndex: number) {
+    updateTab(activeTab, (tab) => {
+      const fromIndex = tab.panels.findIndex((panel) => panel.key === fromKey);
+      if (fromIndex < 0) return tab;
+      const nextPanels = movePanel(tab.panels, fromIndex, toIndex);
+      return { ...tab, panels: nextPanels, focused: nextPanels.findIndex((panel) => panel.key === fromKey) };
     });
   }
 
@@ -1306,13 +1349,37 @@ export function App() {
               }}
               className={isFocused ? 'pane focused' : 'pane'}
               onClick={() => updateTab(activeTab, (tab) => ({ ...tab, focused: index }))}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (!draggedPanelKey) return;
+                movePaneTo(draggedPanelKey, index);
+                setDraggedPanelKey(null);
+              }}
             >
-              <div className="pane-titlebar">
+              <div
+                className="pane-titlebar"
+                draggable
+                onDragStart={() => setDraggedPanelKey(panel.key)}
+                onDragEnd={() => setDraggedPanelKey(null)}
+              >
                 <span className="pane-title-group">
-                  <span className="pane-title">{panelPrimaryLabel(panel, index)}</span>
-                  {panelSecondaryLabel(panel) ? (
-                    <span className="pane-title-meta">{panelSecondaryLabel(panel)}</span>
-                  ) : null}
+                  <span className="pane-title-stack">
+                    <span className="pane-title-row">
+                      <span className="pane-title">{panelPrimaryLabel(panel, index)}</span>
+                      {panelSecondaryLabel(panel) ? (
+                        <span className="pane-title-meta">{panelSecondaryLabel(panel)}</span>
+                      ) : null}
+                    </span>
+                    {panelCwd(panel, sessionMetas) ? (
+                      <span className="pane-cwd" title={panelCwd(panel, sessionMetas)}>
+                        {formatCwd(panelCwd(panel, sessionMetas))}
+                      </span>
+                    ) : null}
+                  </span>
                   {panelSessionId !== undefined && restoreAction ? (
                     <button
                       className="pane-copy"
@@ -1369,6 +1436,7 @@ export function App() {
                     key={panel.key}
                     mux={muxRef.current}
                     attachId={panel.sessionId}
+                    cwd={panelCwd(panel, sessionMetas)}
                     fontSize={terminalFontSize}
                     enableWebgl={fontSmoothing}
                     onCreated={(sessionId) => handleCreated(panel.key, sessionId)}

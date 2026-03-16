@@ -24,6 +24,18 @@ interface WorkspaceMember {
   updatedAt?: number;
 }
 
+interface SessionMeta {
+  cwd?: string | null;
+  [key: string]: unknown;
+}
+
+interface PanelState {
+  key: string;
+  sessionId?: number;
+  memberName?: string;
+  cwd?: string;
+}
+
 interface Workspace {
   id: string;
   project: string;
@@ -113,28 +125,34 @@ function sessionIdsToLayout(ids: number[]): LayoutNode {
 }
 
 function reconcileWorkspacePanels(
-  prevPanels: { key: string; sessionId?: number; memberName?: string }[],
+  prevPanels: PanelState[],
   sessionIds: number[],
   memberNames: Map<number, string>,
-): { key: string; sessionId?: number; memberName?: string }[] {
+  sessionCwds?: Map<number, string>,
+): PanelState[] {
   const unusedPrev = [...prevPanels];
   const nextPanels = (sessionIds.length > 0 ? sessionIds : [undefined]).map((sessionId) => {
     if (sessionId !== undefined) {
       const matchedIndex = unusedPrev.findIndex((panel) => panel.sessionId === sessionId);
       if (matchedIndex >= 0) {
         const [matched] = unusedPrev.splice(matchedIndex, 1);
-        return { ...matched, sessionId, memberName: memberNames.get(sessionId) };
+        return { ...matched, sessionId, memberName: memberNames.get(sessionId), cwd: sessionCwds?.get(sessionId) ?? matched.cwd };
       }
     }
 
     const fallback = unusedPrev.shift();
     if (fallback) {
-      return { ...fallback, sessionId, memberName: sessionId !== undefined ? memberNames.get(sessionId) : fallback.memberName };
+      return {
+        ...fallback,
+        sessionId,
+        memberName: sessionId !== undefined ? memberNames.get(sessionId) : fallback.memberName,
+        cwd: sessionId !== undefined ? sessionCwds?.get(sessionId) ?? fallback.cwd : fallback.cwd,
+      };
     }
 
     return sessionId === undefined
       ? { key: uuid() }
-      : { key: uuid(), sessionId, memberName: memberNames.get(sessionId) };
+      : { key: uuid(), sessionId, memberName: memberNames.get(sessionId), cwd: sessionCwds?.get(sessionId) };
   });
 
   const pendingPanels = unusedPrev.filter((panel) => panel.sessionId === undefined);
@@ -142,6 +160,34 @@ function reconcileWorkspacePanels(
     return [...nextPanels, ...pendingPanels];
   }
   return nextPanels;
+}
+
+function insertPanelRight(panels: PanelState[], focused: number, panel: PanelState): { panels: PanelState[]; focus: number } {
+  const insertAt = Math.min(Math.max(0, focused + 1), panels.length);
+  const nextPanels = [...panels];
+  nextPanels.splice(insertAt, 0, panel);
+  return { panels: nextPanels, focus: insertAt };
+}
+
+function movePanel(panels: PanelState[], fromIndex: number, toIndex: number): PanelState[] {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= panels.length || toIndex >= panels.length) {
+    return panels;
+  }
+  const next = [...panels];
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
+function formatCwd(cwd?: string): string | null {
+  if (!cwd) return null;
+  return cwd.replace(/^\/Users\/[^/]+\b/, '~');
+}
+
+async function fetchSessionMeta(sessionId: number): Promise<SessionMeta> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/meta`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 async function fetchWorkspaces(): Promise<Workspace[]> {
@@ -239,14 +285,25 @@ function navigate(route: Route) {
 function DashboardPage({ mux }: { mux: TerminalMux }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const [list, wsList] = await Promise.all([mux.listSessions(), fetchWorkspaces()]);
-      setSessions(list.filter((s) => s.status !== 'dead'));
+      const live = list.filter((s) => s.status !== 'dead');
+      setSessions(live);
       setWorkspaces(wsList);
+      const cwdEntries = await Promise.all(live.map(async (session) => {
+        try {
+          const meta = await fetchSessionMeta(session.id);
+          return [session.id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+        } catch {
+          return [session.id, ''] as const;
+        }
+      }));
+      setSessionCwds(Object.fromEntries(cwdEntries.filter(([, cwd]) => cwd)));
     } catch {}
     setLoading(false);
   }, [mux]);
@@ -406,7 +463,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
                   <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
                   <span style={{ color: '#666', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {meta} · {s.cmd.join(' ')}
+                    {meta} · {(sessionCwds[s.id] ? `${formatCwd(sessionCwds[s.id])} · ` : '')}{s.cmd.join(' ')}
                   </span>
                 </span>
                 <span style={{
@@ -501,8 +558,10 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   const [wsName, setWsName] = useState(workspaceId);
   const [wsProject, setWsProject] = useState('default');
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
-  const [panels, setPanels] = useState<{ key: string; sessionId?: number; memberName?: string }[]>([{ key: uuid() }]);
+  const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
+  const [panels, setPanels] = useState<PanelState[]>([{ key: uuid() }]);
   const [focused, setFocused] = useState(0);
+  const [draggedPanelKey, setDraggedPanelKey] = useState<string | null>(null);
   const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const initialized = useRef(false);
   const panelsRef = useRef(panels);
@@ -519,9 +578,20 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
       setWsName(ws.name);
       setWsProject(ws.project || 'default');
       const names = memberNameBySession(ws);
+      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+      const cwdEntries = await Promise.all(ids.map(async (id) => {
+        try {
+          const meta = await fetchSessionMeta(id);
+          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+        } catch {
+          return [id, ''] as const;
+        }
+      }));
+      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
       setMemberNames(Object.fromEntries(names));
+      setSessionCwds(Object.fromEntries(cwdMap));
       setPanels((prev) => prev.map((panel) => (
-        panel.sessionId !== undefined ? { ...panel, memberName: names.get(panel.sessionId) } : panel
+        panel.sessionId !== undefined ? { ...panel, memberName: names.get(panel.sessionId), cwd: cwdMap.get(panel.sessionId) ?? panel.cwd } : panel
       )));
     } catch {}
   }, [workspaceId]);
@@ -532,7 +602,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     initialized.current = true;
     fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}`)
       .then((res) => res.ok ? res.json() : null)
-      .then((ws: Workspace | null) => {
+      .then(async (ws: Workspace | null) => {
         if (!ws) return;
         setWsName(ws.name);
         setWsProject(ws.project || 'default');
@@ -540,7 +610,17 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
         const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
         if (ids.length > 0) {
           const names = memberNameBySession(ws);
-          setPanels(ids.map((id) => ({ key: uuid(), sessionId: id, memberName: names.get(id) })));
+          const cwdEntries = await Promise.all(ids.map(async (id) => {
+            try {
+              const meta = await fetchSessionMeta(id);
+              return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+            } catch {
+              return [id, ''] as const;
+            }
+          }));
+          const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
+          setSessionCwds(Object.fromEntries(cwdMap));
+          setPanels(ids.map((id) => ({ key: uuid(), sessionId: id, memberName: names.get(id), cwd: cwdMap.get(id) })));
         }
       })
       .catch(() => {});
@@ -561,10 +641,20 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
 
         const names = memberNameBySession(ws);
         const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+        const cwdEntries = await Promise.all(ids.map(async (id) => {
+          try {
+            const meta = await fetchSessionMeta(id);
+            return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+          } catch {
+            return [id, ''] as const;
+          }
+        }));
+        const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
         setWsName(ws.name);
         setWsProject(ws.project || 'default');
         setMemberNames(Object.fromEntries(names));
-        setPanels((prev) => reconcileWorkspacePanels(prev, ids, names));
+        setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
+        setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
         setFocused((current) => Math.min(current, Math.max(0, Math.max(ids.length, 1) - 1)));
       } catch {}
     };
@@ -577,7 +667,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   }, [workspaceId]);
 
   // 워크스페이스에 세션 ID 동기화 (서버)
-  const syncWorkspace = useCallback((nextPanels: { key: string; sessionId?: number; memberName?: string }[]) => {
+  const syncWorkspace = useCallback((nextPanels: PanelState[]) => {
     const sessionIds = nextPanels.map((p) => p.sessionId).filter((id): id is number => id !== undefined);
     const layout = sessionIdsToLayout(sessionIds);
     apiUpdateWorkspace(workspaceId, { layout });
@@ -585,13 +675,15 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
 
   const add = useCallback(() => {
     setPanels((p) => {
-      const next = [...p, { key: uuid() }];
-      setFocused(next.length - 1);
-      return next;
+      const source = p[focused];
+      const nextPanel: PanelState = { key: uuid(), cwd: source?.cwd };
+      const inserted = insertPanelRight(p, focused, nextPanel);
+      setFocused(inserted.focus);
+      return inserted.panels;
     });
-  }, []);
+  }, [focused]);
 
-  const updatePanelsAfterRemoval = useCallback((prev: { key: string; sessionId?: number; memberName?: string }[], index: number) => {
+  const updatePanelsAfterRemoval = useCallback((prev: PanelState[], index: number) => {
     const next = prev.filter((_, i) => i !== index);
     setFocused((f) => {
       if (next.length === 0) return 0;
@@ -633,7 +725,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   const handleCreated = useCallback((index: number, sessionId: number) => {
     setPanels((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], sessionId, memberName: memberNames[sessionId] };
+      next[index] = { ...next[index], sessionId, memberName: memberNames[sessionId], cwd: next[index].cwd };
       syncWorkspace(next);
       return next;
     });
@@ -643,6 +735,17 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   const removeAt = useCallback((index: number) => {
     setPanels((prev) => updatePanelsAfterRemoval(prev, index));
   }, [updatePanelsAfterRemoval]);
+
+  const movePaneTo = useCallback((fromKey: string, toIndex: number) => {
+    setPanels((prev) => {
+      const fromIndex = prev.findIndex((panel) => panel.key === fromKey);
+      if (fromIndex < 0) return prev;
+      const next = movePanel(prev, fromIndex, toIndex);
+      syncWorkspace(next);
+      setFocused(next.findIndex((panel) => panel.key === fromKey));
+      return next;
+    });
+  }, [syncWorkspace]);
 
   const focusPrev = useCallback(() => setFocused((f) => (f > 0 ? f - 1 : f)), []);
   const focusNext = useCallback(() => {
@@ -689,7 +792,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
           {panels.length} pane{panels.length > 1 ? 's' : ''} across {rows} row{rows > 1 ? 's' : ''}
         </span>
         <span style={{ color: '#444', fontSize: 11, marginLeft: 'auto' }}>
-          {'\u2318\\ split \u2003 \u2318D terminate \u2003 \u2318\u2190\u2192 navigate'}
+          {'\u2318\\ split \u2003 drag reorder \u2003 \u2318\u2190\u2192 navigate'}
         </span>
       </div>
 
@@ -702,6 +805,16 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                 key={panel.key}
                 ref={(el) => { if (el) panelRefs.current.set(panel.key, el); else panelRefs.current.delete(panel.key); }}
                 onClick={() => setFocused(i)}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (!draggedPanelKey) return;
+                  movePaneTo(draggedPanelKey, i);
+                  setDraggedPanelKey(null);
+                }}
                 style={{
                   display: 'flex', flexDirection: 'column', background: '#1e1e1e',
                   minHeight: 0, contain: 'strict',
@@ -710,18 +823,42 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
               >
                 {/* title bar */}
                 <div style={{
-                  display: 'flex', alignItems: 'center', height: 28, padding: '0 8px',
+                  display: 'flex', alignItems: 'center', height: 34, padding: '0 8px',
                   background: isFocused ? '#1e1e1e' : '#181818',
                   borderTop: isFocused ? '2px solid #007acc' : '2px solid transparent',
                   borderBottom: '1px solid #333', flexShrink: 0, userSelect: 'none',
-                }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ color: isFocused ? '#ccc' : '#666', fontSize: 11, fontFamily: 'monospace' }}>
-                      {panel.sessionId ? (panel.memberName || `#${panel.sessionId}`) : 'new'}
+                }}
+                draggable
+                onDragStart={() => setDraggedPanelKey(panel.key)}
+                onDragEnd={() => setDraggedPanelKey(null)}
+                >
+                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, minWidth: 0 }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      <span style={{ color: isFocused ? '#ccc' : '#666', fontSize: 11, fontFamily: 'monospace' }}>
+                        {panel.sessionId ? (panel.memberName || `#${panel.sessionId}`) : 'new'}
+                      </span>
+                      {panel.sessionId && panel.memberName ? (
+                        <span style={{ color: '#555', fontSize: 10, fontFamily: 'monospace' }}>#{panel.sessionId}</span>
+                      ) : null}
                     </span>
-                    {panel.sessionId && panel.memberName ? (
-                      <span style={{ color: '#555', fontSize: 10, fontFamily: 'monospace' }}>#{panel.sessionId}</span>
+                    {panel.cwd ? (
+                      <span
+                        style={{
+                          color: isFocused ? '#6b90b1' : '#4d6175',
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                          maxWidth: '42vw',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                        title={panel.cwd}
+                      >
+                        {formatCwd(panel.cwd)}
+                      </span>
                     ) : null}
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
                     {panel.sessionId ? (
                       <button
                         onClick={(e) => {
@@ -761,6 +898,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                   <Terminal
                     mux={mux}
                     attachId={panel.sessionId}
+                    cwd={panel.cwd}
                     onCreated={(id) => handleCreated(i, id)}
                     onExit={() => removeAt(i)}
                   />

@@ -796,6 +796,31 @@ button {
   min-width: 0;
 }
 
+.pane-title-stack {
+  display: flex;
+  flex-direction: column;
+  gap: calc(1px * var(--ui-scale));
+  min-width: 0;
+}
+
+.pane-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(7px * var(--ui-scale));
+  min-width: 0;
+}
+
+.pane-cwd {
+  color: #6b90b1;
+  font-size: calc(10px * var(--ui-scale));
+  font-family: "SF Mono", Menlo, monospace;
+  min-width: 0;
+  max-width: min(52ch, 42vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pane-copy {
   border: 1px solid rgba(92, 114, 140, 0.55);
   background: rgba(28, 36, 46, 0.92);
@@ -814,6 +839,10 @@ button {
 
 .pane.focused .pane-title {
   color: var(--text);
+}
+
+.pane.focused .pane-cwd {
+  color: #89a6c4;
 }
 
 .pane-bell {

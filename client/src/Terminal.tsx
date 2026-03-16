@@ -9,6 +9,8 @@ export interface TerminalProps {
   mux: TerminalMux;
   /** 새 세션 생성 시 사용할 cmd (없으면 기본 쉘) */
   cmd?: string[];
+  /** 새 세션 생성 시 시작 cwd (없으면 서버 기본값, 보통 HOME) */
+  cwd?: string;
   /** 기존 세션에 재부착할 때의 sessionId */
   attachId?: number;
   /** readwrite (기본) | readonly (입력 차단, 관전 모드) */
@@ -27,7 +29,7 @@ export interface TerminalProps {
 const PAUSE_HIGH = 1024 * 1024; // 1MB pending → PAUSE
 const RESUME_LOW = 256 * 1024;  // 256KB remaining → RESUME
 
-export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14, enableWebgl = true, className, style, onCreated, onExit, onBell }: TerminalProps) {
+export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, enableWebgl = true, className, style, onCreated, onExit, onBell }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<number | null>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -152,7 +154,7 @@ export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14
         if (!disposed) term.write('\r\n\x1b[31m[failed to attach session]\x1b[0m\r\n');
       });
     } else {
-      const opts: CreateOptions = { cmd, cols: term.cols, rows: term.rows };
+      const opts: CreateOptions = { cmd, cwd, cols: term.cols, rows: term.rows };
       mux.createSession(opts, callbacks).then((id) => {
         if (disposed) { mux.destroySession(id); return; }
         sessionRef.current = id;
@@ -197,7 +199,7 @@ export function Terminal({ mux, cmd, attachId, mode = 'readwrite', fontSize = 14
       fitRef.current = null;
       termRef.current = null;
     };
-  }, [mux, attachId, mode, enableWebgl]);
+  }, [mux, cmd, cwd, attachId, mode, enableWebgl]);
 
   useEffect(() => {
     const term = termRef.current;

@@ -284,8 +284,10 @@ export class SessionManager {
     const extraEnv: Record<string, string> = { TTYM_SESSION_ID: String(id) };
     if (this._busUrl) extraEnv.TTYM_BUS_URL = this._busUrl;
 
-    const session = await Session.create(id, cmd, cols, rows, this.runtimeDir, cwd, extraEnv);
+    const resolvedCwd = cwd || process.env.HOME || '/tmp';
+    const session = await Session.create(id, cmd, cols, rows, this.runtimeDir, resolvedCwd, extraEnv);
     this.sessions.set(id, session);
+    await this.setMeta(id, { cwd: resolvedCwd });
 
     session.onExit(() => {
       setTimeout(() => { if (this.sessions.get(id) === session) this.sessions.delete(id); }, 30_000);

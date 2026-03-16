@@ -106,8 +106,9 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         const cmd = Array.isArray(opts.cmd) ? opts.cmd : [DEFAULT_SHELL];
         const cols = opts.cols || 80;
         const rows = opts.rows || 24;
+        const cwd = typeof opts.cwd === 'string' && opts.cwd.trim() ? opts.cwd : undefined;
         const verify = opts.verify === true;
-        const session = await manager.create(cmd, cols, rows);
+        const session = await manager.create(cmd, cols, rows, cwd);
         log(`HTTP CREATE session=${session.id} pid=${session.pid} verify=${verify}`);
 
         if (verify) {
@@ -535,7 +536,7 @@ export async function createServer(port: number): Promise<TtymServer> {
 
         case CMD.CREATE: {
           let requestId: number | undefined;
-          let opts = { cmd: [DEFAULT_SHELL], cols: 80, rows: 24 };
+          let opts: { cmd: string[]; cols: number; rows: number; cwd?: string } = { cmd: [DEFAULT_SHELL], cols: 80, rows: 24 };
 
           if (payload.length > 0) {
             try {
@@ -544,13 +545,14 @@ export async function createServer(port: number): Promise<TtymServer> {
               if (Array.isArray(parsed.cmd)) opts.cmd = parsed.cmd;
               if (Number.isInteger(parsed.cols) && parsed.cols > 0) opts.cols = parsed.cols;
               if (Number.isInteger(parsed.rows) && parsed.rows > 0) opts.rows = parsed.rows;
+              if (typeof parsed.cwd === 'string' && parsed.cwd.trim()) opts.cwd = parsed.cwd;
             } catch {
               safeSend(ws, encode(0, CMD.CREATE, jsonPayload({ requestId, ok: false, error: 'invalid payload' })));
               break;
             }
           }
 
-          manager.create(opts.cmd, opts.cols, opts.rows).then((session) => {
+          manager.create(opts.cmd, opts.cols, opts.rows, opts.cwd).then((session) => {
             log(`CREATE session=${session.id} pid=${session.pid} cmd=${opts.cmd.join(' ')}`);
             safeSend(ws, encode(session.id, CMD.CREATE, jsonPayload({ requestId, ok: true })));
             wireSession(session.id);
