@@ -169,7 +169,7 @@ describe('createServer', () => {
     expect(snapshot.payload.toString()).toContain('hello');
   });
 
-  it('replays snapshot-style redraw payload after a completed sync block', async () => {
+  it('reattaches after a completed sync block without replaying a snapshot-style reset payload', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);
     clients.push(ws1);
@@ -194,11 +194,13 @@ describe('createServer', () => {
     clients.push(ws2);
     ws2.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: 0, cols: 80, rows: 24 }))));
     await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
-    const replay = await ws2.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid);
-    expect([CMD.DATA, CMD.SNAPSHOT]).toContain(replay.cmd);
+    const replay = await ws2.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid);
+    expect(replay.cmd).toBe(CMD.SNAPSHOT);
     const replayText = replay.payload.toString('binary');
     expect(replayText).toContain('hello');
-    expect(replayText.includes('\x1bc') || replay.cmd === CMD.SNAPSHOT).toBe(true);
+    expect(replayText).not.toContain('\x1bc');
+    expect(replayText).not.toContain('\x1b[?2026h');
+    expect(replayText).not.toContain('\x1b[?2026l');
   });
 
   it('atomically splits a workspace by creating a session and inserting it to the right', async () => {

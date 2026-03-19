@@ -47,8 +47,6 @@ const H_CMD_KILL = 0x09;
 const H_CMD_PING = 0x0a;
 const H_CMD_PONG = 0x0b;
 const ENABLE_SYNC_BLOCK_COALESCING = process.env.TTYM_SYNC_BLOCK_COALESCING !== '0';
-const ENABLE_SYNC_SNAPSHOT_REDRAW = process.env.TTYM_SYNC_SNAPSHOT_REDRAW !== '0';
-const RIS_RESET = '\x1bc';
 
 function getSyncBlockTimeoutMs(): number {
   return Number.parseInt(process.env.TTYM_SYNC_BLOCK_TIMEOUT_MS ?? '1000', 10) || 1000;
@@ -491,15 +489,6 @@ export class Session {
       this.syncBlocksCompleted += 1;
       this.clearSyncTimer();
       this.syncBufferedBytes += data.length;
-      if (ENABLE_SYNC_SNAPSHOT_REDRAW) {
-        const redraw = this.buildViewerSnapshotPayload();
-        this.syncEmittedBytes += redraw.length;
-        this.debug(
-          `sync end count=${this.syncBlocksCompleted} raw=${data.length} snapshotRedraw=${redraw.length} open=${result.syncOpen}`,
-        );
-        this.emitViewerChunk(redraw, broadcast);
-        return;
-      }
       this.syncEmittedBytes += result.coalescedBytes;
       this.debug(
         `sync end count=${this.syncBlocksCompleted} raw=${data.length} emitted=${result.coalescedBytes} open=${result.syncOpen}`,
@@ -527,10 +516,6 @@ export class Session {
       this.debug(`sync reset reason=${reason} replaying-open-block-bytes=${aborted.length}`);
       this.emitViewerChunk(aborted, true);
     }
-  }
-
-  private buildViewerSnapshotPayload(): Buffer {
-    return Buffer.from(RIS_RESET + this.snapshot());
   }
 
   private armSyncTimer(): void {

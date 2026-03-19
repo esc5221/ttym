@@ -125,9 +125,9 @@ describe('Session (holder-backed)', () => {
     expect(chunks).toHaveLength(1);
     const payload = chunks[0]!.data.toString('binary');
     expect(payload).toContain('hello');
-    expect(payload).toContain('\x1bc');
     expect(payload).not.toContain('\x1b[?2026h');
     expect(payload).not.toContain('\x1b[?2026l');
+    expect(payload).not.toContain('\x1bc');
   });
 
   it('forces snapshot replay while a sync block is open', async () => {
