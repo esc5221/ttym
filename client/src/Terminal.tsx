@@ -156,7 +156,7 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
     } else {
       const opts: CreateOptions = { cmd, cwd, cols: term.cols, rows: term.rows };
       mux.createSession(opts, callbacks).then((id) => {
-        if (disposed) { mux.destroySession(id); return; }
+        if (disposed) { mux.detachSession(id); return; }
         sessionRef.current = id;
         onCreated?.(id);
         wireInput(id);

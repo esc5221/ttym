@@ -6,7 +6,8 @@
   <title>ttym demo</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; transition: none !important; animation: none !important; }
-    html, body, #root { height: 100%; background: #1e1e1e; overflow: hidden; }
+    html, body { min-height: 100%; background: #1e1e1e; overflow-x: hidden; overflow-y: auto; }
+    #root { min-height: 100%; background: #1e1e1e; }
     .xterm-viewport::-webkit-scrollbar { display: none; }
     .xterm-viewport { scrollbar-width: none; }
   </style>

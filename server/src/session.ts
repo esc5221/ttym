@@ -7,6 +7,7 @@ import headless from '@xterm/headless';
 const { Terminal } = headless;
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { OutputRing } from './output-ring.js';
+import { SyncBlockFilter } from './sync-block.js';
 
 export type SessionStatus = 'attached' | 'detached' | 'dead';
 export type ViewerMode = 'readwrite' | 'readonly';
@@ -45,6 +46,13 @@ const H_CMD_EXIT = 0x08;
 const H_CMD_KILL = 0x09;
 const H_CMD_PING = 0x0a;
 const H_CMD_PONG = 0x0b;
+const ENABLE_SYNC_BLOCK_COALESCING = process.env.TTYM_SYNC_BLOCK_COALESCING !== '0';
+const ENABLE_SYNC_SNAPSHOT_REDRAW = process.env.TTYM_SYNC_SNAPSHOT_REDRAW !== '0';
+const RIS_RESET = '\x1bc';
+
+function getSyncBlockTimeoutMs(): number {
+  return Number.parseInt(process.env.TTYM_SYNC_BLOCK_TIMEOUT_MS ?? '1000', 10) || 1000;
+}
 
 function writeFrame(sock: Socket, cmd: number, payload: Buffer = Buffer.alloc(0)) {
   const hdr = Buffer.allocUnsafe(5);
@@ -136,6 +144,14 @@ export class Session {
   private _dirty = false;
   private _lastDirtyAt = 0;
   private _diedAt = 0;
+  private readonly syncFilter = new SyncBlockFilter();
+  private syncBlocksStarted = 0;
+  private syncBlocksCompleted = 0;
+  private syncOverflowCount = 0;
+  private syncBufferedBytes = 0;
+  private syncEmittedBytes = 0;
+  private syncTimeoutCount = 0;
+  private syncTimer: NodeJS.Timeout | null = null;
 
   private debug(message: string): void {
     console.log(`[sess ${this.id}] ${message}`);
@@ -276,10 +292,14 @@ export class Session {
                 clearTimeout(timer);
                 resolve();
               };
-              // Write ring dump to headless xterm
+              // Seed authoritative terminal with holder dump and rebuild viewer replay
               if (frame.payload.length > 0) {
-                this.ring.push(Buffer.from(frame.payload));
-                this.term.write(Buffer.from(frame.payload), finalize);
+                this.resetSyncEmissionState('holder dump');
+                const dump = Buffer.from(frame.payload);
+                this.term.write(dump, () => {
+                  this.processTerminalOutput(dump, false);
+                  finalize();
+                });
               } else {
                 finalize();
               }
@@ -316,24 +336,14 @@ export class Session {
       case H_CMD_DATA_OUT: {
         if (this.closed) return;
         if (payload.length < 4) return;
-        const seq = payload.readUInt32LE(0);
         const data = payload.subarray(4);
 
         // Layer 2: headless xterm
-        this.term.write(data);
+        this.term.write(data, () => {
+          this.processTerminalOutput(data, true);
+        });
         this._dirty = true;
         this._lastDirtyAt = Date.now();
-
-        // Layer 3: ring (for viewer delta replay)
-        this.ring.push(data); // ring assigns its own seq for viewers
-
-        // Broadcast to viewers
-        const viewerSeq = this.ring.nextSeq - 1;
-        for (const viewer of this.viewers.values()) {
-          if (!viewer.paused) {
-            viewer.dataCb(data, viewerSeq);
-          }
-        }
         break;
       }
       case H_CMD_EXIT: {
@@ -387,12 +397,17 @@ export class Session {
     if (v) v.paused = false;
   }
 
+  shouldForceSnapshotReplay(): boolean {
+    return this.syncFilter.syncOpen;
+  }
+
   snapshot(): string {
     return this.serializer.serialize();
   }
 
   /** Seed headless xterm with a previously saved snapshot (for reboot restore) */
   seedSnapshot(ansi: string): void {
+    this.resetSyncEmissionState('seed snapshot');
     this.term.write(ansi);
   }
 
@@ -425,6 +440,7 @@ export class Session {
     if (this.closed || !this.sock) return;
     this._cols = cols;
     this._rows = rows;
+    this.resetSyncEmissionState('resize');
     const payload = Buffer.allocUnsafe(4);
     payload.writeUInt16LE(cols, 0);
     payload.writeUInt16LE(rows, 2);
@@ -442,6 +458,7 @@ export class Session {
 
   kill(): void {
     if (this.closed) return;
+    this.clearSyncTimer();
     this.closed = true;
     this.viewers.clear();
     if (this.sock) {
@@ -451,6 +468,84 @@ export class Session {
     }
     this.term.dispose();
     this.ring.clear();
+  }
+
+  private processTerminalOutput(data: Buffer, broadcast: boolean): void {
+    if (!ENABLE_SYNC_BLOCK_COALESCING) {
+      this.emitViewerChunk(data, broadcast);
+      return;
+    }
+
+    const result = this.syncFilter.process(data);
+    if (result.syncStarted) {
+      this.syncBlocksStarted += 1;
+      this.armSyncTimer();
+      this.debug(`sync start count=${this.syncBlocksStarted}`);
+    }
+    if (result.overflowed) {
+      this.syncOverflowCount += 1;
+      this.clearSyncTimer();
+      this.debug(`sync overflow count=${this.syncOverflowCount}`);
+    }
+    if (result.syncEnded) {
+      this.syncBlocksCompleted += 1;
+      this.clearSyncTimer();
+      this.syncBufferedBytes += data.length;
+      if (ENABLE_SYNC_SNAPSHOT_REDRAW) {
+        const redraw = this.buildViewerSnapshotPayload();
+        this.syncEmittedBytes += redraw.length;
+        this.debug(
+          `sync end count=${this.syncBlocksCompleted} raw=${data.length} snapshotRedraw=${redraw.length} open=${result.syncOpen}`,
+        );
+        this.emitViewerChunk(redraw, broadcast);
+        return;
+      }
+      this.syncEmittedBytes += result.coalescedBytes;
+      this.debug(
+        `sync end count=${this.syncBlocksCompleted} raw=${data.length} emitted=${result.coalescedBytes} open=${result.syncOpen}`,
+      );
+    }
+
+    for (const chunk of result.emitted) {
+      this.emitViewerChunk(chunk, broadcast);
+    }
+  }
+
+  private emitViewerChunk(data: Buffer, broadcast: boolean): void {
+    if (data.length === 0) return;
+    const viewerSeq = this.ring.push(data);
+    if (!broadcast) return;
+    for (const viewer of this.viewers.values()) {
+      if (!viewer.paused) viewer.dataCb(data, viewerSeq);
+    }
+  }
+
+  private resetSyncEmissionState(reason: string): void {
+    this.clearSyncTimer();
+    const aborted = this.syncFilter.abortOpenBlock();
+    if (aborted && aborted.length > 0) {
+      this.debug(`sync reset reason=${reason} replaying-open-block-bytes=${aborted.length}`);
+      this.emitViewerChunk(aborted, true);
+    }
+  }
+
+  private buildViewerSnapshotPayload(): Buffer {
+    return Buffer.from(RIS_RESET + this.snapshot());
+  }
+
+  private armSyncTimer(): void {
+    this.clearSyncTimer();
+    this.syncTimer = setTimeout(() => {
+      this.syncTimeoutCount += 1;
+      this.debug(`sync timeout count=${this.syncTimeoutCount}`);
+      this.resetSyncEmissionState('timeout');
+    }, getSyncBlockTimeoutMs());
+  }
+
+  private clearSyncTimer(): void {
+    if (!this.syncTimer) return;
+    clearTimeout(this.syncTimer);
+    this.syncTimer = null;
   }
 }
 

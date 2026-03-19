@@ -331,6 +331,65 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     }
   }
 
+  const splitMatch = path.match(/^\/api\/workspaces\/([^/]+)\/split$/);
+  if (splitMatch && req.method === 'POST') {
+    const wsId = decodeURIComponent(splitMatch[1]);
+    readBody().then(async (body) => {
+      const workspace = workspaceStore.get(wsId);
+      if (!workspace) { json(404, { error: 'not found' }); return; }
+      try {
+        const {
+          targetSessionId,
+          cmd,
+          cols,
+          rows,
+          cwd,
+          name,
+          role,
+          tags,
+        } = JSON.parse(body || '{}');
+
+        const targetId = Number.isInteger(targetSessionId) ? Number(targetSessionId) : undefined;
+        let resolvedCwd: string | undefined;
+        if (typeof cwd === 'string' && cwd.trim()) {
+          resolvedCwd = cwd;
+        } else if (targetId !== undefined) {
+          const meta = await manager.getMeta(targetId);
+          resolvedCwd = typeof meta.cwd === 'string' && meta.cwd.trim() ? meta.cwd : undefined;
+        }
+
+        const created = await manager.create(
+          Array.isArray(cmd) && cmd.length > 0 ? cmd : [DEFAULT_SHELL],
+          Number.isInteger(cols) && cols > 0 ? cols : 80,
+          Number.isInteger(rows) && rows > 0 ? rows : 24,
+          resolvedCwd,
+        );
+
+        try {
+          const ws = workspaceStore.splitRight(wsId, targetId, {
+            sessionId: created.id,
+            name: typeof name === 'string' && name.trim() ? name : `term-${created.id}`,
+            role: typeof role === 'string' ? role : undefined,
+            tags: Array.isArray(tags) ? tags : [],
+          });
+          if (!ws) {
+            manager.destroy(created.id);
+            json(404, { error: 'not found' });
+            return;
+          }
+          log(`WORKSPACE SPLIT id=${wsId} target=${targetId ?? 'none'} session=${created.id}`);
+          json(201, { workspace: ws, session: created.info() });
+        } catch (error) {
+          manager.destroy(created.id);
+          json(400, { error: error instanceof Error ? error.message : 'split failed' });
+        }
+      } catch (error) {
+        json(400, { error: error instanceof Error ? error.message : 'invalid body' });
+      }
+    });
+    return true;
+  }
+
   const membersCollectionMatch = path.match(/^\/api\/workspaces\/([^/]+)\/members$/);
   if (membersCollectionMatch && req.method === 'POST') {
     const wsId = decodeURIComponent(membersCollectionMatch[1]);
@@ -587,7 +646,7 @@ export async function createServer(port: number): Promise<TtymServer> {
           log(`ATTACH session=${sessionId} viewer=${viewerId.slice(0, 8)} mode=${mode} fromSeq=${fromSeq}`);
           safeSend(ws, encode(sessionId, CMD.ATTACH, jsonPayload({ ok: true, ...session.info() })));
 
-          if (fromSeq > 0 && session.ring.canReplaySince(fromSeq)) {
+          if (!session.shouldForceSnapshotReplay() && fromSeq > 0 && session.ring.canReplaySince(fromSeq)) {
             const chunks = session.ring.since(fromSeq);
             for (const chunk of chunks) {
               safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));
@@ -648,7 +707,7 @@ export async function createServer(port: number): Promise<TtymServer> {
             batcher.pausedView = false;
 
             const fromSeq = meta?.fromSeq ?? 0;
-            if (fromSeq > 0 && session.ring.canReplaySince(fromSeq)) {
+            if (!session.shouldForceSnapshotReplay() && fromSeq > 0 && session.ring.canReplaySince(fromSeq)) {
               const chunks = session.ring.since(fromSeq);
               for (const chunk of chunks) {
                 safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));

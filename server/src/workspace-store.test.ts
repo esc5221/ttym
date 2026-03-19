@@ -120,6 +120,43 @@ describe('WorkspaceStore', () => {
     expect(removed?.layout).toEqual({ type: 'pane', sessionId: 32 });
   });
 
+  it('inserts a new member immediately to the right of the target session', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const created = store.create('ws1', 'workspace 1', {
+      type: 'split',
+      axis: 'row',
+      sizes: [0.5, 0.5],
+      children: [
+        { type: 'pane', sessionId: 41 },
+        { type: 'pane', sessionId: 42 },
+      ],
+    }, 'pilot', [
+      { sessionId: 41, name: 'lead', createdAt: 1, updatedAt: 1 },
+      { sessionId: 42, name: 'logs', createdAt: 1, updatedAt: 1 },
+    ]);
+
+    const updated = store.splitRight(created.id, 41, {
+      sessionId: 43,
+      name: 'worker',
+      role: 'agent',
+      tags: [],
+    });
+
+    expect(updated?.members.map((member) => member.name)).toEqual(['lead', 'worker', 'logs']);
+    expect(updated?.layout).toEqual({
+      type: 'split',
+      axis: 'row',
+      sizes: [1 / 3, 1 / 3, 1 / 3],
+      children: [
+        { type: 'pane', sessionId: 41 },
+        { type: 'pane', sessionId: 43 },
+        { type: 'pane', sessionId: 42 },
+      ],
+    });
+  });
+
   // ───── Load edge cases ─────
 
   it('loads v2 format correctly', async () => {
@@ -200,6 +237,21 @@ describe('WorkspaceStore', () => {
     expect(data.workspaces).toHaveLength(1);
     expect(data.workspaces[0].id).toBe('ws1');
     // tmp file should not remain
+    expect(existsSync(join(dir, 'workspaces.json.tmp'))).toBe(false);
+  });
+
+  it('serializes overlapping saves onto a single tmp file path', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    store.create('ws1', 'one', { type: 'pane', sessionId: 1 });
+    store.create('ws2', 'two', { type: 'pane', sessionId: 2 });
+
+    await Promise.all([store.save(), store.save(), store.save()]);
+
+    const raw = readFileSync(join(dir, 'workspaces.json'), 'utf8');
+    const data = JSON.parse(raw);
+    expect(data.workspaces.map((workspace: { id: string }) => workspace.id)).toEqual(['ws1', 'ws2']);
     expect(existsSync(join(dir, 'workspaces.json.tmp'))).toBe(false);
   });
 

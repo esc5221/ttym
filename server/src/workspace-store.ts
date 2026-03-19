@@ -60,6 +60,8 @@ export class WorkspaceStore {
   private workspaces = new Map<string, WorkspaceInfo>();
   private readonly filePath: string;
   private dirty = false;
+  private savePromise: Promise<void> | null = null;
+  private saveQueued = false;
 
   constructor(runtimeDir: string) {
     this.filePath = resolve(runtimeDir, 'workspaces.json');
@@ -88,14 +90,31 @@ export class WorkspaceStore {
   }
 
   async save(): Promise<void> {
-    const data: StoreFile = {
-      version: 2,
-      workspaces: Array.from(this.workspaces.values()),
-    };
-    const tmpPath = this.filePath + '.tmp';
-    await writeFile(tmpPath, JSON.stringify(data, null, 2));
-    await rename(tmpPath, this.filePath);
-    this.dirty = false;
+    if (this.savePromise) {
+      this.saveQueued = true;
+      await this.savePromise;
+      if (!this.dirty) return;
+    }
+
+    this.savePromise = (async () => {
+      do {
+        this.saveQueued = false;
+        const data: StoreFile = {
+          version: 2,
+          workspaces: Array.from(this.workspaces.values()),
+        };
+        const tmpPath = this.filePath + '.tmp';
+        await writeFile(tmpPath, JSON.stringify(data, null, 2));
+        await rename(tmpPath, this.filePath);
+        this.dirty = false;
+      } while (this.saveQueued || this.dirty);
+    })();
+
+    try {
+      await this.savePromise;
+    } finally {
+      this.savePromise = null;
+    }
   }
 
   private scheduleSave(): void {
@@ -191,6 +210,32 @@ export class WorkspaceStore {
     }
 
     ws.layout = appendSessionToLayout(ws.layout, member.sessionId);
+    this.reconcileWorkspace(ws);
+    ws.updatedAt = now;
+    this.scheduleSave();
+    return ws;
+  }
+
+  splitRight(
+    id: string,
+    targetSessionId: number | undefined,
+    member: Omit<WorkspaceMemberInfo, 'createdAt' | 'updatedAt'>,
+  ): WorkspaceInfo | null {
+    const ws = this.workspaces.get(id);
+    if (!ws) return null;
+    this.assertUniqueMemberName(ws, member.name, member.sessionId);
+
+    const now = Date.now();
+    ws.members.push({
+      sessionId: member.sessionId,
+      name: member.name,
+      role: member.role,
+      tags: member.tags ?? [],
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    ws.layout = insertSessionRightOfTarget(ws.layout, targetSessionId, member.sessionId);
     this.reconcileWorkspace(ws);
     ws.updatedAt = now;
     this.scheduleSave();
@@ -304,6 +349,25 @@ function appendSessionToLayout(node: LayoutNode, sessionId: number): LayoutNode 
   const sessionIds = layoutToSessionIds(node).filter((id) => id > 0);
   if (sessionIds.includes(sessionId)) return node;
   sessionIds.push(sessionId);
+  return sessionIdsToLayout(sessionIds);
+}
+
+function insertSessionRightOfTarget(node: LayoutNode, targetSessionId: number | undefined, sessionId: number): LayoutNode {
+  const sessionIds = layoutToSessionIds(node).filter((id) => id > 0);
+  if (sessionIds.includes(sessionId)) return node;
+  if (sessionIds.length === 0) return { type: 'pane', sessionId };
+  if (targetSessionId === undefined) {
+    sessionIds.push(sessionId);
+    return sessionIdsToLayout(sessionIds);
+  }
+
+  const targetIndex = sessionIds.indexOf(targetSessionId);
+  if (targetIndex === -1) {
+    sessionIds.push(sessionId);
+    return sessionIdsToLayout(sessionIds);
+  }
+
+  sessionIds.splice(targetIndex + 1, 0, sessionId);
   return sessionIdsToLayout(sessionIds);
 }
 

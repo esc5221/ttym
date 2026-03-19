@@ -9,6 +9,7 @@ import {
   listSessions,
   listWorkspaces,
   sessionIdsToLayout,
+  splitWorkspace,
   type SessionMeta,
   updateWorkspace,
   type WorkspaceMemberInfo,
@@ -852,12 +853,34 @@ export function App() {
   }
 
   function addSplit() {
-    if (!currentTab) return;
-    updateTab(activeTab, (tab) => {
-      const source = tab.panels[tab.focused];
-      const inserted = insertPanelRight(tab.panels, tab.focused, makePanel());
-      inserted.panels[inserted.focus] = { ...inserted.panels[inserted.focus], cwd: panelCwd(source, sessionMetas) };
-      return { ...tab, panels: inserted.panels, focused: inserted.focus };
+    if (!currentTab || port === null) return;
+    const source = currentTab.panels[currentTab.focused];
+    void splitWorkspace(port, currentTab.workspaceId, {
+      targetSessionId: source?.sessionId,
+      cwd: panelCwd(source, sessionMetas),
+      cols: 80,
+      rows: 24,
+    }).then(async ({ workspace }) => {
+      const namesBySessionId = memberNameBySession(workspace.members);
+      const ids = layoutToSessionIds(workspace.layout).filter((id) => id > 0);
+      updateTab(activeTab, (tab) => {
+        const nextPanels = reconcileWorkspaceTabs([tab], [workspace])[0]!.panels;
+        const targetIndex = source?.sessionId !== undefined ? ids.indexOf(source.sessionId) : -1;
+        return {
+          ...tab,
+          project: workspace.project,
+          name: workspace.name,
+          members: workspace.members,
+          panels: nextPanels.map((panel) => ({
+            ...panel,
+            memberName: panel.sessionId !== undefined ? namesBySessionId.get(panel.sessionId) : panel.memberName,
+          })),
+          focused: targetIndex >= 0 ? Math.min(targetIndex + 1, ids.length - 1) : Math.max(0, ids.length - 1),
+        };
+      });
+      await refreshSessionsOnly(port);
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
     });
   }
 
@@ -888,14 +911,22 @@ export function App() {
     setActiveTab((current) => Math.min(tabs.length - 1, current + 1));
   }
 
-  function handleCreated(panelKey: string, sessionId: number) {
-    updateTab(activeTab, (tab) => ({
-      ...tab,
-      panels: tab.panels.map((panel) => (
-        panel.key === panelKey ? { ...panel, sessionId, memberName: undefined, hasBell: false } : panel
-      )),
-    }));
-    if (port !== null) void refreshLauncher(port).catch(() => {});
+  function startPaneAt(index: number) {
+    if (!currentTab || port === null) return;
+    const source = currentTab.panels[index] ?? currentTab.panels[Math.max(0, index - 1)];
+    void splitWorkspace(port, currentTab.workspaceId, {
+      targetSessionId: source?.sessionId,
+      cwd: panelCwd(source, sessionMetas),
+      cols: 80,
+      rows: 24,
+    }).then(async ({ workspace }) => {
+      const nextTab = reconcileWorkspaceTabs([currentTab], [workspace])[0]!;
+      updateTab(activeTab, () => nextTab);
+      setActiveTab(activeTab);
+      await refreshSessionsOnly(port);
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : String(err));
+    });
   }
 
   function handleExit(panelKey: string) {
@@ -1431,18 +1462,20 @@ export function App() {
                 </button>
               </div>
               <div className="pane-terminal">
-                {ready && muxRef.current ? (
+                {ready && muxRef.current && panel.sessionId !== undefined ? (
                   <Terminal
                     key={panel.key}
                     mux={muxRef.current}
                     attachId={panel.sessionId}
-                    cwd={panelCwd(panel, sessionMetas)}
                     fontSize={terminalFontSize}
                     enableWebgl={fontSmoothing}
-                    onCreated={(sessionId) => handleCreated(panel.key, sessionId)}
                     onExit={() => handleExit(panel.key)}
                     onBell={() => handleBell(panel.key)}
                   />
+                ) : ready && panel.sessionId === undefined ? (
+                  <div className="pane-empty">
+                    <button className="home-primary" onClick={() => startPaneAt(index)}>start terminal</button>
+                  </div>
                 ) : (
                   <div className="pane-empty">
                     {error ?? busy ?? (ready ? `daemon :${port}` : 'starting ttym-native...')}

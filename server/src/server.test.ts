@@ -140,4 +140,111 @@ describe('createServer', () => {
     const snapshot = await ws2.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid);
     expect(snapshot.payload.toString()).toContain('hello');
   });
+
+  it('forces snapshot on attach when a sync block is still open', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', "printf '\\033[?2026hhello'; sleep 1; printf ' world\\033[?2026l'; stty -echo; exec cat"],
+      cols: 80,
+      rows: 24,
+    }))));
+
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+
+    // Give the session enough time to enter an open sync block.
+    await new Promise((r) => setTimeout(r, 150));
+
+    const ws2 = await openClient(port);
+    clients.push(ws2);
+    ws2.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: 1 }))));
+
+    const attached = await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+    expect(JSON.parse(attached.payload.toString()).ok).toBe(true);
+
+    const snapshot = await ws2.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid);
+    expect(snapshot.payload.toString()).toContain('hello');
+  });
+
+  it('replays snapshot-style redraw payload after a completed sync block', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', "printf '\\033[?2026hhello\\033[31m red\\033[0m\\033[?2026l'; stty -echo; exec cat"],
+      cols: 80,
+      rows: 24,
+    }))));
+
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    const first = await ws1.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid);
+    expect([CMD.DATA, CMD.SNAPSHOT]).toContain(first.cmd);
+    expect(first.payload.toString('binary')).toContain('hello');
+
+    ws1.send(encode(sid, CMD.DETACH));
+    await ws1.next((f) => f.cmd === CMD.DETACH && f.sessionId === sid);
+    await ws1.close();
+
+    const ws2 = await openClient(port);
+    clients.push(ws2);
+    ws2.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: 0, cols: 80, rows: 24 }))));
+    await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+    const replay = await ws2.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid);
+    expect([CMD.DATA, CMD.SNAPSHOT]).toContain(replay.cmd);
+    const replayText = replay.payload.toString('binary');
+    expect(replayText).toContain('hello');
+    expect(replayText.includes('\x1bc') || replay.cmd === CMD.SNAPSHOT).toBe(true);
+  });
+
+  it('atomically splits a workspace by creating a session and inserting it to the right', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+
+    const createWorkspaceRes = await fetch(`http://127.0.0.1:${port}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 'split-test',
+        project: 'default',
+        name: 'workspace split test',
+        layout: { type: 'pane', sessionId: 0 },
+      }),
+    });
+    expect(createWorkspaceRes.status).toBe(201);
+
+    const splitRes1 = await fetch(`http://127.0.0.1:${port}/api/workspaces/split-test/split`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cols: 80, rows: 24, name: 'lead', cwd: '/tmp' }),
+    });
+    expect(splitRes1.status).toBe(201);
+    const split1 = await splitRes1.json();
+    expect(split1.workspace.members.map((member: any) => member.name)).toEqual(['lead']);
+    const firstSessionId = split1.session.id;
+
+    const splitRes2 = await fetch(`http://127.0.0.1:${port}/api/workspaces/split-test/split`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetSessionId: firstSessionId, cols: 80, rows: 24, name: 'worker' }),
+    });
+    expect(splitRes2.status).toBe(201);
+    const split2 = await splitRes2.json();
+    expect(split2.workspace.layout).toEqual({
+      type: 'split',
+      axis: 'row',
+      sizes: [0.5, 0.5],
+      children: [
+        { type: 'pane', sessionId: firstSessionId },
+        { type: 'pane', sessionId: split2.session.id },
+      ],
+    });
+    expect(split2.workspace.members.map((member: any) => member.name)).toEqual(['lead', 'worker']);
+
+    const sessionRes = await fetch(`http://127.0.0.1:${port}/api/sessions/${split2.session.id}`);
+    expect(sessionRes.status).toBe(200);
+  });
 });

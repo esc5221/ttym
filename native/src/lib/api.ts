@@ -117,6 +117,26 @@ export async function deleteWorkspace(port: number, id: string): Promise<void> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
+export async function splitWorkspace(
+  port: number,
+  id: string,
+  options: {
+    targetSessionId?: number;
+    cwd?: string;
+    cols?: number;
+    rows?: number;
+    name?: string;
+    role?: string;
+    cmd?: string[];
+  } = {},
+): Promise<{ workspace: WorkspaceInfo; session: SessionInfo }> {
+  return asJson(await fetch(`http://127.0.0.1:${port}/api/workspaces/${encodeURIComponent(id)}/split`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options),
+  }));
+}
+
 export function firstSessionId(node: LayoutNode): number | null {
   if (node.type === 'pane') {
     return node.sessionId > 0 ? node.sessionId : null;

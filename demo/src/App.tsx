@@ -249,6 +249,22 @@ async function apiDeleteWorkspace(id: string): Promise<void> {
   } catch {}
 }
 
+async function apiSplitWorkspace(
+  id: string,
+  options: { targetSessionId?: number; cwd?: string; cols?: number; rows?: number; name?: string; role?: string; cmd?: string[] } = {},
+): Promise<Workspace | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(id)}/split`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.workspace ?? null;
+  } catch { return null; }
+}
+
 // ───── 해시 라우팅 ─────
 
 type Route =
@@ -673,15 +689,38 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     apiUpdateWorkspace(workspaceId, { layout });
   }, [workspaceId]);
 
-  const add = useCallback(() => {
-    setPanels((p) => {
-      const source = p[focused];
-      const nextPanel: PanelState = { key: uuid(), cwd: source?.cwd };
-      const inserted = insertPanelRight(p, focused, nextPanel);
-      setFocused(inserted.focus);
-      return inserted.panels;
+  const add = useCallback(async () => {
+    const source = panelsRef.current[focused];
+    const ws = await apiSplitWorkspace(workspaceId, {
+      targetSessionId: source?.sessionId,
+      cwd: source?.cwd,
+      cols: 80,
+      rows: 24,
     });
-  }, [focused]);
+    if (!ws) return;
+    setWsName(ws.name);
+    setWsProject(ws.project || 'default');
+    const names = memberNameBySession(ws);
+    const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+    const cwdEntries = await Promise.all(ids.map(async (id) => {
+      try {
+        const meta = await fetchSessionMeta(id);
+        return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+      } catch {
+        return [id, ''] as const;
+      }
+    }));
+    const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
+    setMemberNames(Object.fromEntries(names));
+    setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
+    setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
+    if (source?.sessionId !== undefined) {
+      const targetIndex = ids.indexOf(source.sessionId);
+      if (targetIndex >= 0) setFocused(Math.min(targetIndex + 1, ids.length - 1));
+    } else {
+      setFocused(Math.max(0, ids.length - 1));
+    }
+  }, [focused, workspaceId]);
 
   const updatePanelsAfterRemoval = useCallback((prev: PanelState[], index: number) => {
     const next = prev.filter((_, i) => i !== index);
@@ -722,19 +761,35 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     });
   }, [mux, syncWorkspace]);
 
-  const handleCreated = useCallback((index: number, sessionId: number) => {
-    setPanels((prev) => {
-      const next = [...prev];
-      next[index] = { ...next[index], sessionId, memberName: memberNames[sessionId], cwd: next[index].cwd };
-      syncWorkspace(next);
-      return next;
-    });
-    window.setTimeout(() => { void refreshWorkspaceMeta(); }, 150);
-  }, [memberNames, refreshWorkspaceMeta, syncWorkspace]);
-
   const removeAt = useCallback((index: number) => {
     setPanels((prev) => updatePanelsAfterRemoval(prev, index));
   }, [updatePanelsAfterRemoval]);
+
+  const startAt = useCallback(async (index: number) => {
+    const source = panelsRef.current[index] ?? panelsRef.current[Math.max(0, index - 1)];
+    const ws = await apiSplitWorkspace(workspaceId, {
+      targetSessionId: source?.sessionId,
+      cwd: source?.cwd,
+      cols: 80,
+      rows: 24,
+    });
+    if (!ws) return;
+    const names = memberNameBySession(ws);
+    const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+    const cwdEntries = await Promise.all(ids.map(async (id) => {
+      try {
+        const meta = await fetchSessionMeta(id);
+        return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+      } catch {
+        return [id, ''] as const;
+      }
+    }));
+    const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
+    setMemberNames(Object.fromEntries(names));
+    setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
+    setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
+    setFocused(Math.min(index, Math.max(0, ids.length - 1)));
+  }, [workspaceId]);
 
   const movePaneTo = useCallback((fromKey: string, toIndex: number) => {
     setPanels((prev) => {
@@ -895,13 +950,26 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                   )}
                 </div>
                 <div style={{ flex: 1, minHeight: 0 }}>
-                  <Terminal
-                    mux={mux}
-                    attachId={panel.sessionId}
-                    cwd={panel.cwd}
-                    onCreated={(id) => handleCreated(i, id)}
-                    onExit={() => removeAt(i)}
-                  />
+                  {panel.sessionId !== undefined ? (
+                    <Terminal
+                      mux={mux}
+                      attachId={panel.sessionId}
+                      onExit={() => removeAt(i)}
+                    />
+                  ) : (
+                    <div style={{
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: '#151515',
+                      color: '#666',
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    }}>
+                      <button onClick={() => void startAt(i)} style={actionBtnStyle}>start terminal</button>
+                    </div>
+                  )}
                 </div>
               </div>
             );
