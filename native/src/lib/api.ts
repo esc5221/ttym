@@ -1,18 +1,9 @@
 import type { SessionInfo } from '@ttym/client';
-
-export interface PaneNode {
-  type: 'pane';
-  sessionId: number;
-}
-
-export interface SplitNode {
-  type: 'split';
-  axis: 'row' | 'col';
-  sizes: number[];
-  children: LayoutNode[];
-}
-
-export type LayoutNode = PaneNode | SplitNode;
+import {
+  layoutToSessionIds,
+  sessionIdsToLayout,
+  type LayoutNode,
+} from '../../../shared/src/workspace-domain';
 
 export interface WorkspaceInfo {
   id: string;
@@ -67,21 +58,7 @@ export async function getSessionMeta(port: number, sessionId: number): Promise<S
   return asJson(await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/meta`));
 }
 
-export function layoutToSessionIds(node: LayoutNode): number[] {
-  if (node.type === 'pane') return [node.sessionId];
-  return node.children.flatMap(layoutToSessionIds);
-}
-
-export function sessionIdsToLayout(ids: number[]): LayoutNode {
-  if (ids.length === 0) return { type: 'pane', sessionId: 0 };
-  if (ids.length === 1) return { type: 'pane', sessionId: ids[0] };
-  return {
-    type: 'split',
-    axis: 'row',
-    sizes: ids.map(() => 1 / ids.length),
-    children: ids.map((id) => ({ type: 'pane' as const, sessionId: id })),
-  };
-}
+export { layoutToSessionIds, sessionIdsToLayout };
 
 export async function createWorkspace(port: number, name: string, sessionIds: number[] = []): Promise<WorkspaceInfo> {
   const body = {

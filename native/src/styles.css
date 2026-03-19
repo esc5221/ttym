@@ -792,15 +792,8 @@ button {
 .pane-title-group {
   display: inline-flex;
   align-items: center;
-  gap: calc(7px * var(--ui-scale));
   min-width: 0;
-}
-
-.pane-title-stack {
-  display: flex;
-  flex-direction: column;
-  gap: calc(1px * var(--ui-scale));
-  min-width: 0;
+  flex: 1;
 }
 
 .pane-title-row {
@@ -808,6 +801,17 @@ button {
   align-items: center;
   gap: calc(7px * var(--ui-scale));
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.pane-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(6px * var(--ui-scale));
+  margin-left: auto;
+  margin-right: calc(8px * var(--ui-scale));
+  flex-shrink: 0;
 }
 
 .pane-cwd {
@@ -815,7 +819,7 @@ button {
   font-size: calc(10px * var(--ui-scale));
   font-family: "SF Mono", Menlo, monospace;
   min-width: 0;
-  max-width: min(52ch, 42vw);
+  max-width: min(42ch, 32vw);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

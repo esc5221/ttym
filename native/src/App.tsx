@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Terminal, TerminalMux, type SessionInfo } from '@ttym/client';
 import {
+  MutationBarrier,
+  formatCwd,
+  memberNameBySession,
+  reconcileSessionPanels,
+  workspaceLabel,
+} from '../../shared/src/workspace-domain';
+import {
   createWorkspace,
   getSessionMeta,
   deleteWorkspace,
@@ -137,19 +144,6 @@ async function copySessionUrl(sessionId: number) {
 
 function makePanel(): PanelState {
   return { key: crypto.randomUUID(), hasBell: false };
-}
-
-function formatCwd(cwd?: string | null): string | null {
-  if (!cwd) return null;
-  return cwd.replace(/^\/Users\/[^/]+\b/, '~');
-}
-
-function workspaceLabel(project: string, name: string): string {
-  return project && project !== 'default' ? `${project}/${name}` : name;
-}
-
-function memberNameBySession(members: WorkspaceMemberInfo[]): Map<number, string> {
-  return new Map(members.map((member) => [member.sessionId, member.name]));
 }
 
 function panelPrimaryLabel(panel: PanelState, fallbackIndex?: number): string {
@@ -378,29 +372,21 @@ function reconcileWorkspaceTabs(prevTabs: WorkspaceTab[], workspaces: WorkspaceI
       });
     }
 
-    const unusedPrevPanels = [...prevTab.panels];
-    const nextPanels = (sessionIds.length > 0 ? sessionIds : [undefined]).map((sessionId) => {
-      if (sessionId !== undefined) {
-        const matchedIndex = unusedPrevPanels.findIndex((panel) => panel.sessionId === sessionId);
-        if (matchedIndex >= 0) {
-          const [matched] = unusedPrevPanels.splice(matchedIndex, 1);
-          return { ...matched, sessionId, memberName: namesBySessionId.get(sessionId) };
-        }
-      }
-
-      const fallback = unusedPrevPanels.shift();
-      if (fallback) {
-        return {
-          ...fallback,
-          sessionId,
-          memberName: sessionId !== undefined ? namesBySessionId.get(sessionId) : undefined,
-          hasBell: fallback.hasBell && fallback.sessionId === sessionId,
-        };
-      }
-
-      return sessionId === undefined
-        ? makePanel()
-        : { key: crypto.randomUUID(), sessionId, memberName: namesBySessionId.get(sessionId), hasBell: false };
+    const nextPanels = reconcileSessionPanels(prevTab.panels, sessionIds, {
+      createEmpty: () => makePanel(),
+      createForSession: (sessionId) => ({
+        key: crypto.randomUUID(),
+        sessionId,
+        memberName: namesBySessionId.get(sessionId),
+        hasBell: false,
+      }),
+      decorateSession: (panel, sessionId) => ({
+        ...panel,
+        sessionId,
+        memberName: namesBySessionId.get(sessionId),
+        hasBell: panel.hasBell && panel.sessionId === sessionId,
+      }),
+      clearUnassigned: (panel) => ({ ...panel, sessionId: undefined, memberName: undefined, hasBell: false }),
     });
 
     return clampFocused({
@@ -434,6 +420,7 @@ export function App() {
   const [appMode, setAppMode] = useState<AppMode>(readAppMode);
   const [homeSelection, setHomeSelection] = useState(0);
   const [draggedPanelKey, setDraggedPanelKey] = useState<string | null>(null);
+  const mutationBarrierRef = useRef(new MutationBarrier());
 
   const currentTab = useMemo(() => tabs[activeTab] ?? null, [tabs, activeTab]);
   const terminalFontSize = BASE_TERMINAL_FONT_SIZE + zoomLevel;
@@ -644,6 +631,7 @@ export function App() {
     let cancelled = false;
 
     const tick = async () => {
+      if (mutationBarrierRef.current.isLocked()) return;
       const [workspaceList, sessionList] = await Promise.all([
         listWorkspaces(port),
         listSessions(port).catch(() => []),
@@ -671,6 +659,7 @@ export function App() {
     let cancelled = false;
 
     const tick = async () => {
+      if (mutationBarrierRef.current.isLocked()) return;
       const hasPendingLocalPane = tabsRef.current.some((tab) => tab.panels.some((panel) => panel.sessionId === undefined));
       if (hasPendingLocalPane) return;
 
@@ -763,6 +752,7 @@ export function App() {
 
   async function createWorkspaceTab(options?: { enter?: boolean }) {
     if (port === null) return;
+    const endMutation = mutationBarrierRef.current.begin();
     setBusy('creating workspace');
     setError(null);
     try {
@@ -780,6 +770,7 @@ export function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      endMutation();
       setBusy(null);
     }
   }
@@ -789,6 +780,7 @@ export function App() {
     const tab = tabs[index];
     if (!tab) return;
     const terminate = options?.terminate ?? false;
+    const endMutation = mutationBarrierRef.current.begin();
 
     setBusy(terminate ? 'terminating workspace' : 'detaching workspace');
     setError(null);
@@ -825,6 +817,7 @@ export function App() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      endMutation();
       setBusy(null);
     }
   }
@@ -840,6 +833,7 @@ export function App() {
 
   function removePaneAt(index: number, options?: { terminate?: boolean }) {
     if (!currentTab) return;
+    mutationBarrierRef.current.blockFor();
     const panel = currentTab.panels[index];
     if (!panel) return;
     const terminate = options?.terminate ?? false;
@@ -854,6 +848,7 @@ export function App() {
 
   function addSplit() {
     if (!currentTab || port === null) return;
+    const endMutation = mutationBarrierRef.current.begin();
     const source = currentTab.panels[currentTab.focused];
     void splitWorkspace(port, currentTab.workspaceId, {
       targetSessionId: source?.sessionId,
@@ -881,6 +876,8 @@ export function App() {
       await refreshSessionsOnly(port);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : String(err));
+    }).finally(() => {
+      endMutation();
     });
   }
 
@@ -913,6 +910,7 @@ export function App() {
 
   function startPaneAt(index: number) {
     if (!currentTab || port === null) return;
+    const endMutation = mutationBarrierRef.current.begin();
     const source = currentTab.panels[index] ?? currentTab.panels[Math.max(0, index - 1)];
     void splitWorkspace(port, currentTab.workspaceId, {
       targetSessionId: source?.sessionId,
@@ -926,10 +924,13 @@ export function App() {
       await refreshSessionsOnly(port);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : String(err));
+    }).finally(() => {
+      endMutation();
     });
   }
 
   function handleExit(panelKey: string) {
+    mutationBarrierRef.current.blockFor();
     updateTab(activeTab, (tab) => {
       const nextPanels = tab.panels.filter((panel) => panel.key !== panelKey);
       if (nextPanels.length === 0) {
@@ -1398,19 +1399,20 @@ export function App() {
                 onDragEnd={() => setDraggedPanelKey(null)}
               >
                 <span className="pane-title-group">
-                  <span className="pane-title-stack">
-                    <span className="pane-title-row">
-                      <span className="pane-title">{panelPrimaryLabel(panel, index)}</span>
-                      {panelSecondaryLabel(panel) ? (
-                        <span className="pane-title-meta">{panelSecondaryLabel(panel)}</span>
-                      ) : null}
-                    </span>
+                  <span className="pane-title-row">
+                    <span className="pane-title">{panelPrimaryLabel(panel, index)}</span>
+                    {panelSecondaryLabel(panel) ? (
+                      <span className="pane-title-meta">{panelSecondaryLabel(panel)}</span>
+                    ) : null}
                     {panelCwd(panel, sessionMetas) ? (
                       <span className="pane-cwd" title={panelCwd(panel, sessionMetas)}>
                         {formatCwd(panelCwd(panel, sessionMetas))}
                       </span>
                     ) : null}
                   </span>
+                </span>
+                <span className="pane-actions">
+                  {panel.hasBell ? <span className="pane-bell" aria-label="Unread terminal bell" /> : null}
                   {panelSessionId !== undefined && restoreAction ? (
                     <button
                       className="pane-copy"
@@ -1448,7 +1450,6 @@ export function App() {
                       copy
                     </button>
                   ) : null}
-                  {panel.hasBell ? <span className="pane-bell" aria-label="Unread terminal bell" /> : null}
                 </span>
                 <button
                   className="pane-close"

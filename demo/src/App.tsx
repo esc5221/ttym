@@ -2,6 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { TerminalMux, Terminal } from '@ttym/client';
 import type { SessionInfo } from '@ttym/client';
 import '@xterm/xterm/css/xterm.css';
+import {
+  MutationBarrier,
+  formatCwd,
+  layoutToSessionIds,
+  memberNameBySession,
+  reconcileSessionPanels,
+  sessionIdsToLayout,
+  shouldBootstrapWorkspacePanels,
+  workspaceLabel,
+  type LayoutNode,
+} from '../../shared/src/workspace-domain';
 
 /** crypto.randomUUID fallback for non-secure contexts (HTTP over LAN) */
 function uuid(): string {
@@ -10,10 +21,6 @@ function uuid(): string {
 }
 
 // ───── Workspace 타입 + Server API ─────
-
-interface PaneNode { type: 'pane'; sessionId: number; }
-interface SplitNode { type: 'split'; axis: 'row' | 'col'; sizes: number[]; children: LayoutNode[]; }
-type LayoutNode = PaneNode | SplitNode;
 
 interface WorkspaceMember {
   sessionId: number;
@@ -107,59 +114,28 @@ async function copySessionUrl(sessionId: number) {
   document.body.removeChild(input);
 }
 
-/** Extract flat sessionId list from layout tree */
-function layoutToSessionIds(node: LayoutNode): number[] {
-  if (node.type === 'pane') return [node.sessionId];
-  return node.children.flatMap(layoutToSessionIds);
-}
-
-/** Build flat row layout from sessionId list */
-function sessionIdsToLayout(ids: number[]): LayoutNode {
-  if (ids.length === 0) return { type: 'pane', sessionId: 0 };
-  if (ids.length === 1) return { type: 'pane', sessionId: ids[0] };
-  return {
-    type: 'split', axis: 'row',
-    sizes: ids.map(() => 1 / ids.length),
-    children: ids.map((id) => ({ type: 'pane' as const, sessionId: id })),
-  };
-}
-
 function reconcileWorkspacePanels(
   prevPanels: PanelState[],
   sessionIds: number[],
   memberNames: Map<number, string>,
   sessionCwds?: Map<number, string>,
 ): PanelState[] {
-  const unusedPrev = [...prevPanels];
-  const nextPanels = (sessionIds.length > 0 ? sessionIds : [undefined]).map((sessionId) => {
-    if (sessionId !== undefined) {
-      const matchedIndex = unusedPrev.findIndex((panel) => panel.sessionId === sessionId);
-      if (matchedIndex >= 0) {
-        const [matched] = unusedPrev.splice(matchedIndex, 1);
-        return { ...matched, sessionId, memberName: memberNames.get(sessionId), cwd: sessionCwds?.get(sessionId) ?? matched.cwd };
-      }
-    }
-
-    const fallback = unusedPrev.shift();
-    if (fallback) {
-      return {
-        ...fallback,
-        sessionId,
-        memberName: sessionId !== undefined ? memberNames.get(sessionId) : fallback.memberName,
-        cwd: sessionId !== undefined ? sessionCwds?.get(sessionId) ?? fallback.cwd : fallback.cwd,
-      };
-    }
-
-    return sessionId === undefined
-      ? { key: uuid() }
-      : { key: uuid(), sessionId, memberName: memberNames.get(sessionId), cwd: sessionCwds?.get(sessionId) };
+  return reconcileSessionPanels(prevPanels, sessionIds, {
+    createEmpty: () => ({ key: uuid() }),
+    createForSession: (sessionId) => ({
+      key: uuid(),
+      sessionId,
+      memberName: memberNames.get(sessionId),
+      cwd: sessionCwds?.get(sessionId),
+    }),
+    decorateSession: (panel, sessionId) => ({
+      ...panel,
+      sessionId,
+      memberName: memberNames.get(sessionId),
+      cwd: sessionCwds?.get(sessionId) ?? panel.cwd,
+    }),
+    clearUnassigned: (panel) => ({ ...panel, sessionId: undefined }),
   });
-
-  const pendingPanels = unusedPrev.filter((panel) => panel.sessionId === undefined);
-  if (pendingPanels.length > 0 && nextPanels.every((panel) => panel.sessionId !== undefined)) {
-    return [...nextPanels, ...pendingPanels];
-  }
-  return nextPanels;
 }
 
 function insertPanelRight(panels: PanelState[], focused: number, panel: PanelState): { panels: PanelState[]; focus: number } {
@@ -179,15 +155,17 @@ function movePanel(panels: PanelState[], fromIndex: number, toIndex: number): Pa
   return next;
 }
 
-function formatCwd(cwd?: string): string | null {
-  if (!cwd) return null;
-  return cwd.replace(/^\/Users\/[^/]+\b/, '~');
-}
-
 async function fetchSessionMeta(sessionId: number): Promise<SessionMeta> {
   const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/meta`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+}
+
+async function fetchSessionScreen(sessionId: number): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/screen`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return typeof data.screen === 'string' ? data.screen : '';
 }
 
 async function fetchWorkspaces(): Promise<Workspace[]> {
@@ -209,14 +187,146 @@ async function apiCreateWorkspace(ws: { id: string; name: string; layout: Layout
   } catch { return null; }
 }
 
-function workspaceLabel(workspace: Workspace): string {
-  return workspace.project && workspace.project !== 'default'
-    ? `${workspace.project}/${workspace.name}`
-    : workspace.name;
+function workspaceDisplayLabel(workspace: Workspace): string {
+  return workspaceLabel(workspace.project, workspace.name);
 }
 
-function memberNameBySession(workspace: Workspace): Map<number, string> {
-  return new Map((workspace.members || []).map((member) => [member.sessionId, member.name]));
+function xterm256Color(code: number): string {
+  if (code < 16) {
+    const base = [
+      '#000000', '#cd3131', '#0dbc79', '#e5e510',
+      '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
+      '#666666', '#f14c4c', '#23d18b', '#f5f543',
+      '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
+    ];
+    return base[code] ?? '#d4d4d4';
+  }
+  if (code >= 16 && code <= 231) {
+    const n = code - 16;
+    const r = Math.floor(n / 36);
+    const g = Math.floor((n % 36) / 6);
+    const b = n % 6;
+    const channel = [0, 95, 135, 175, 215, 255];
+    return `rgb(${channel[r]}, ${channel[g]}, ${channel[b]})`;
+  }
+  const gray = 8 + (code - 232) * 10;
+  return `rgb(${gray}, ${gray}, ${gray})`;
+}
+
+function ansiToHtml(value: string): string {
+  let result = '';
+  let index = 0;
+  let column = 0;
+  let fg = '#d4d4d4';
+  let bg = 'transparent';
+  let bold = false;
+  let open = false;
+
+  const close = () => {
+    if (open) {
+      result += '</span>';
+      open = false;
+    }
+  };
+
+  const openSpan = () => {
+    close();
+    result += `<span style="color:${fg};background:${bg};font-weight:${bold ? 600 : 400}">`;
+    open = true;
+  };
+
+  openSpan();
+
+  while (index < value.length) {
+    const char = value[index];
+    if (char === '\u001b') {
+      const cursorForward = /^\u001b\[([0-9]*)C/.exec(value.slice(index));
+      if (cursorForward) {
+        const amount = Number(cursorForward[1] || '1');
+        result += ' '.repeat(Math.max(0, amount));
+        column += Math.max(0, amount);
+        index += cursorForward[0].length;
+        continue;
+      }
+
+      const cursorBackward = /^\u001b\[([0-9]*)D/.exec(value.slice(index));
+      if (cursorBackward) {
+        const amount = Number(cursorBackward[1] || '1');
+        column = Math.max(0, column - Math.max(0, amount));
+        index += cursorBackward[0].length;
+        continue;
+      }
+
+      const cursorAbsolute = /^\u001b\[([0-9]*)G/.exec(value.slice(index));
+      if (cursorAbsolute) {
+        const target = Math.max(0, Number(cursorAbsolute[1] || '1') - 1);
+        if (target > column) result += ' '.repeat(target - column);
+        column = target;
+        index += cursorAbsolute[0].length;
+        continue;
+      }
+
+      const sgr = /^\u001b\[([0-9;]*)m/.exec(value.slice(index));
+      if (sgr) {
+        const codes = sgr[1].split(';').filter(Boolean).map((code) => Number(code));
+        if (codes.length === 0) codes.push(0);
+        for (let i = 0; i < codes.length; i += 1) {
+          const code = codes[i];
+          if (code === 0) {
+            fg = '#d4d4d4';
+            bg = 'transparent';
+            bold = false;
+          } else if (code === 1) {
+            bold = true;
+          } else if (code === 22) {
+            bold = false;
+          } else if (code === 39) {
+            fg = '#d4d4d4';
+          } else if (code === 49) {
+            bg = 'transparent';
+          } else if (code >= 30 && code <= 37) {
+            fg = xterm256Color(code - 30);
+          } else if (code >= 90 && code <= 97) {
+            fg = xterm256Color(code - 82);
+          } else if (code >= 40 && code <= 47) {
+            bg = xterm256Color(code - 40);
+          } else if (code >= 100 && code <= 107) {
+            bg = xterm256Color(code - 92);
+          } else if (code === 38 && codes[i + 1] === 5 && typeof codes[i + 2] === 'number') {
+            fg = xterm256Color(codes[i + 2]);
+            i += 2;
+          } else if (code === 48 && codes[i + 1] === 5 && typeof codes[i + 2] === 'number') {
+            bg = xterm256Color(codes[i + 2]);
+            i += 2;
+          }
+        }
+        openSpan();
+        index += sgr[0].length;
+        continue;
+      }
+
+      const otherEscape = /^\u001b(?:[@-Z\\-_]|\[[0-9;?]*[ -/]*[@-~])/.exec(value.slice(index));
+      if (otherEscape) {
+        index += otherEscape[0].length;
+        continue;
+      }
+    }
+
+    if (char === '&') result += '&amp;';
+    else if (char === '<') result += '&lt;';
+    else if (char === '>') result += '&gt;';
+    else if (char === '\n') {
+      result += '\n';
+      column = 0;
+    } else if (char !== '\r') {
+      result += char;
+      column += 1;
+    }
+    index += 1;
+  }
+
+  close();
+  return result;
 }
 
 function memberLabel(name: string | undefined, sessionId: number): string {
@@ -226,7 +336,7 @@ function memberLabel(name: string | undefined, sessionId: number): string {
 function sessionWorkspaceMembership(workspaces: Workspace[]): Map<number, { workspace: Workspace; memberName?: string }> {
   const membership = new Map<number, { workspace: Workspace; memberName?: string }>();
   for (const workspace of workspaces) {
-    const names = memberNameBySession(workspace);
+    const names = memberNameBySession(workspace.members);
     for (const sessionId of layoutToSessionIds(workspace.layout).filter((id) => id > 0)) {
       membership.set(sessionId, { workspace, memberName: names.get(sessionId) });
     }
@@ -303,6 +413,9 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
+  const [hoveredSessionId, setHoveredSessionId] = useState<number | null>(null);
+  const [hoveredScreen, setHoveredScreen] = useState<string>('hover a session to preview');
+  const [compactLayout, setCompactLayout] = useState(() => window.innerWidth < 1080);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -326,6 +439,46 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
 
   useEffect(() => { refresh(); }, [refresh]);
   const membership = sessionWorkspaceMembership(workspaces);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 1080px)');
+    const sync = () => setCompactLayout(media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      setHoveredSessionId(null);
+      setHoveredScreen('hover a session to preview');
+      return;
+    }
+    if (hoveredSessionId === null || !sessions.some((session) => session.id === hoveredSessionId)) {
+      setHoveredSessionId(sessions[0]!.id);
+    }
+  }, [sessions, hoveredSessionId]);
+
+  useEffect(() => {
+    if (hoveredSessionId === null) return;
+    let cancelled = false;
+
+    const tick = async () => {
+      try {
+        const screen = await fetchSessionScreen(hoveredSessionId);
+        if (!cancelled) setHoveredScreen(screen || 'no output yet');
+      } catch {
+        if (!cancelled) setHoveredScreen('preview unavailable');
+      }
+    };
+
+    void tick();
+    const timer = window.setInterval(() => { void tick(); }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [hoveredSessionId]);
 
   // 세션이 죽은 것을 워크스페이스에서 정리 (로딩 완료 후에만)
   useEffect(() => {
@@ -380,8 +533,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
   }, [mux, workspaces]);
 
   return (
-    <div style={{ padding: 32, fontFamily: 'monospace', color: '#ccc', maxWidth: 700 }}>
-      {/* OVERVIEW LINK */}
+    <div style={{ padding: 32, fontFamily: 'monospace', color: '#ccc', width: '100%', maxWidth: 1400, margin: '0 auto' }}>
       <div style={{ marginBottom: 24 }}>
         <button
           onClick={() => navigate({ page: 'overview' })}
@@ -391,9 +543,8 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
         </button>
       </div>
 
-      {/* WORKSPACES */}
       <div style={{ marginBottom: 32 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
           <h2 style={{ fontSize: 13, margin: 0, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>
             workspaces
           </h2>
@@ -410,11 +561,13 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
             {workspaces.map((ws) => (
               <div
                 key={ws.id}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#252525', cursor: 'pointer' }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#252525', cursor: 'pointer', minWidth: 0 }}
                 onClick={() => navigate({ page: 'workspace', id: ws.id })}
               >
-                <span style={{ color: '#eee', flex: 1 }}>{workspaceLabel(ws)}</span>
-                <span style={{ color: '#666', fontSize: 11 }}>
+                <span style={{ color: '#eee', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {workspaceDisplayLabel(ws)}
+                </span>
+                <span style={{ color: '#666', fontSize: 11, flexShrink: 0 }}>
                   {layoutToSessionIds(ws.layout).filter((id) => id > 0).length} session{layoutToSessionIds(ws.layout).filter((id) => id > 0).length !== 1 ? 's' : ''}
                 </span>
                 <button
@@ -430,9 +583,8 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
         )}
       </div>
 
-      {/* SESSIONS */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
           <h2 style={{ fontSize: 13, margin: 0, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>
             sessions
           </h2>
@@ -447,67 +599,127 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
             <span onClick={createSession} style={{ color: '#007acc', cursor: 'pointer' }}>create one</span>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {sessions.map((s) => (
-              (() => {
-                const info = membership.get(s.id);
-                const title = info?.memberName ? info.memberName : `#${s.id}`;
-                const meta = info ? workspaceLabel(info.workspace) : 'standalone';
-                return (
-              <div
-                key={s.id}
-                onClick={() => navigate({ page: 'session', id: s.id })}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px',
-                  background: '#252525', cursor: 'pointer',
-                  borderLeft: `3px solid ${s.status === 'attached' ? '#007acc' : '#555'}`,
-                }}
-              >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: 72 }}>
-                  <span style={{ color: '#eee', fontWeight: 600, width: 36 }}>#{s.id}</span>
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await copySessionUrl(s.id);
-                    }}
-                    style={miniLinkBtnStyle}
-                    title={`Copy ${getSessionUrl(s.id)}`}
-                  >
-                    copy
-                  </button>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: compactLayout ? 'minmax(0, 1fr)' : 'minmax(320px, 420px) minmax(0, 1fr)',
+            gap: 16,
+            alignItems: 'start',
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+              {sessions.map((s) => (
+                (() => {
+                  const info = membership.get(s.id);
+                  const title = info?.memberName ? info.memberName : `#${s.id}`;
+                  const meta = info ? workspaceDisplayLabel(info.workspace) : 'standalone';
+                  const hovered = hoveredSessionId === s.id;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => navigate({ page: 'session', id: s.id })}
+                      onMouseEnter={() => setHoveredSessionId(s.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '8px 12px',
+                        background: hovered ? '#2b2f35' : '#252525',
+                        cursor: 'pointer',
+                        borderLeft: `3px solid ${s.status === 'attached' ? '#007acc' : '#555'}`,
+                        minWidth: 0,
+                      }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: 72, flexShrink: 0 }}>
+                        <span style={{ color: '#eee', fontWeight: 600, width: 36 }}>#{s.id}</span>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await copySessionUrl(s.id);
+                          }}
+                          style={miniLinkBtnStyle}
+                          title={`Copy ${getSessionUrl(s.id)}`}
+                        >
+                          copy
+                        </button>
+                      </span>
+                      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+                        <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+                        <span style={{ color: '#666', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {meta} · {(sessionCwds[s.id] ? `${formatCwd(sessionCwds[s.id])} · ` : '')}{s.cmd.join(' ')}
+                        </span>
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0, marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                        <span style={{
+                          fontSize: 11, padding: '1px 6px', borderRadius: 3,
+                          background: s.status === 'attached' ? '#0d3a58' : '#333',
+                          color: s.status === 'attached' ? '#4fc3f7' : '#888',
+                          flexShrink: 0,
+                        }}>
+                          {s.status}
+                        </span>
+                        <span style={{ color: '#555', fontSize: 11, flexShrink: 0, width: 74, textAlign: 'right' }}>pid {s.pid}</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); navigate({ page: 'viewer', id: s.id }); }}
+                          style={{ ...actionBtnStyle, padding: '1px 6px', fontSize: 10, background: '#2a2a2a', flexShrink: 0 }}
+                          title="View readonly"
+                        >
+                          view
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); mux.destroySession(s.id); refresh(); }}
+                          style={{ ...closeBtnStyle, color: '#555', fontSize: 12, flexShrink: 0, marginLeft: 0 }}
+                          title="Kill session"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })()
+              ))}
+            </div>
+            <div
+              style={{
+                position: compactLayout ? 'relative' : 'sticky',
+                top: compactLayout ? 0 : 24,
+                background: '#1b1f24',
+                border: '1px solid #2d3440',
+                borderRadius: 4,
+                overflow: 'hidden',
+                minHeight: 320,
+                minWidth: 0,
+              }}
+            >
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 10px',
+                background: '#171b20',
+                borderBottom: '1px solid #2d3440',
+                fontSize: 11,
+              }}>
+                <span style={{ color: '#9fb3c8' }}>preview</span>
+                <span style={{ color: '#566373', marginLeft: 'auto' }}>
+                  {hoveredSessionId !== null ? `#${hoveredSessionId}` : 'no session'}
                 </span>
-                <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-                  <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-                  <span style={{ color: '#666', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {meta} · {(sessionCwds[s.id] ? `${formatCwd(sessionCwds[s.id])} · ` : '')}{s.cmd.join(' ')}
-                  </span>
-                </span>
-                <span style={{
-                  fontSize: 11, padding: '1px 6px', borderRadius: 3,
-                  background: s.status === 'attached' ? '#0d3a58' : '#333',
-                  color: s.status === 'attached' ? '#4fc3f7' : '#888',
-                }}>
-                  {s.status}
-                </span>
-                <span style={{ color: '#555', fontSize: 11 }}>pid {s.pid}</span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); navigate({ page: 'viewer', id: s.id }); }}
-                  style={{ ...actionBtnStyle, padding: '1px 6px', fontSize: 10, background: '#2a2a2a' }}
-                  title="View readonly"
-                >
-                  view
-                </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); mux.destroySession(s.id); refresh(); }}
-                  style={{ ...closeBtnStyle, color: '#555', fontSize: 12 }}
-                  title="Kill session"
-                >
-                  ×
-                </button>
               </div>
-                );
-              })()
-            ))}
+              <div
+                className="preview-scroll"
+                style={{
+                  minHeight: 280,
+                  height: compactLayout ? 320 : 'min(58vh, 620px)',
+                  overflow: 'auto',
+                  padding: '12px 14px',
+                  background: '#0f141a',
+                  color: '#d4d4d4',
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  whiteSpace: 'pre-wrap',
+                }}
+                dangerouslySetInnerHTML={{ __html: ansiToHtml(hoveredScreen) }}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -580,11 +792,22 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   const [draggedPanelKey, setDraggedPanelKey] = useState<string | null>(null);
   const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const initialized = useRef(false);
+  const bootstrappedInitialTerminal = useRef(false);
+  const hydrationSettled = useRef(false);
   const panelsRef = useRef(panels);
+  const mutationBarrierRef = useRef(new MutationBarrier());
 
   useEffect(() => {
     panelsRef.current = panels;
   }, [panels]);
+
+  useEffect(() => {
+    initialized.current = false;
+    bootstrappedInitialTerminal.current = false;
+    hydrationSettled.current = false;
+    setPanels([{ key: uuid() }]);
+    setFocused(0);
+  }, [workspaceId]);
 
   const refreshWorkspaceMeta = useCallback(async () => {
     try {
@@ -593,7 +816,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
       const ws: Workspace = await res.json();
       setWsName(ws.name);
       setWsProject(ws.project || 'default');
-      const names = memberNameBySession(ws);
+      const names = memberNameBySession(ws.members);
       const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
       const cwdEntries = await Promise.all(ids.map(async (id) => {
         try {
@@ -625,7 +848,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
         setMemberNames(Object.fromEntries((ws.members || []).map((member) => [member.sessionId, member.name])));
         const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
         if (ids.length > 0) {
-          const names = memberNameBySession(ws);
+          const names = memberNameBySession(ws.members);
           const cwdEntries = await Promise.all(ids.map(async (id) => {
             try {
               const meta = await fetchSessionMeta(id);
@@ -639,13 +862,17 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
           setPanels(ids.map((id) => ({ key: uuid(), sessionId: id, memberName: names.get(id), cwd: cwdMap.get(id) })));
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        hydrationSettled.current = true;
+      });
   }, [workspaceId]);
 
   useEffect(() => {
     let cancelled = false;
 
     const tick = async () => {
+      if (mutationBarrierRef.current.isLocked()) return;
       const hasPendingLocalPane = panelsRef.current.some((panel) => panel.sessionId === undefined);
       if (hasPendingLocalPane) return;
 
@@ -655,7 +882,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
         const ws: Workspace = await res.json();
         if (cancelled) return;
 
-        const names = memberNameBySession(ws);
+        const names = memberNameBySession(ws.members);
         const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
         const cwdEntries = await Promise.all(ids.map(async (id) => {
           try {
@@ -684,41 +911,47 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
 
   // 워크스페이스에 세션 ID 동기화 (서버)
   const syncWorkspace = useCallback((nextPanels: PanelState[]) => {
+    mutationBarrierRef.current.blockFor();
     const sessionIds = nextPanels.map((p) => p.sessionId).filter((id): id is number => id !== undefined);
     const layout = sessionIdsToLayout(sessionIds);
     apiUpdateWorkspace(workspaceId, { layout });
   }, [workspaceId]);
 
   const add = useCallback(async () => {
+    const endMutation = mutationBarrierRef.current.begin();
     const source = panelsRef.current[focused];
-    const ws = await apiSplitWorkspace(workspaceId, {
-      targetSessionId: source?.sessionId,
-      cwd: source?.cwd,
-      cols: 80,
-      rows: 24,
-    });
-    if (!ws) return;
-    setWsName(ws.name);
-    setWsProject(ws.project || 'default');
-    const names = memberNameBySession(ws);
-    const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-    const cwdEntries = await Promise.all(ids.map(async (id) => {
-      try {
-        const meta = await fetchSessionMeta(id);
-        return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-      } catch {
-        return [id, ''] as const;
+    try {
+      const ws = await apiSplitWorkspace(workspaceId, {
+        targetSessionId: source?.sessionId,
+        cwd: source?.cwd,
+        cols: 80,
+        rows: 24,
+      });
+      if (!ws) return;
+      setWsName(ws.name);
+      setWsProject(ws.project || 'default');
+      const names = memberNameBySession(ws.members);
+      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+      const cwdEntries = await Promise.all(ids.map(async (id) => {
+        try {
+          const meta = await fetchSessionMeta(id);
+          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+        } catch {
+          return [id, ''] as const;
+        }
+      }));
+      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
+      setMemberNames(Object.fromEntries(names));
+      setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
+      setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
+      if (source?.sessionId !== undefined) {
+        const targetIndex = ids.indexOf(source.sessionId);
+        if (targetIndex >= 0) setFocused(Math.min(targetIndex + 1, ids.length - 1));
+      } else {
+        setFocused(Math.max(0, ids.length - 1));
       }
-    }));
-    const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
-    setMemberNames(Object.fromEntries(names));
-    setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
-    setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
-    if (source?.sessionId !== undefined) {
-      const targetIndex = ids.indexOf(source.sessionId);
-      if (targetIndex >= 0) setFocused(Math.min(targetIndex + 1, ids.length - 1));
-    } else {
-      setFocused(Math.max(0, ids.length - 1));
+    } finally {
+      endMutation();
     }
   }, [focused, workspaceId]);
 
@@ -736,6 +969,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   }, [syncWorkspace]);
 
   const detachAt = useCallback((index: number) => {
+    mutationBarrierRef.current.blockFor();
     setPanels((prev) => {
       const panel = prev[index];
       if (panel?.sessionId !== undefined) mux.detachSession(panel.sessionId);
@@ -744,6 +978,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   }, [mux, updatePanelsAfterRemoval]);
 
   const terminateAt = useCallback((index: number) => {
+    mutationBarrierRef.current.blockFor();
     setPanels((prev) => {
       const panel = prev[index];
       if (panel?.sessionId !== undefined) mux.destroySession(panel.sessionId);
@@ -752,6 +987,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   }, [mux, updatePanelsAfterRemoval]);
 
   const detachWorkspace = useCallback(() => {
+    mutationBarrierRef.current.blockFor();
     setPanels((prev) => {
       for (const panel of prev) {
         if (panel.sessionId !== undefined) mux.detachSession(panel.sessionId);
@@ -762,34 +998,52 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
   }, [mux, syncWorkspace]);
 
   const removeAt = useCallback((index: number) => {
+    mutationBarrierRef.current.blockFor();
     setPanels((prev) => updatePanelsAfterRemoval(prev, index));
   }, [updatePanelsAfterRemoval]);
 
   const startAt = useCallback(async (index: number) => {
+    const endMutation = mutationBarrierRef.current.begin();
     const source = panelsRef.current[index] ?? panelsRef.current[Math.max(0, index - 1)];
-    const ws = await apiSplitWorkspace(workspaceId, {
-      targetSessionId: source?.sessionId,
-      cwd: source?.cwd,
-      cols: 80,
-      rows: 24,
-    });
-    if (!ws) return;
-    const names = memberNameBySession(ws);
-    const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-    const cwdEntries = await Promise.all(ids.map(async (id) => {
-      try {
-        const meta = await fetchSessionMeta(id);
-        return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-      } catch {
-        return [id, ''] as const;
-      }
-    }));
-    const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
-    setMemberNames(Object.fromEntries(names));
-    setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
-    setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
-    setFocused(Math.min(index, Math.max(0, ids.length - 1)));
+    try {
+      const ws = await apiSplitWorkspace(workspaceId, {
+        targetSessionId: source?.sessionId,
+        cwd: source?.cwd,
+        cols: 80,
+        rows: 24,
+      });
+      if (!ws) return;
+      const names = memberNameBySession(ws.members);
+      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+      const cwdEntries = await Promise.all(ids.map(async (id) => {
+        try {
+          const meta = await fetchSessionMeta(id);
+          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+        } catch {
+          return [id, ''] as const;
+        }
+      }));
+      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
+      setMemberNames(Object.fromEntries(names));
+      setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
+      setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
+      setFocused(Math.min(index, Math.max(0, ids.length - 1)));
+    } finally {
+      endMutation();
+    }
   }, [workspaceId]);
+
+  useEffect(() => {
+    if (bootstrappedInitialTerminal.current) return;
+    if (!shouldBootstrapWorkspacePanels({
+      initialized: initialized.current,
+      hydrated: hydrationSettled.current,
+      panels,
+    })) return;
+
+    bootstrappedInitialTerminal.current = true;
+    void startAt(0);
+  }, [panels, startAt]);
 
   const movePaneTo = useCallback((fromKey: string, toIndex: number) => {
     setPanels((prev) => {
@@ -1094,7 +1348,7 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
                 onClick={() => navigate({ page: 'workspace', id: ws.id })}
               >
                 <span style={{ color: '#ccc', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
-                  {workspaceLabel(ws)}
+                  {workspaceDisplayLabel(ws)}
                 </span>
                 <span style={{ color: '#555', fontSize: 11, fontFamily: 'monospace' }}>
                   {ws.liveSessions.length} session{ws.liveSessions.length !== 1 ? 's' : ''}
