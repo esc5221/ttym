@@ -10,9 +10,9 @@ import { CMD, encode, encodeData, decode, toBuffer, jsonPayload, parseJson } fro
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
-const BATCH_MS = 12;
+const BATCH_MS = 4;
 const MAX_BATCH_BYTES = 64 * 1024;
-const IMMEDIATE_THRESHOLD = 256; // bytes — flush immediately for interactive typing
+const IMMEDIATE_THRESHOLD = 512; // bytes — flush immediately for interactive typing
 const WS_HIGH_WATER = 1 << 20;
 const WS_LOW_WATER = 1 << 18;
 

@@ -28,6 +28,7 @@ export interface TerminalProps {
 // flow control 상수
 const PAUSE_HIGH = 1024 * 1024; // 1MB pending → PAUSE
 const RESUME_LOW = 256 * 1024;  // 256KB remaining → RESUME
+const IMMEDIATE_WRITE_BYTES = 512; // small interactive echo should skip the next animation frame
 
 export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, enableWebgl = true, className, style, onCreated, onExit, onBell }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -81,6 +82,13 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
     let writeBytes = 0;
     let paused = false;
 
+    const maybeResumeFlowControl = () => {
+      if (paused && writeBytes <= RESUME_LOW && sessionRef.current !== null) {
+        mux.resume(sessionRef.current);
+        paused = false;
+      }
+    };
+
     const flushWrites = () => {
       writeRaf = null;
       if (writeBytes === 0 || disposed) return;
@@ -91,16 +99,17 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
       writeChunks = [];
       writeBytes = 0;
 
-      term.write(merged, () => {
-        if (paused && writeBytes <= RESUME_LOW && sessionRef.current !== null) {
-          mux.resume(sessionRef.current);
-          paused = false;
-        }
-      });
+      term.write(merged, maybeResumeFlowControl);
     };
 
     const enqueueWrite = (data: Uint8Array) => {
       if (disposed) return;
+
+      if (writeRaf === null && writeBytes === 0 && data.length <= IMMEDIATE_WRITE_BYTES) {
+        term.write(data, maybeResumeFlowControl);
+        return;
+      }
+
       writeChunks.push(data);
       writeBytes += data.length;
 
