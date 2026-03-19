@@ -1,4 +1,7 @@
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { extname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
@@ -16,9 +19,85 @@ const WS_LOW_WATER = 1 << 18;
 const DEBUG = true;
 const log = (...args: unknown[]) => DEBUG && console.log(`[srv ${new Date().toISOString().slice(11, 23)}]`, ...args);
 
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const DEMO_DIST_DIR = resolve(__dirname, '../../demo/dist');
+
+const MIME_TYPES: Record<string, string> = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.txt': 'text/plain; charset=utf-8',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
 function safeSend(ws: WebSocket, data: Buffer): boolean {
   if (ws.readyState !== WebSocket.OPEN) return false;
   try { ws.send(data); return true; } catch { return false; }
+}
+
+function isSafeAssetPath(pathname: string): boolean {
+  return !pathname.includes('..');
+}
+
+async function serveStaticFile(res: ServerResponse, filePath: string): Promise<boolean> {
+  try {
+    const body = await readFile(filePath);
+    const contentType = MIME_TYPES[extname(filePath)] ?? 'application/octet-stream';
+    res.writeHead(200, {
+      'Cache-Control': 'public, max-age=300',
+      'Content-Type': contentType,
+    });
+    res.end(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function handleDemoApp(req: IncomingMessage, res: ServerResponse): boolean {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  const path = decodeURIComponent(url.pathname);
+
+  if (path.startsWith('/api/') || path === '/api' || path === '/ws') return false;
+  if (!isSafeAssetPath(path)) {
+    res.writeHead(400);
+    res.end('invalid path');
+    return true;
+  }
+
+  void (async () => {
+    const assetPath = path === '/' ? '/index.html' : path;
+    const requestedFile = resolve(DEMO_DIST_DIR, `.${assetPath}`);
+
+    if (extname(assetPath)) {
+      if (await serveStaticFile(res, requestedFile)) return;
+      res.writeHead(404);
+      res.end('not found');
+      return;
+    }
+
+    if (await serveStaticFile(res, requestedFile)) return;
+
+    const served = await serveStaticFile(res, resolve(DEMO_DIST_DIR, 'index.html'));
+    if (!served) {
+      res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('demo build not found: run `pnpm --dir demo build`');
+    }
+  })().catch((error) => {
+    console.error('Static serve error:', error);
+    if (!res.headersSent) res.writeHead(500);
+    res.end('internal error');
+  });
+
+  return true;
 }
 
 interface SessionBatch {
@@ -440,10 +519,11 @@ export async function createServer(port: number): Promise<TtymServer> {
   const httpServer = createHttpServer((req, res) => {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
     if (handleHttpApi(manager, workspaceStore, req, res)) return;
+    if (handleDemoApp(req, res)) return;
     res.writeHead(404);
     res.end('not found');
   });
-  const wss = new WebSocketServer({ server: httpServer });
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
   wss.on('connection', (ws: WebSocket) => {
     const viewerId = randomUUID();

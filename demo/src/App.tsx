@@ -80,11 +80,14 @@ function getTtymHost(): string {
   const h = window.location.hostname;
   // ttym-ui.lullu.lan → ttym.lullu.lan (Caddy proxy, port 80)
   if (h.startsWith('ttym-ui.')) return `ttym.${h.slice(8)}`;
-  // localhost / IP dev mode → same host, port 7690
+  // tunnel or same-origin proxy → use current host (Vite proxies /api and /ws)
+  if (h.startsWith('ttym.') || h === 'localhost' || h === '127.0.0.1') return window.location.host;
+  // fallback: same host, port 7690
   return `${h}:7690`;
 }
 const TTYM_HOST = getTtymHost();
-const API_BASE = `http://${TTYM_HOST}`;
+const isSecure = window.location.protocol === 'https:';
+const API_BASE = `${isSecure ? 'https' : 'http'}://${TTYM_HOST}`;
 
 function getTtymUiBase(): string {
   const { protocol, hostname } = window.location;
@@ -1464,9 +1467,15 @@ function App() {
   const [maxPanels, setMaxPanels] = useState(readMaxPanels);
 
   useEffect(() => {
-    const mux = new TerminalMux(`ws://${TTYM_HOST}`);
+    const wsUrl = `${isSecure ? 'wss' : 'ws'}://${TTYM_HOST}/ws`;
+    console.log('[ttym] TTYM_HOST:', TTYM_HOST);
+    console.log('[ttym] API_BASE:', API_BASE);
+    console.log('[ttym] WS URL:', wsUrl);
+    const mux = new TerminalMux(wsUrl);
     muxRef.current = mux;
-    mux.connect().then(() => setConnected(true));
+    mux.connect()
+      .then(() => { console.log('[ttym] connected'); setConnected(true); })
+      .catch((err) => console.error('[ttym] connect failed:', err));
     return () => mux.disconnect();
   }, []);
 
