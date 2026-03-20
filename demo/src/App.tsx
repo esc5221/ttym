@@ -57,6 +57,7 @@ interface Workspace {
 const DEFAULT_MAX_PANELS = 3;
 const MIN_MAX_PANELS = 1;
 const MAX_MAX_PANELS = 8;
+const LOCAL_ECHO_STORAGE_KEY = 'ttym-demo-local-echo';
 
 function clampMaxPanels(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_MAX_PANELS;
@@ -74,6 +75,20 @@ function writeMaxPanels(value: number) {
   const url = new URL(window.location.href);
   url.searchParams.set('maxPanels', String(next));
   window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+function readLocalEchoEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(LOCAL_ECHO_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeLocalEchoEnabled(value: boolean) {
+  try {
+    window.localStorage.setItem(LOCAL_ECHO_STORAGE_KEY, value ? '1' : '0');
+  } catch {}
 }
 
 /** Derive ttym server host from current page URL */
@@ -739,7 +754,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
 
 // ───── 단일 세션 페이지 ─────
 
-function SessionPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number }) {
+function SessionPage({ mux, sessionId, localEchoEnabled }: { mux: TerminalMux; sessionId: number; localEchoEnabled: boolean }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
@@ -756,7 +771,7 @@ function SessionPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number }
         </span>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <Terminal mux={mux} attachId={sessionId} onExit={() => navigate({ page: 'dashboard' })} />
+        <Terminal mux={mux} attachId={sessionId} localEcho={localEchoEnabled} onExit={() => navigate({ page: 'dashboard' })} />
       </div>
     </div>
   );
@@ -792,7 +807,7 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
 
 // ───── 워크스페이스 페이지 (분할 터미널) ─────
 
-function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; workspaceId: string; maxPanels: number }) {
+function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux: TerminalMux; workspaceId: string; maxPanels: number; localEchoEnabled: boolean }) {
   const [wsName, setWsName] = useState(workspaceId);
   const [wsProject, setWsProject] = useState('default');
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
@@ -1257,6 +1272,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                     <Terminal
                       mux={mux}
                       attachId={panel.sessionId}
+                      localEcho={localEchoEnabled}
                       onExit={() => markDeadAt(i)}
                     />
                   ) : (
@@ -1297,10 +1313,14 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
 
 function SettingsOverlay({
   maxPanels,
+  localEchoEnabled,
   onChange,
+  onLocalEchoChange,
 }: {
   maxPanels: number;
+  localEchoEnabled: boolean;
   onChange: (value: number) => void;
+  onLocalEchoChange: (value: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -1331,6 +1351,15 @@ function SettingsOverlay({
               style={settingsInputStyle}
             />
           </label>
+          <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span style={settingsLabelStyle}>optimistic local echo</span>
+            <input
+              type="checkbox"
+              checked={localEchoEnabled}
+              onChange={(event) => onLocalEchoChange(event.target.checked)}
+            />
+          </label>
+          <div style={settingsHintStyle}>experimental: predicts printable shell echo before server confirmation</div>
           <div style={settingsHintStyle}>query: `maxPanels` (columns per row)</div>
         </div>
       ) : null}
@@ -1523,6 +1552,7 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [route, setRoute] = useState<Route>(parseHash);
   const [maxPanels, setMaxPanels] = useState(readMaxPanels);
+  const [localEchoEnabled, setLocalEchoEnabled] = useState(readLocalEchoEnabled);
 
   useEffect(() => {
     const wsUrl = `${isSecure ? 'wss' : 'ws'}://${TTYM_HOST}/ws`;
@@ -1555,6 +1585,11 @@ function App() {
     setMaxPanels(next);
   }, []);
 
+  const handleLocalEchoChange = useCallback((value: boolean) => {
+    writeLocalEchoEnabled(value);
+    setLocalEchoEnabled(value);
+  }, []);
+
   if (!connected || !muxRef.current) {
     return (
       <div style={{ color: '#888', padding: 40, fontFamily: 'monospace' }}>
@@ -1572,13 +1607,13 @@ function App() {
       page = <OverviewPage mux={mux} />;
       break;
     case 'session':
-      page = <SessionPage mux={mux} sessionId={route.id} />;
+      page = <SessionPage mux={mux} sessionId={route.id} localEchoEnabled={localEchoEnabled} />;
       break;
     case 'viewer':
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} maxPanels={maxPanels} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} maxPanels={maxPanels} localEchoEnabled={localEchoEnabled} />;
       break;
     default:
       page = <DashboardPage mux={mux} />;
@@ -1588,7 +1623,12 @@ function App() {
   return (
     <>
       {page}
-      <SettingsOverlay maxPanels={maxPanels} onChange={handleMaxPanelsChange} />
+      <SettingsOverlay
+        maxPanels={maxPanels}
+        localEchoEnabled={localEchoEnabled}
+        onChange={handleMaxPanelsChange}
+        onLocalEchoChange={handleLocalEchoChange}
+      />
     </>
   );
 }

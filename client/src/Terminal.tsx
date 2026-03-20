@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import type { IDisposable } from '@xterm/xterm';
 import type { TerminalMux, CreateOptions } from './mux';
+import { LocalEchoController } from './local-echo';
 
 export interface TerminalProps {
   mux: TerminalMux;
@@ -18,6 +19,7 @@ export interface TerminalProps {
   /** xterm 폰트 크기 (기본 14) */
   fontSize?: number;
   enableWebgl?: boolean;
+  localEcho?: boolean;
   className?: string;
   style?: React.CSSProperties;
   onCreated?: (sessionId: number) => void;
@@ -30,7 +32,7 @@ const PAUSE_HIGH = 1024 * 1024; // 1MB pending → PAUSE
 const RESUME_LOW = 256 * 1024;  // 256KB remaining → RESUME
 const IMMEDIATE_WRITE_BYTES = 512; // small interactive echo should skip the next animation frame
 
-export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, enableWebgl = true, className, style, onCreated, onExit, onBell }: TerminalProps) {
+export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, enableWebgl = true, localEcho = false, className, style, onCreated, onExit, onBell }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sessionRef = useRef<number | null>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -81,6 +83,14 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
     let writeChunks: Uint8Array[] = [];
     let writeBytes = 0;
     let paused = false;
+    const localEchoController = new LocalEchoController({
+      writeOptimistic: (text) => term.write(text),
+      writeOptimisticBackspace: () => term.write('\b \b'),
+      requestSnapshot: () => {
+        if (sessionRef.current !== null) mux.requestSnapshot(sessionRef.current);
+      },
+    });
+    localEchoController.setEnabled(localEcho && !isReadonly);
 
     const maybeResumeFlowControl = () => {
       if (paused && writeBytes <= RESUME_LOW && sessionRef.current !== null) {
@@ -122,14 +132,19 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
 
     const handleSnapshot = (snapStr: string) => {
       if (disposed) return;
+      localEchoController.handleSnapshot();
       term.reset();
       term.write(snapStr);
     };
 
     const wireInput = (id: number) => {
       if (isReadonly) return; // readonly는 입력 안 함
-      disposables.push(term.onData((data) => mux.send(id, data)));
+      disposables.push(term.onData((data) => {
+        localEchoController.handleLocalInput(data);
+        mux.send(id, data);
+      }));
       disposables.push(term.onBinary((data) => {
+        localEchoController.handleBinaryInput();
         const bytes = new Uint8Array(data.length);
         for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i);
         mux.send(id, bytes);
@@ -138,7 +153,10 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
     };
 
     const callbacks = {
-      onData: enqueueWrite,
+      onData: (data: Uint8Array) => {
+        const reconciled = localEchoController.reconcileServerData(data);
+        if (reconciled.length > 0) enqueueWrite(reconciled);
+      },
       onSnapshot: handleSnapshot,
       onExit: () => {
         if (disposed) return;
@@ -208,7 +226,7 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
       fitRef.current = null;
       termRef.current = null;
     };
-  }, [mux, cmd, cwd, attachId, mode, enableWebgl]);
+  }, [mux, cmd, cwd, attachId, mode, enableWebgl, localEcho]);
 
   useEffect(() => {
     const term = termRef.current;

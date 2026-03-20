@@ -57,7 +57,7 @@ class TestClient {
 }
 
 async function openClient(port: number): Promise<TestClient> {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
     ws.once('error', reject);

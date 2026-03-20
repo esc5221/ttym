@@ -134,8 +134,6 @@ export class TerminalMux {
       this.pendingList.reject(error);
       this.pendingList = null;
     }
-    // notify sessions
-    for (const session of this.sessions.values()) session.onExit?.();
     this.sessions.clear();
     this._lastSeqs.clear();
     this.ws = null;
@@ -351,6 +349,10 @@ export class TerminalMux {
 
   resume(sessionId: number) {
     this.sendRaw(encode(sessionId, CMD.RESUME));
+  }
+
+  requestSnapshot(sessionId: number) {
+    this.sendRaw(encode(sessionId, CMD.SNAPSHOT));
   }
 
   destroySession(sessionId: number) {

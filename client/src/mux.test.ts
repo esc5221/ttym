@@ -115,14 +115,15 @@ describe('TerminalMux', () => {
     expect(JSON.parse(new TextDecoder().decode(resume!.payload))).toEqual({ fromSeq: 4 });
   });
 
-  it('detaches tracked sessions on disconnect', async () => {
+  it('detaches tracked sessions on disconnect without faking session exit', async () => {
     const mux = new TerminalMux('ws://example.test');
     const connected = mux.connect();
     const socket = FakeWebSocket.latest();
     socket.open();
     await connected;
 
-    const createPromise = mux.createSession({}, { onData: vi.fn() });
+    const onExit = vi.fn();
+    const createPromise = mux.createSession({}, { onData: vi.fn(), onExit });
     socket.emitMessage(encode(5, CMD.CREATE, new TextEncoder().encode(JSON.stringify({ ok: true }))));
     await createPromise;
 
@@ -131,6 +132,7 @@ describe('TerminalMux', () => {
     const sentCommands = socket.sent.map((frame) => decode(toArrayBuffer(frame))!.cmd);
     expect(sentCommands).toContain(CMD.DETACH);
     expect(sentCommands).not.toContain(CMD.DESTROY);
+    expect(onExit).not.toHaveBeenCalled();
   });
 
   it('chunks oversized data frames for large pastes', async () => {
