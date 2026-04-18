@@ -7,13 +7,38 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import process from 'node:process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const { WebSocket } = require('ws');
 const HOME_DIR = resolve(process.env.HOME || '/tmp', '.ttym');
 const PID_FILE = resolve(HOME_DIR, 'ttym.pid');
 const LOG_FILE = resolve(HOME_DIR, 'ttym.log');
 const SERVER_JS = resolve(__dirname, 'ttym-server.js');
 const HOLDER_BIN = resolve(__dirname, 'ttym-holder');
+const HTTP_TIMEOUT_MS = parseInt(process.env.TTYM_HTTP_TIMEOUT_MS || '5000', 10);
+const ATTACH_RETRY_MS = parseInt(process.env.TTYM_ATTACH_RETRY_MS || '1000', 10);
+const DETACH_KEY = '\u001d';
+
+const CMD = {
+  DATA: 0x00,
+  RESIZE: 0x01,
+  CREATE: 0x02,
+  DESTROY: 0x03,
+  PAUSE: 0x04,
+  RESUME: 0x05,
+  HELLO: 0x06,
+  LIST: 0x07,
+  ATTACH: 0x08,
+  DETACH: 0x09,
+  SNAPSHOT: 0x0a,
+  ACK: 0x0b,
+  PAUSE_VIEW: 0x0c,
+  RESUME_VIEW: 0x0d,
+};
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 // ───── Helpers ─────
 
@@ -44,7 +69,7 @@ function fetchJson(port, path) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(2000, () => { req.destroy(); reject(new Error('timeout')); });
+    req.setTimeout(HTTP_TIMEOUT_MS, () => { req.destroy(); reject(new Error(`timeout after ${HTTP_TIMEOUT_MS}ms`)); });
   });
 }
 
@@ -74,7 +99,7 @@ function fetchRequest(port, method, path, body) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(2000, () => { req.destroy(); reject(new Error('timeout')); });
+    req.setTimeout(HTTP_TIMEOUT_MS, () => { req.destroy(); reject(new Error(`timeout after ${HTTP_TIMEOUT_MS}ms`)); });
     if (data !== null) req.write(data);
     req.end();
   });
@@ -96,6 +121,52 @@ function printOutput(value, asJson = false) {
     return;
   }
   console.log(value);
+}
+
+function encodeFrame(sessionId, cmd, payload = Buffer.alloc(0)) {
+  const body = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+  const frame = Buffer.allocUnsafe(3 + body.length);
+  frame.writeUInt16LE(sessionId, 0);
+  frame[2] = cmd;
+  if (body.length > 0) body.copy(frame, 3);
+  return frame;
+}
+
+function encodeDataFrame(sessionId, seq, payload) {
+  const body = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
+  const frame = Buffer.allocUnsafe(7 + body.length);
+  frame.writeUInt16LE(sessionId, 0);
+  frame[2] = CMD.DATA;
+  frame.writeUInt32LE(seq, 3);
+  body.copy(frame, 7);
+  return frame;
+}
+
+function decodeFrame(raw) {
+  const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+  const sessionId = buf.readUInt16LE(0);
+  const cmd = buf[2];
+  if (cmd === CMD.DATA && buf.length >= 7) {
+    return {
+      sessionId,
+      cmd,
+      seq: buf.readUInt32LE(3),
+      payload: buf.subarray(7),
+    };
+  }
+  return {
+    sessionId,
+    cmd,
+    payload: buf.subarray(3),
+  };
+}
+
+function parseFrameJson(payload) {
+  try {
+    return JSON.parse(decoder.decode(payload));
+  } catch {
+    return null;
+  }
 }
 
 // ───── Commands ─────
@@ -193,6 +264,211 @@ async function cmdStatus() {
   } catch {
     console.log('sessions: (could not fetch)');
   }
+}
+
+async function cmdAttach() {
+  const args = process.argv.slice(3).filter((value) => value !== '--json');
+  const readonly = args.includes('--readonly');
+  const filtered = args.filter((value) => value !== '--readonly');
+  const targetToken = filtered[0];
+  if (!targetToken) {
+    console.error('usage: ttym attach <session-id|project/workspace/member|workspace/member> [--readonly]');
+    process.exit(1);
+  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error('ttym attach requires an interactive TTY');
+    process.exit(1);
+  }
+
+  const port = getPort();
+  const target = await resolveAttachTarget(port, targetToken);
+  const mode = readonly ? 'readonly' : 'readwrite';
+  const wsUrl = `ws://127.0.0.1:${port}`;
+
+  let ws = null;
+  let connected = false;
+  let detached = false;
+  let closed = false;
+  let reconnectTimer = null;
+  let restoreTty = null;
+  let lastSeq = 0;
+  let lastSnapshot = '';
+  let lastInfo = null;
+  let statusMessage = '';
+
+  function writeStdout(data) {
+    try { process.stdout.write(data); } catch {}
+  }
+
+  function showStatus(text) {
+    statusMessage = text;
+    writeStdout(`\r\n\x1b[2m[ttym] ${text}\x1b[0m\r\n`);
+  }
+
+  function applySnapshot(snapshot) {
+    lastSnapshot = snapshot;
+    writeStdout('\x1b[?25l\x1b[H\x1b[2J');
+    writeStdout(snapshot);
+    writeStdout('\x1b[?25h');
+  }
+
+  function sendFrame(frame) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(frame);
+    }
+  }
+
+  function sendHello() {
+    sendFrame(encodeFrame(0, CMD.HELLO, encoder.encode(JSON.stringify({ clientId: randomUUID() }))));
+  }
+
+  function sendAttach() {
+    sendFrame(encodeFrame(target.sessionId, CMD.ATTACH, encoder.encode(JSON.stringify({
+      fromSeq: lastSeq,
+      cols: process.stdout.columns || 80,
+      rows: process.stdout.rows || 24,
+      mode,
+    }))));
+  }
+
+  function sendDetach() {
+    sendFrame(encodeFrame(target.sessionId, CMD.DETACH));
+  }
+
+  function sendResize() {
+    const cols = process.stdout.columns || lastInfo?.cols || 80;
+    const rows = process.stdout.rows || lastInfo?.rows || 24;
+    const payload = Buffer.allocUnsafe(4);
+    payload.writeUInt16LE(cols, 0);
+    payload.writeUInt16LE(rows, 2);
+    sendFrame(encodeFrame(target.sessionId, CMD.RESIZE, payload));
+  }
+
+  function scheduleReconnect() {
+    if (detached || closed || reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, ATTACH_RETRY_MS);
+  }
+
+  function cleanup(exitCode = 0) {
+    if (closed) return;
+    closed = true;
+    detached = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    process.stdin.off('data', onInput);
+    process.stdout.off('resize', onResize);
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+    if (ws) {
+      try { ws.close(); } catch {}
+      ws = null;
+    }
+    if (restoreTty) restoreTty();
+    if (statusMessage) writeStdout('\r\n');
+    process.exit(exitCode);
+  }
+
+  function onSignal() {
+    detached = true;
+    try { sendDetach(); } catch {}
+    cleanup(0);
+  }
+
+  function onResize() {
+    if (connected && mode === 'readwrite') sendResize();
+  }
+
+  function onInput(chunk) {
+    const data = Buffer.from(chunk);
+    if (!readonly && data.length === 1 && data[0] === 0x1d) {
+      detached = true;
+      sendDetach();
+      cleanup(0);
+      return;
+    }
+    if (readonly) return;
+    sendFrame(encodeFrame(target.sessionId, CMD.DATA, data));
+  }
+
+  function connect() {
+    if (closed || detached) return;
+    showStatus(connected ? `reconnecting ${target.label}` : `connecting ${target.label}`);
+    ws = new WebSocket(wsUrl);
+    ws.binaryType = 'nodebuffer';
+
+    ws.on('open', () => {
+      connected = true;
+      sendHello();
+      sendAttach();
+    });
+
+    ws.on('message', (raw) => {
+      const frame = decodeFrame(raw);
+      if (frame.sessionId !== target.sessionId && frame.sessionId !== 0) return;
+
+      if (frame.cmd === CMD.ATTACH) {
+        const meta = parseFrameJson(frame.payload);
+        if (!meta?.ok) {
+          showStatus(meta?.error || 'attach failed');
+          detached = true;
+          cleanup(1);
+          return;
+        }
+        lastInfo = meta;
+        lastSeq = typeof meta.lastSeq === 'number' ? meta.lastSeq : lastSeq;
+        showStatus(`${target.label} attached ${mode === 'readonly' ? '(readonly)' : `(detach: Ctrl-])`}`);
+        if (mode === 'readwrite') sendResize();
+        return;
+      }
+
+      if (frame.cmd === CMD.SNAPSHOT) {
+        applySnapshot(decoder.decode(frame.payload));
+        return;
+      }
+
+      if (frame.cmd === CMD.DATA) {
+        if (typeof frame.seq === 'number') {
+          lastSeq = frame.seq;
+          sendFrame(encodeFrame(target.sessionId, CMD.ACK, encoder.encode(JSON.stringify({ seq: frame.seq }))));
+        }
+        writeStdout(frame.payload);
+        return;
+      }
+
+      if (frame.cmd === CMD.DESTROY) {
+        showStatus(`${target.label} exited`);
+        detached = true;
+        cleanup(0);
+      }
+    });
+
+    ws.on('close', () => {
+      connected = false;
+      if (closed || detached) return;
+      showStatus(`connection lost, retrying in ${ATTACH_RETRY_MS}ms`);
+      scheduleReconnect();
+    });
+
+    ws.on('error', () => {
+      connected = false;
+    });
+  }
+
+  const wasRaw = process.stdin.isRaw;
+  process.stdin.setRawMode(true);
+  process.stdin.resume();
+  process.stdin.on('data', onInput);
+  process.stdout.on('resize', onResize);
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  restoreTty = () => {
+    if (process.stdin.isTTY) process.stdin.setRawMode(Boolean(wasRaw));
+  };
+
+  connect();
 }
 
 function cmdLog() {
@@ -369,6 +645,61 @@ async function resolveWorkspace(port, token) {
   }
 
   console.error(`workspace not found: ${token}`);
+  process.exit(1);
+}
+
+async function resolveAttachTarget(port, token) {
+  const normalized = normalizeAddressToken(token);
+  if (!normalized) {
+    console.error('attach target is required');
+    process.exit(1);
+  }
+
+  if (/^\d+$/.test(normalized)) {
+    const sessionId = parseInt(normalized, 10);
+    return {
+      sessionId,
+      label: `#${sessionId}`,
+      workspace: null,
+      member: null,
+    };
+  }
+
+  const parts = normalized.split('/');
+  if (parts.length >= 3) {
+    const workspaceToken = `${parts[0]}/${parts[1]}`;
+    const memberToken = parts.slice(2).join('/');
+    const workspace = await resolveWorkspace(port, workspaceToken);
+    const member = requireMember(workspace, memberToken);
+    return {
+      sessionId: member.sessionId,
+      label: memberAddress(workspace, member),
+      workspace,
+      member,
+    };
+  }
+
+  if (parts.length === 2) {
+    const [workspaceName, memberToken] = parts;
+    const workspaces = await listWorkspaces(port);
+    const matches = workspaces.filter((workspace) => workspace.name === workspaceName);
+    if (matches.length === 1) {
+      const workspace = matches[0];
+      const member = requireMember(workspace, memberToken);
+      return {
+        sessionId: member.sessionId,
+        label: memberAddress(workspace, member),
+        workspace,
+        member,
+      };
+    }
+    if (matches.length > 1) {
+      console.error(`workspace name is ambiguous: ${workspaceName}`);
+      process.exit(1);
+    }
+  }
+
+  console.error(`attach target not found: ${token}`);
   process.exit(1);
 }
 
@@ -998,6 +1329,7 @@ async function cmdAgent() {
 const cmd = process.argv[2];
 
 switch (cmd) {
+  case 'attach':  await cmdAttach(); break;
   case 'start':   cmdStart(); break;
   case 'stop':    cmdStop(); break;
   case 'restart': cmdRestart(); break;
@@ -1016,6 +1348,7 @@ switch (cmd) {
     console.log('  start [--port 7690]          Start server in background');
     console.log('  stop                         Stop server (holders survive)');
     console.log('  restart                      Restart server');
+    console.log('  attach <target>              Attach to session or workspace member');
     console.log('  status                       Show server & session info');
     console.log('  current                      Show current project/workspace/member context');
     console.log('  project list                 List projects');
