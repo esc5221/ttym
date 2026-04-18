@@ -1077,6 +1077,7 @@ const AGENTS = {
     name: 'Claude Code',
     settingsPath: resolve(process.env.HOME || '/tmp', '.claude', 'settings.json'),
     metaKey: 'claudeSessionId',
+    lastMetaKey: 'claudeLastSessionId',
     hooks: [
       {
         event: 'SessionStart',
@@ -1095,6 +1096,7 @@ const AGENTS = {
     name: 'Codex CLI (experimental)',
     settingsPath: resolve(process.env.HOME || '/tmp', '.codex', 'hooks.json'),
     metaKey: 'codexSessionId',
+    lastMetaKey: 'codexLastSessionId',
     hooks: [
       {
         event: 'SessionStart',
@@ -1240,14 +1242,21 @@ async function cmdAgent() {
     const port = getPort();
     try {
       const meta = await fetchJson(port, `/api/sessions/${parseInt(sid, 10)}/meta`);
-      if (!meta || (!meta.claudeSessionId && !meta.codexSessionId)) {
+      let found = false;
+      for (const [key, cfg] of Object.entries(AGENTS)) {
+        const active = meta?.[cfg.metaKey];
+        const last = meta?.[cfg.lastMetaKey];
+        if (active) {
+          console.log(`  ${key}: ${active} (active)`);
+          found = true;
+        } else if (last) {
+          console.log(`  ${key}: ${last} (last)`);
+          found = true;
+        }
+      }
+      if (!found) {
         console.log('no agent session linked');
         return;
-      }
-      for (const [key, cfg] of Object.entries(AGENTS)) {
-        if (meta[cfg.metaKey]) {
-          console.log(`  ${key}: ${meta[cfg.metaKey]}`);
-        }
       }
     } catch {
       console.error('failed to connect to ttym server');
@@ -1279,19 +1288,28 @@ async function cmdAgent() {
     if (agentName) {
       // Explicit agent
       const cfg = resolveAgent(agentName);
-      targetSessionId = meta?.[cfg.metaKey];
+      targetSessionId = meta?.[cfg.metaKey] || meta?.[cfg.lastMetaKey];
       if (!targetSessionId) {
         console.error(`no ${cfg.name} session linked to this ttym session`);
         process.exit(1);
       }
       targetCfg = cfg;
     } else {
-      // Auto-detect: try each agent in order
+      // Auto-detect: try active first, then last session
       for (const [, cfg] of Object.entries(AGENTS)) {
         if (meta?.[cfg.metaKey]) {
           targetCfg = cfg;
           targetSessionId = meta[cfg.metaKey];
           break;
+        }
+      }
+      if (!targetCfg) {
+        for (const [, cfg] of Object.entries(AGENTS)) {
+          if (meta?.[cfg.lastMetaKey]) {
+            targetCfg = cfg;
+            targetSessionId = meta[cfg.lastMetaKey];
+            break;
+          }
         }
       }
       if (!targetCfg) {
