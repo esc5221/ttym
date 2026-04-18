@@ -41,6 +41,7 @@ interface PanelState {
   sessionId?: number;
   memberName?: string;
   cwd?: string;
+  dead?: boolean;
 }
 
 interface Workspace {
@@ -359,6 +360,12 @@ async function apiUpdateWorkspace(id: string, patch: { name?: string; layout?: L
 async function apiDeleteWorkspace(id: string): Promise<void> {
   try {
     await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  } catch {}
+}
+
+async function apiRemoveMember(wsId: string, sessionId: number): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(wsId)}/members/${sessionId}`, { method: 'DELETE' });
   } catch {}
 }
 
@@ -1005,6 +1012,45 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
     setPanels((prev) => updatePanelsAfterRemoval(prev, index));
   }, [updatePanelsAfterRemoval]);
 
+  const markDeadAt = useCallback((index: number) => {
+    setPanels((prev) => prev.map((p, i) => i === index ? { ...p, dead: true } : p));
+  }, []);
+
+  const restartAt = useCallback(async (index: number) => {
+    const endMutation = mutationBarrierRef.current.begin();
+    const panel = panelsRef.current[index];
+    try {
+      if (panel?.sessionId !== undefined) {
+        await apiRemoveMember(workspaceId, panel.sessionId);
+      }
+      const neighbor = panelsRef.current.find((p, i) => i !== index && p.sessionId !== undefined && !p.dead);
+      const ws = await apiSplitWorkspace(workspaceId, {
+        targetSessionId: neighbor?.sessionId,
+        cwd: panel?.cwd ?? neighbor?.cwd,
+        cols: 80,
+        rows: 24,
+      });
+      if (!ws) return;
+      const names = memberNameBySession(ws.members);
+      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+      const cwdEntries = await Promise.all(ids.map(async (id) => {
+        try {
+          const meta = await fetchSessionMeta(id);
+          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+        } catch {
+          return [id, ''] as const;
+        }
+      }));
+      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
+      setMemberNames(Object.fromEntries(names));
+      setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
+      setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
+      setFocused(index);
+    } finally {
+      endMutation();
+    }
+  }, [workspaceId]);
+
   const startAt = useCallback(async (index: number) => {
     const endMutation = mutationBarrierRef.current.begin();
     const source = panelsRef.current[index] ?? panelsRef.current[Math.max(0, index - 1)];
@@ -1137,7 +1183,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                 <div style={{
                   display: 'flex', alignItems: 'center', height: 34, padding: '0 8px',
                   background: isFocused ? '#1e1e1e' : '#181818',
-                  borderTop: isFocused ? '2px solid #007acc' : '2px solid transparent',
+                  borderTop: panel.dead ? '2px solid #a55' : isFocused ? '2px solid #007acc' : '2px solid transparent',
                   borderBottom: '1px solid #333', flexShrink: 0, userSelect: 'none',
                 }}
                 draggable
@@ -1207,24 +1253,36 @@ function WorkspacePage({ mux, workspaceId, maxPanels }: { mux: TerminalMux; work
                   )}
                 </div>
                 <div style={{ flex: 1, minHeight: 0 }}>
-                  {panel.sessionId !== undefined ? (
+                  {panel.sessionId !== undefined && !panel.dead ? (
                     <Terminal
                       mux={mux}
                       attachId={panel.sessionId}
-                      onExit={() => removeAt(i)}
+                      onExit={() => markDeadAt(i)}
                     />
                   ) : (
                     <div style={{
                       height: '100%',
                       display: 'flex',
+                      flexDirection: 'column',
                       alignItems: 'center',
                       justifyContent: 'center',
                       background: '#151515',
                       color: '#666',
                       fontFamily: 'monospace',
                       fontSize: 12,
+                      gap: 8,
                     }}>
-                      <button onClick={() => void startAt(i)} style={actionBtnStyle}>start terminal</button>
+                      {panel.dead ? (
+                        <>
+                          <span style={{ color: '#a55', fontSize: 11 }}>session ended</span>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button onClick={() => void restartAt(i)} style={actionBtnStyle}>restart</button>
+                            <button onClick={() => removeAt(i)} style={{ ...actionBtnStyle, background: '#333', color: '#888' }}>close</button>
+                          </div>
+                        </>
+                      ) : (
+                        <button onClick={() => void startAt(i)} style={actionBtnStyle}>start terminal</button>
+                      )}
                     </div>
                   )}
                 </div>
