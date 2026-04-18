@@ -19,11 +19,11 @@ const WS_LOW_WATER = 1 << 18;
 const DEBUG = true;
 const log = (...args: unknown[]) => DEBUG && console.log(`[srv ${new Date().toISOString().slice(11, 23)}]`, ...args);
 
-const __dirname = fileURLToPath(new URL('.', import.meta.url));
+const SERVER_DIR = fileURLToPath(new URL('.', import.meta.url));
 // Works both from source (server/src/) and bundle (dist/)
 const DEMO_DIST_DIR = (() => {
-  const fromSource = resolve(__dirname, '../../demo/dist');
-  const fromBundle = resolve(__dirname, '../demo/dist');
+  const fromSource = resolve(SERVER_DIR, '../../demo/dist');
+  const fromBundle = resolve(SERVER_DIR, '../demo/dist');
   try { require('fs').statSync(fromSource); return fromSource; } catch {}
   return fromBundle;
 })();
