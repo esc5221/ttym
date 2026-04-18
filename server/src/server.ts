@@ -20,7 +20,13 @@ const DEBUG = true;
 const log = (...args: unknown[]) => DEBUG && console.log(`[srv ${new Date().toISOString().slice(11, 23)}]`, ...args);
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const DEMO_DIST_DIR = resolve(__dirname, '../../demo/dist');
+// Works both from source (server/src/) and bundle (dist/)
+const DEMO_DIST_DIR = (() => {
+  const fromSource = resolve(__dirname, '../../demo/dist');
+  const fromBundle = resolve(__dirname, '../demo/dist');
+  try { require('fs').statSync(fromSource); return fromSource; } catch {}
+  return fromBundle;
+})();
 
 const MIME_TYPES: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
