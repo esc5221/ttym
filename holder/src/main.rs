@@ -245,11 +245,18 @@ fn main() {
             }
             // Clean inherited env vars that prevent nesting (e.g. Claude Code sets CLAUDECODE=1)
             for key in &[
+                "NO_COLOR",
                 "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT",
                 "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
             ] {
                 let ckey = CString::new(*key).unwrap();
                 unsafe { libc::unsetenv(ckey.as_ptr()); }
+            }
+            unsafe {
+                libc::setenv(b"CLICOLOR\0".as_ptr() as *const _, b"1\0".as_ptr() as *const _, 0);
+                libc::setenv(b"CLICOLOR_FORCE\0".as_ptr() as *const _, b"1\0".as_ptr() as *const _, 0);
+                libc::setenv(b"FORCE_COLOR\0".as_ptr() as *const _, b"1\0".as_ptr() as *const _, 0);
+                libc::setenv(b"COLORTERM\0".as_ptr() as *const _, b"truecolor\0".as_ptr() as *const _, 0);
             }
             // Change working directory if --cwd was specified
             if let Some(ref cwd) = config.cwd {

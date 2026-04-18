@@ -52,6 +52,20 @@ function getSyncBlockTimeoutMs(): number {
   return Number.parseInt(process.env.TTYM_SYNC_BLOCK_TIMEOUT_MS ?? '1000', 10) || 1000;
 }
 
+export function buildSessionEnv(extraEnv?: Record<string, string>): Record<string, string> {
+  const env = { ...process.env, ...(extraEnv ?? {}) } as Record<string, string>;
+  // ttym sessions should behave like real terminals, not inherit global no-color mode.
+  delete env.NO_COLOR;
+  // Codex parent sessions can export GIT_PAGER=cat, which disables interactive
+  // pagers like `git log` inside ttym PTYs. Drop only that degenerate case.
+  if (env.GIT_PAGER === 'cat') delete env.GIT_PAGER;
+  if (!env.CLICOLOR) env.CLICOLOR = '1';
+  if (!env.CLICOLOR_FORCE) env.CLICOLOR_FORCE = '1';
+  if (!env.FORCE_COLOR) env.FORCE_COLOR = '1';
+  if (!env.COLORTERM) env.COLORTERM = 'truecolor';
+  return env;
+}
+
 function writeFrame(sock: Socket, cmd: number, payload: Buffer = Buffer.alloc(0)) {
   const hdr = Buffer.allocUnsafe(5);
   hdr.writeUInt32LE(1 + payload.length, 0);
@@ -200,10 +214,7 @@ export class Session {
     args.push('--', ...cmd);
 
     const holderLogFd = openSync(resolve(getHomeDir(), 'ttym.log'), 'a');
-    const env = { ...process.env, ...(extraEnv ?? {}) } as Record<string, string>;
-    // Codex parent sessions can export GIT_PAGER=cat, which disables interactive
-    // pagers like `git log` inside ttym PTYs. Drop only that degenerate case.
-    if (env.GIT_PAGER === 'cat') delete env.GIT_PAGER;
+    const env = buildSessionEnv(extraEnv);
     const proc = spawn(holderBin(), args, {
       detached: true,
       stdio: ['ignore', holderLogFd, holderLogFd],

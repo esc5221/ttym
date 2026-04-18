@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Session, getRuntimeDir } from './session.js';
+import { Session, buildSessionEnv } from './session.js';
 import { resolve } from 'node:path';
 import { mkdirSync, rmSync } from 'node:fs';
 
@@ -39,6 +39,36 @@ afterEach(() => {
 });
 
 describe('Session (holder-backed)', () => {
+  it('normalizes child env to prefer color output', () => {
+    const previous = {
+      NO_COLOR: process.env.NO_COLOR,
+      GIT_PAGER: process.env.GIT_PAGER,
+      CLICOLOR: process.env.CLICOLOR,
+      CLICOLOR_FORCE: process.env.CLICOLOR_FORCE,
+      FORCE_COLOR: process.env.FORCE_COLOR,
+      COLORTERM: process.env.COLORTERM,
+    };
+    process.env.NO_COLOR = '1';
+    process.env.GIT_PAGER = 'cat';
+    delete process.env.CLICOLOR;
+    delete process.env.CLICOLOR_FORCE;
+    delete process.env.FORCE_COLOR;
+    delete process.env.COLORTERM;
+
+    const env = buildSessionEnv();
+    expect(env.NO_COLOR).toBeUndefined();
+    expect(env.GIT_PAGER).toBeUndefined();
+    expect(env.CLICOLOR).toBe('1');
+    expect(env.CLICOLOR_FORCE).toBe('1');
+    expect(env.FORCE_COLOR).toBe('1');
+    expect(env.COLORTERM).toBe('truecolor');
+
+    for (const [key, value] of Object.entries(previous)) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
   it('captures output in snapshot and ring', async () => {
     mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
     const session = await Session.create(
