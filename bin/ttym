@@ -267,21 +267,50 @@ async function cmdStatus() {
 }
 
 async function cmdAttach() {
-  const args = process.argv.slice(3).filter((value) => value !== '--json');
-  const readonly = args.includes('--readonly');
-  const filtered = args.filter((value) => value !== '--readonly');
-  const targetToken = filtered[0];
+  const raw = process.argv.slice(3);
+  const cmdIdx = raw.indexOf('--cmd');
+  const head = cmdIdx !== -1 ? raw.slice(0, cmdIdx) : raw;
+  const tailCmd = cmdIdx !== -1
+    ? raw.slice(cmdIdx + 1).filter((v) => v !== '--json')
+    : null;
+
+  let readonly = false;
+  let createNew = false;
+  let cwd = null;
+  let role = null;
+  let memberName = null;
+  const positional = [];
+
+  for (let i = 0; i < head.length; i += 1) {
+    const arg = head[i];
+    if (arg === '--json') continue;
+    if (arg === '--readonly') { readonly = true; continue; }
+    if (arg === '--new') { createNew = true; continue; }
+    if (arg === '--cwd') { cwd = head[++i] ?? null; continue; }
+    if (arg === '--role') { role = head[++i] ?? null; continue; }
+    if (arg === '--name') { memberName = head[++i] ?? null; continue; }
+    if (arg.startsWith('--')) {
+      console.error(`unknown option: ${arg}`);
+      process.exit(1);
+    }
+    positional.push(arg);
+  }
+
+  const targetToken = positional[0];
   if (!targetToken) {
-    console.error('usage: ttym attach <session-id|project/workspace/member|workspace/member> [--readonly]');
+    console.error('usage: ttym attach <session-id|project/workspace/member|workspace/member>');
+    console.error('            [--readonly] [--new [--cmd <cmd...>] [--cwd <path>] [--role <role>] [--name <name>]]');
     process.exit(1);
   }
+  const port = getPort();
+  const target = await resolveAttachTarget(port, targetToken, {
+    createIfMissing: createNew,
+    createOptions: { name: memberName, role, cmd: tailCmd, cwd },
+  });
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error('ttym attach requires an interactive TTY');
     process.exit(1);
   }
-
-  const port = getPort();
-  const target = await resolveAttachTarget(port, targetToken);
   const mode = readonly ? 'readonly' : 'readwrite';
   const wsUrl = `ws://127.0.0.1:${port}`;
 
@@ -648,7 +677,8 @@ async function resolveWorkspace(port, token) {
   process.exit(1);
 }
 
-async function resolveAttachTarget(port, token) {
+async function resolveAttachTarget(port, token, options = {}) {
+  const { createIfMissing = false, createOptions = {} } = options;
   const normalized = normalizeAddressToken(token);
   if (!normalized) {
     console.error('attach target is required');
@@ -656,6 +686,10 @@ async function resolveAttachTarget(port, token) {
   }
 
   if (/^\d+$/.test(normalized)) {
+    if (createIfMissing) {
+      console.error('--new requires a workspace/member address, not a raw session id');
+      process.exit(1);
+    }
     const sessionId = parseInt(normalized, 10);
     return {
       sessionId,
@@ -666,41 +700,114 @@ async function resolveAttachTarget(port, token) {
   }
 
   const parts = normalized.split('/');
-  if (parts.length >= 3) {
-    const workspaceToken = `${parts[0]}/${parts[1]}`;
-    const memberToken = parts.slice(2).join('/');
-    const workspace = await resolveWorkspace(port, workspaceToken);
-    const member = requireMember(workspace, memberToken);
-    return {
-      sessionId: member.sessionId,
-      label: memberAddress(workspace, member),
-      workspace,
-      member,
-    };
-  }
+  let workspace = null;
+  let memberToken = null;
 
-  if (parts.length === 2) {
-    const [workspaceName, memberToken] = parts;
+  if (parts.length >= 3) {
+    workspace = await resolveWorkspace(port, `${parts[0]}/${parts[1]}`);
+    memberToken = parts.slice(2).join('/');
+  } else if (parts.length === 2) {
+    const [workspaceName, rest] = parts;
     const workspaces = await listWorkspaces(port);
-    const matches = workspaces.filter((workspace) => workspace.name === workspaceName);
-    if (matches.length === 1) {
-      const workspace = matches[0];
-      const member = requireMember(workspace, memberToken);
-      return {
-        sessionId: member.sessionId,
-        label: memberAddress(workspace, member),
-        workspace,
-        member,
-      };
-    }
+    const matches = workspaces.filter((ws) => ws.name === workspaceName);
     if (matches.length > 1) {
       console.error(`workspace name is ambiguous: ${workspaceName}`);
       process.exit(1);
     }
+    if (matches.length === 1) {
+      workspace = matches[0];
+      memberToken = rest;
+    }
   }
 
-  console.error(`attach target not found: ${token}`);
-  process.exit(1);
+  if (!workspace) {
+    console.error(`attach target not found: ${token}`);
+    process.exit(1);
+  }
+
+  const existing = findMemberInWorkspace(workspace, memberToken);
+  if (existing) {
+    return {
+      sessionId: existing.sessionId,
+      label: memberAddress(workspace, existing),
+      workspace,
+      member: existing,
+    };
+  }
+
+  if (!createIfMissing) {
+    console.error(`member not found: ${memberToken}`);
+    process.exit(1);
+  }
+
+  if (/^\d+$/.test(normalizeAddressToken(memberToken) || '')) {
+    console.error('--new requires a member name, not a session id');
+    process.exit(1);
+  }
+
+  const created = await createWorkspaceMember(port, workspace, {
+    ...createOptions,
+    name: createOptions.name || memberToken,
+  });
+  return {
+    sessionId: created.session.id,
+    label: memberAddress(created.workspace, created.member),
+    workspace: created.workspace,
+    member: created.member,
+  };
+}
+
+function findMemberInWorkspace(workspace, token) {
+  const normalized = normalizeAddressToken(token);
+  if (!normalized) return null;
+  const members = workspace.members || [];
+  const byName = members.find((m) => m.name === normalized);
+  if (byName) return byName;
+  if (/^\d+$/.test(normalized)) {
+    const sid = parseInt(normalized, 10);
+    return members.find((m) => m.sessionId === sid) || null;
+  }
+  return null;
+}
+
+async function createWorkspaceMember(port, workspace, opts = {}) {
+  const { name, role = null, cmd = null, cwd = null } = opts;
+  const usedNames = new Set((workspace.members || []).map((m) => m.name));
+  let memberName = name;
+  if (!memberName) {
+    let index = 1;
+    while (usedNames.has(`term-${index}`)) index += 1;
+    memberName = `term-${index}`;
+  } else if (usedNames.has(memberName)) {
+    throw new Error(`member name already exists: ${memberName}`);
+  }
+  const sessionBody = {
+    cmd: cmd && cmd.length > 0 ? cmd : [process.env.SHELL || '/bin/bash'],
+    cols: 80,
+    rows: 24,
+    verify: true,
+  };
+  if (cwd) sessionBody.cwd = cwd;
+  const created = await fetchPost(port, '/api/sessions', sessionBody);
+  if (created.error) {
+    throw new Error(created.error);
+  }
+  const updated = await fetchPost(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members`, {
+    sessionId: created.id,
+    name: memberName,
+    role: role || undefined,
+    tags: [],
+  });
+  await patchSessionMeta(port, created.id, {
+    project: updated.project,
+    workspaceId: updated.id,
+    workspaceName: updated.name,
+    memberName,
+    role: role || null,
+    name: memberName,
+  });
+  const member = updated.members.find((entry) => entry.sessionId === created.id);
+  return { workspace: updated, member, session: created };
 }
 
 function requireMember(workspace, token) {
@@ -876,48 +983,23 @@ async function cmdWorkspace() {
     const name = readOption(args, '--name');
     const role = readOption(args, '--role');
     const cmdIndex = args.indexOf('--cmd');
-    const cmd = cmdIndex !== -1 ? args.slice(cmdIndex + 1).filter((value) => value !== '--json') : [process.env.SHELL || '/bin/bash'];
-    const usedNames = new Set((workspace.members || []).map((member) => member.name));
-    let memberName = name || 'term-1';
-    if (!name) {
-      let index = 1;
-      while (usedNames.has(`term-${index}`)) index += 1;
-      memberName = `term-${index}`;
-    } else if (usedNames.has(name)) {
-      console.error(`member name already exists: ${name}`);
+    const cmd = cmdIndex !== -1 ? args.slice(cmdIndex + 1).filter((value) => value !== '--json') : null;
+    try {
+      const { workspace: updated, member, session } = await createWorkspaceMember(port, workspace, {
+        name, role, cmd,
+      });
+      const result = {
+        workspace: `${updated.project}/${updated.name}`,
+        member: { ...member, address: memberAddress(updated, member) },
+        session,
+      };
+      if (asJson) return printOutput(result, true);
+      console.log(`added ${result.member.address} -> #${session.id}`);
+    } catch (e) {
+      if (asJson) return printOutput({ error: e.message }, true);
+      console.error(`workspace add failed: ${e.message}`);
       process.exit(1);
     }
-    const created = await fetchPost(port, '/api/sessions', { cmd, cols: 80, rows: 24, verify: true });
-    if (created.error) {
-      if (asJson) return printOutput({ error: created.error, cmd }, true);
-      console.error(`workspace add failed: ${created.error}`);
-      process.exit(1);
-    }
-    const updated = await fetchPost(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members`, {
-      sessionId: created.id,
-      name: memberName,
-      role: role || undefined,
-      tags: [],
-    });
-    await patchSessionMeta(port, created.id, {
-      project: updated.project,
-      workspaceId: updated.id,
-      workspaceName: updated.name,
-      memberName,
-      role: role || null,
-      name: memberName,
-    });
-    const member = updated.members.find((entry) => entry.sessionId === created.id);
-    const result = {
-      workspace: `${updated.project}/${updated.name}`,
-      member: {
-        ...member,
-        address: memberAddress(updated, member),
-      },
-      session: created,
-    };
-    if (asJson) return printOutput(result, true);
-    console.log(`added ${result.member.address} -> #${created.id}`);
     return;
   }
 
@@ -1366,7 +1448,7 @@ switch (cmd) {
     console.log('  start [--port 7690]          Start server in background');
     console.log('  stop                         Stop server (holders survive)');
     console.log('  restart                      Restart server');
-    console.log('  attach <target>              Attach to session or workspace member');
+    console.log('  attach <target> [--new]      Attach to session or workspace member (--new: create if missing)');
     console.log('  status                       Show server & session info');
     console.log('  current                      Show current project/workspace/member context');
     console.log('  project list                 List projects');
