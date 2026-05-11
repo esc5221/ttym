@@ -189,6 +189,12 @@ export class WorkspaceStore {
   addMember(id: string, member: Omit<WorkspaceMemberInfo, 'createdAt' | 'updatedAt'>): WorkspaceInfo | null {
     const ws = this.workspaces.get(id);
     if (!ws) return null;
+    for (const other of this.workspaces.values()) {
+      if (other.id === id) continue;
+      if (other.members.some((entry) => entry.sessionId === member.sessionId)) {
+        throw new Error(`session ${member.sessionId} already belongs to workspace ${other.id}`);
+      }
+    }
     this.assertUniqueMemberName(ws, member.name, member.sessionId);
 
     const now = Date.now();

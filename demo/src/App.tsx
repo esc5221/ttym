@@ -384,6 +384,22 @@ async function apiRemoveMember(wsId: string, sessionId: number): Promise<void> {
   } catch {}
 }
 
+async function apiAddMember(
+  wsId: string,
+  sessionId: number,
+  name: string,
+): Promise<Workspace | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(wsId)}/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, name }),
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
 async function apiSplitWorkspace(
   id: string,
   options: { targetSessionId?: number; cwd?: string; cols?: number; rows?: number; name?: string; role?: string; cmd?: string[] } = {},
@@ -815,6 +831,11 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
   const [panels, setPanels] = useState<PanelState[]>([{ key: uuid() }]);
   const [focused, setFocused] = useState(0);
   const [draggedPanelKey, setDraggedPanelKey] = useState<string | null>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const [standaloneSessions, setStandaloneSessions] = useState<Array<{ id: number; cwd?: string }>>([]);
+  const [attachLoading, setAttachLoading] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState('');
   const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const initialized = useRef(false);
   const bootstrappedInitialTerminal = useRef(false);
@@ -1022,6 +1043,97 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
     });
   }, [mux, syncWorkspace]);
 
+  const loadStandaloneSessions = useCallback(async () => {
+    setAttachLoading(true);
+    try {
+      const [list, wsList] = await Promise.all([mux.listSessions(), fetchWorkspaces()]);
+      const taken = new Set<number>();
+      for (const ws of wsList) for (const m of ws.members) taken.add(m.sessionId);
+      const live = list.filter((s) => s.status !== 'dead' && !taken.has(s.id));
+      const enriched = await Promise.all(live.map(async (s) => {
+        try {
+          const meta = await fetchSessionMeta(s.id);
+          return { id: s.id, cwd: typeof meta.cwd === 'string' ? meta.cwd : undefined };
+        } catch {
+          return { id: s.id };
+        }
+      }));
+      setStandaloneSessions(enriched);
+    } finally {
+      setAttachLoading(false);
+    }
+  }, [mux]);
+
+  const toggleAttach = useCallback(() => {
+    setAttachOpen((prev) => {
+      const next = !prev;
+      if (next) void loadStandaloneSessions();
+      return next;
+    });
+  }, [loadStandaloneSessions]);
+
+  const attachSession = useCallback(async (sessionId: number) => {
+    const endMutation = mutationBarrierRef.current.begin();
+    try {
+      const used = new Set(Object.values(memberNames));
+      let name = '';
+      for (let i = 1; i < 1000; i++) {
+        const candidate = `term-${i}`;
+        if (!used.has(candidate)) { name = candidate; break; }
+      }
+      if (!name) name = `term-${sessionId}`;
+      const ws = await apiAddMember(workspaceId, sessionId, name);
+      if (!ws) return;
+      setWsName(ws.name);
+      setWsProject(ws.project || 'default');
+      const names = memberNameBySession(ws.members);
+      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+      const cwdEntries = await Promise.all(ids.map(async (id) => {
+        try {
+          const meta = await fetchSessionMeta(id);
+          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+        } catch {
+          return [id, ''] as const;
+        }
+      }));
+      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
+      setMemberNames(Object.fromEntries(names));
+      setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
+      setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
+      const attachedIndex = ids.indexOf(sessionId);
+      if (attachedIndex >= 0) setFocused(attachedIndex);
+      setAttachOpen(false);
+    } finally {
+      endMutation();
+    }
+  }, [memberNames, workspaceId]);
+
+  useEffect(() => {
+    if (!attachOpen) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAttachOpen(false);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [attachOpen]);
+
+  const beginEditName = useCallback(() => {
+    setDraftName(wsName);
+    setEditingName(true);
+  }, [wsName]);
+
+  const commitEditName = useCallback(async () => {
+    const next = draftName.trim();
+    setEditingName(false);
+    if (!next || next === wsName) return;
+    setWsName(next);
+    await apiUpdateWorkspace(workspaceId, { name: next });
+  }, [draftName, wsName, workspaceId]);
+
+  const cancelEditName = useCallback(() => {
+    setEditingName(false);
+  }, []);
+
   const removeAt = useCallback((index: number) => {
     mutationBarrierRef.current.blockFor();
     setPanels((prev) => updatePanelsAfterRemoval(prev, index));
@@ -1138,18 +1250,28 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
   }, [add, terminateAt, focusPrev, focusNext, focused]);
 
   // 포커스 시 xterm textarea에 포커스
+  // panels 레퍼런스가 아니라 focused 패널의 안정된 key에만 의존.
+  // 2초 폴링이 reconcile로 panels 배열을 새로 만들어도, 같은 key면 재포커스하지 않는다.
+  const focusedPanelKey = panels[focused]?.key;
   useEffect(() => {
-    const panel = panels[focused];
-    if (!panel) return;
-    const el = panelRefs.current.get(panel.key);
+    if (!focusedPanelKey) return;
+    const el = panelRefs.current.get(focusedPanelKey);
     if (!el) return;
     el.querySelector('textarea')?.focus();
-  }, [focused, panels]);
+  }, [focusedPanelKey]);
 
   // 모든 패널이 닫히면 대시보드로
   useEffect(() => {
     if (panels.length === 0) navigate({ page: 'dashboard' });
   }, [panels.length]);
+
+  // 브라우저 탭 제목
+  useEffect(() => {
+    const count = panels.filter((p) => p.sessionId !== undefined).length;
+    const label = wsProject !== 'default' ? `${wsProject}/${wsName}` : wsName;
+    document.title = count > 0 ? `${label} (${count})` : label;
+    return () => { document.title = 'ttym demo'; };
+  }, [wsName, wsProject, panels]);
 
   const cols = Math.max(1, Math.min(panels.length || 1, maxPanels));
   const rows = Math.max(1, Math.ceil((panels.length || 1) / maxPanels));
@@ -1157,13 +1279,58 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
-        <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
-        <span style={{ color: '#aaa', fontSize: 12 }}>{wsProject !== 'default' ? `${wsProject}/${wsName}` : wsName}</span>
+        <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle} title="dashboard">&larr;</button>
+        {wsProject !== 'default' ? (
+          <span style={{ color: '#666', fontSize: 13 }}>{wsProject}/</span>
+        ) : null}
+        {editingName ? (
+          <input
+            autoFocus
+            value={draftName}
+            onChange={(event) => setDraftName(event.target.value)}
+            onBlur={() => { void commitEditName(); }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') { event.preventDefault(); void commitEditName(); }
+              else if (event.key === 'Escape') { event.preventDefault(); cancelEditName(); }
+            }}
+            style={workspaceNameInputStyle}
+          />
+        ) : (
+          <span
+            onClick={beginEditName}
+            style={workspaceNameStyle}
+            title="click to rename"
+          >
+            {wsName}
+          </span>
+        )}
         <button onClick={add} style={btnStyle}>+ split</button>
-        <button onClick={detachWorkspace} style={btnStyle}>detach</button>
-        <span style={{ color: '#666', fontSize: 12 }}>
-          {panels.length} pane{panels.length > 1 ? 's' : ''} across {rows} row{rows > 1 ? 's' : ''}
+        <span style={{ position: 'relative', display: 'inline-block' }}>
+          <button onClick={toggleAttach} style={btnStyle}>+ attach</button>
+          {attachOpen ? (
+            <div style={attachDropdownStyle}>
+              <div style={attachDropdownTitleStyle}>detached sessions</div>
+              {attachLoading ? (
+                <div style={attachDropdownEmptyStyle}>loading…</div>
+              ) : standaloneSessions.length === 0 ? (
+                <div style={attachDropdownEmptyStyle}>no detached sessions</div>
+              ) : (
+                standaloneSessions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => void attachSession(s.id)}
+                    style={attachDropdownItemStyle}
+                    title={s.cwd ?? ''}
+                  >
+                    <span style={{ color: '#eaf0f6' }}>#{s.id}</span>
+                    {s.cwd ? <span style={{ color: '#8892a0', marginLeft: 8, fontSize: 10 }}>{s.cwd}</span> : null}
+                  </button>
+                ))
+              )}
+            </div>
+          ) : null}
         </span>
+        <button onClick={detachWorkspace} style={btnStyle}>detach</button>
         <span style={{ color: '#444', fontSize: 11, marginLeft: 'auto' }}>
           {'\u2318\\ split \u2003 drag reorder \u2003 \u2318\u2190\u2192 navigate'}
         </span>
@@ -1700,6 +1867,75 @@ const settingsButtonStyle: React.CSSProperties = {
   fontFamily: 'monospace',
   fontSize: 11,
   borderRadius: 7,
+};
+
+const workspaceNameStyle: React.CSSProperties = {
+  color: '#eaf0f6',
+  fontSize: 15,
+  fontWeight: 600,
+  cursor: 'pointer',
+  padding: '2px 6px',
+  borderRadius: 4,
+  marginLeft: -4,
+};
+
+const workspaceNameInputStyle: React.CSSProperties = {
+  background: 'rgba(21, 28, 37, 0.98)',
+  color: '#eaf0f6',
+  border: '1px solid rgba(79, 93, 113, 0.62)',
+  borderRadius: 4,
+  padding: '2px 6px',
+  fontFamily: 'monospace',
+  fontSize: 15,
+  fontWeight: 600,
+  outline: 'none',
+  minWidth: 160,
+};
+
+const attachDropdownStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: 'calc(100% + 6px)',
+  left: 0,
+  minWidth: 240,
+  maxHeight: 320,
+  overflowY: 'auto',
+  padding: 6,
+  borderRadius: 8,
+  border: '1px solid rgba(79, 93, 113, 0.56)',
+  background: 'rgba(12, 17, 24, 0.98)',
+  boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
+  backdropFilter: 'blur(14px)',
+  fontFamily: 'monospace',
+  zIndex: 50,
+};
+
+const attachDropdownTitleStyle: React.CSSProperties = {
+  color: '#aab4c0',
+  fontSize: 10,
+  textTransform: 'uppercase',
+  letterSpacing: 0.5,
+  padding: '4px 8px 6px',
+};
+
+const attachDropdownItemStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  width: '100%',
+  padding: '6px 8px',
+  background: 'transparent',
+  border: 'none',
+  color: '#c7d1dd',
+  fontFamily: 'monospace',
+  fontSize: 12,
+  textAlign: 'left',
+  cursor: 'pointer',
+  borderRadius: 4,
+};
+
+const attachDropdownEmptyStyle: React.CSSProperties = {
+  padding: '8px',
+  color: '#666',
+  fontSize: 11,
 };
 
 const settingsPopoverStyle: React.CSSProperties = {
