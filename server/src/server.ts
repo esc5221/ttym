@@ -167,8 +167,13 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
 
   const json = (status: number, body: unknown) => {
-    res.writeHead(status, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(body));
+    const payload = JSON.stringify(body);
+    res.writeHead(status, {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(payload),
+      'Connection': 'close',
+    });
+    res.end(payload);
   };
 
   const readBody = (): Promise<string> => new Promise((resolve) => {
@@ -869,6 +874,10 @@ export async function createServer(port: number): Promise<TtymServer> {
       clientSessions.clear();
     });
   });
+
+  httpServer.keepAliveTimeout = 1000;
+  httpServer.headersTimeout = 3000;
+  httpServer.requestTimeout = 10000;
 
   await new Promise<void>((resolve) => httpServer.listen(port, resolve));
 

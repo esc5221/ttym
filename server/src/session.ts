@@ -348,8 +348,11 @@ export class Session {
         const data = payload.subarray(4);
 
         // Layer 2: headless xterm
+        // When no viewers are attached, skip sync-filter + ring.push + broadcast.
+        // term.write still runs so snapshot() stays current for the next attach.
+        const broadcast = this.viewers.size > 0;
         this.term.write(data, () => {
-          this.processTerminalOutput(data, true);
+          if (broadcast) this.processTerminalOutput(data, true);
         });
         this._dirty = true;
         this._lastDirtyAt = Date.now();

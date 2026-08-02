@@ -514,7 +514,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
     };
 
     void tick();
-    const timer = window.setInterval(() => { void tick(); }, 1000);
+    const timer = window.setInterval(() => { void tick(); }, 5000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
