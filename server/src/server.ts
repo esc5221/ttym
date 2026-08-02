@@ -505,9 +505,18 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
 
 export async function createServer(port: number): Promise<TtymServer> {
   const manager = new SessionManager();
-  await manager.boot();
+
+  // Load workspace store first so we know which session IDs deserve restore.
+  // Sessions not referenced by any workspace remain on disk but stay dormant —
+  // they can be revived later by adding them back to a workspace.
   const workspaceStore = new WorkspaceStore(manager.runtimeDir);
   await workspaceStore.load();
+  const restoreAllowlist = new Set<number>();
+  for (const ws of workspaceStore.list()) {
+    for (const m of ws.members) restoreAllowlist.add(m.sessionId);
+  }
+
+  await manager.boot(restoreAllowlist);
 
   // Agent Bus is optional and currently disabled in the bundled server path.
   const agentBus = null as { close?: () => void } | null;
@@ -516,11 +525,6 @@ export async function createServer(port: number): Promise<TtymServer> {
 
   // Inject TTYM_BUS_URL into SessionManager for holder env
   manager.setBusUrl(`http://127.0.0.1:${port}/api`);
-
-  // Remap workspace layout sessionIds after reboot restore
-  if (manager.lastIdMap.size > 0) {
-    workspaceStore.remapSessionIds(manager.lastIdMap);
-  }
 
   const httpServer = createHttpServer((req, res) => {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;

@@ -1,6 +1,7 @@
-import { readdir, readFile, unlink, mkdir, writeFile, rename } from 'node:fs/promises';
+import { readdir, readFile, readlink, unlink, mkdir, writeFile, rename } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
 import { Session, SessionInfo, HolderManifest, getRuntimeDir } from './session.js';
 
 export type SessionMeta = Record<string, unknown>;
@@ -39,7 +40,6 @@ export class SessionManager {
   private lastPersistAt = 0;
   readonly runtimeDir: string;
   private _ready = false;
-  private _lastIdMap = new Map<number, number>(); // old → new (from last restore)
   private _busUrl: string | null = null;
 
   constructor(runtimeDir?: string) {
@@ -49,13 +49,16 @@ export class SessionManager {
   }
 
   get ready(): boolean { return this._ready; }
-  get lastIdMap(): Map<number, number> { return this._lastIdMap; }
 
   /** Set bus URL — injected by server after port is known */
   setBusUrl(url: string): void { this._busUrl = url; }
 
-  /** Boot: create runtime dir, recover existing holders, then mark ready */
-  async boot(): Promise<void> {
+  /**
+   * Boot: create runtime dir, recover existing holders, then mark ready.
+   * If `restoreAllowlist` is provided, only sessions whose IDs are in the set
+   * will be restored from snapshots; others stay on disk untouched.
+   */
+  async boot(restoreAllowlist?: Set<number>): Promise<void> {
     await mkdir(this.runtimeDir, { recursive: true });
 
     // Load persisted next-id
@@ -68,10 +71,9 @@ export class SessionManager {
     // Discover and recover holders
     await this.recover();
 
-    // If no holders recovered, try workspace restore
-    if (this.sessions.size === 0) {
-      await this.restoreWorkspace();
-    }
+    // Always attempt snapshot-based restore: holders may cover some sessions,
+    // remaining snapshots fill the gaps. Both code paths preserve original IDs.
+    await this.restoreWorkspace(restoreAllowlist);
 
     this._ready = true;
   }
@@ -123,49 +125,83 @@ export class SessionManager {
 
   // ───── Workspace Restore (reboot recovery) ─────
 
-  private async restoreWorkspace(): Promise<void> {
+  private async restoreWorkspace(allowlist?: Set<number>): Promise<void> {
+    // Prefer workspace.json (graceful shutdown index). If missing or unreadable,
+    // fall back to scanning snapshot-*.json directly — this is what saves us
+    // when shutdown was killed before the index could be written.
     const wsPath = resolve(this.runtimeDir, 'workspace.json');
-    if (!existsSync(wsPath)) return;
+    let snapshotFiles: string[] = [];
 
-    let ws: WorkspaceState;
-    try {
-      ws = JSON.parse(await readFile(wsPath, 'utf8'));
-      if (ws.version !== 1 || !Array.isArray(ws.sessions)) return;
-    } catch {
+    if (existsSync(wsPath)) {
+      try {
+        const ws: WorkspaceState = JSON.parse(await readFile(wsPath, 'utf8'));
+        if (ws.version === 1 && Array.isArray(ws.sessions)) {
+          snapshotFiles = ws.sessions.map((e) => e.snapshotFile);
+        }
+      } catch {
+        /* fall through to directory scan */
+      }
+    }
+
+    if (snapshotFiles.length === 0) {
+      try {
+        const files = await readdir(this.runtimeDir);
+        snapshotFiles = files.filter((f) => /^snapshot-\d+\.json$/.test(f));
+      } catch {
+        return;
+      }
+    }
+
+    // Filter to allowlist if provided — restore only sessions that some
+    // workspace actually cares about. Untouched snapshots stay on disk so
+    // they can be revived later by adding them back to a workspace.
+    if (allowlist) {
+      snapshotFiles = snapshotFiles.filter((f) => {
+        const m = f.match(/^snapshot-(\d+)\.json$/);
+        return m ? allowlist.has(parseInt(m[1], 10)) : false;
+      });
+    }
+
+    if (snapshotFiles.length === 0) {
+      await unlink(wsPath).catch(() => {});
       return;
     }
 
-    console.log(`[mgr] restoring workspace: ${ws.sessions.length} sessions`);
-    const idMap = new Map<number, number>(); // old → new
+    console.log(`[mgr] restoring workspace: ${snapshotFiles.length} snapshot(s)`);
 
-    for (const entry of ws.sessions) {
-      const snapPath = resolve(this.runtimeDir, entry.snapshotFile);
+    for (const filename of snapshotFiles) {
+      const snapPath = resolve(this.runtimeDir, filename);
       let snap: SessionSnapshot;
       try {
         snap = JSON.parse(await readFile(snapPath, 'utf8'));
       } catch {
-        console.log(`[mgr] snapshot not found: ${entry.snapshotFile}, skipping`);
+        console.log(`[mgr] snapshot unreadable: ${filename}, skipping`);
         continue;
       }
 
-      // Validate cwd
+      // Holder may have already brought this session back — keep that one.
+      if (this.sessions.has(snap.id)) {
+        console.log(`[mgr] session=${snap.id} already alive via holder, dropping snapshot`);
+        await unlink(snapPath).catch(() => {});
+        continue;
+      }
+
       const cwd = snap.cwd && existsSync(snap.cwd) ? snap.cwd : process.env.HOME || '/tmp';
 
       try {
+        // Preserve original sessionId so URLs and workspace layouts keep working.
         const session = await Session.create(
-          this.nextId++, snap.cmd, snap.cols, snap.rows, this.runtimeDir, cwd,
+          snap.id, snap.cmd, snap.cols, snap.rows, this.runtimeDir, cwd,
         );
         this.sessions.set(session.id, session);
-        idMap.set(snap.id, session.id);
+        this.nextId = Math.max(this.nextId, snap.id + 1);
 
-        // Seed headless xterm with saved screen + separator
         if (snap.screen) {
           session.seedSnapshot(snap.screen + '\r\n\x1b[90m── restored ──\x1b[0m\r\n');
         }
 
-        // Migrate meta (old ID → new ID)
         if (snap.meta && Object.keys(snap.meta).length > 0) {
-          await this.setMeta(session.id, snap.meta);
+          await this.setMeta(snap.id, snap.meta);
         }
 
         session.onExit(() => {
@@ -173,22 +209,19 @@ export class SessionManager {
           setTimeout(() => { if (this.sessions.get(sid) === session) this.sessions.delete(sid); }, 30_000);
         });
 
-        console.log(`[mgr] restored session=${snap.id} → ${session.id} cwd=${cwd}`);
+        console.log(`[mgr] restored session=${snap.id} cwd=${cwd}`);
       } catch (e) {
         console.error(`[mgr] failed to restore session=${snap.id}:`, e);
       }
 
-      // Clean up snapshot file
+      // Drop the snapshot once consumed; persistAll will rewrite a fresh one.
       await unlink(snapPath).catch(() => {});
     }
 
-    this._lastIdMap = idMap;
     await this.persistNextId();
-
-    // Clean up workspace file
     await unlink(wsPath).catch(() => {});
 
-    // Clean stale socket files
+    // Clean stale socket files belonging to no live session
     try {
       const files = await readdir(this.runtimeDir);
       for (const f of files) {
@@ -221,17 +254,29 @@ export class SessionManager {
     if (!session || session.isDead) return;
 
     const meta = await this.getMeta(id);
+
+    // Read the child shell's live cwd so `cd` inside the PTY survives restore.
+    // Falls back to meta.cwd (recorded at create time) if the lookup fails.
+    let liveCwd: string | undefined;
+    if (session.childPid > 0) {
+      liveCwd = await readPidCwd(session.childPid).catch(() => undefined);
+    }
+    const cwd = liveCwd || (meta.cwd as string) || undefined;
+    if (liveCwd && liveCwd !== meta.cwd) {
+      await this.setMeta(id, { cwd: liveCwd }).catch(() => {});
+    }
+
     const snap: SessionSnapshot = {
       version: 1,
       id,
       cmd: session.info().cmd,
       cols: session.cols,
       rows: session.rows,
-      cwd: (meta.cwd as string) || undefined,
+      cwd,
       createdAt: session.createdAt,
       savedAt: Date.now(),
       screen: session.snapshot(),
-      meta,
+      meta: { ...meta, cwd: cwd ?? meta.cwd },
     };
 
     // Atomic write: temp → rename
@@ -406,4 +451,44 @@ export class SessionManager {
       }
     }
   }
+}
+
+/**
+ * Resolve the live cwd of a running process by pid.
+ * Linux: read /proc/<pid>/cwd symlink.
+ * macOS: shell out to lsof (no /proc on Darwin).
+ * Returns undefined if the lookup fails or the platform isn't supported.
+ */
+async function readPidCwd(pid: number): Promise<string | undefined> {
+  if (!pid || pid <= 0) return undefined;
+  if (process.platform === 'linux') {
+    try { return await readlink(`/proc/${pid}/cwd`); } catch { return undefined; }
+  }
+  if (process.platform === 'darwin') {
+    return await new Promise<string | undefined>((resolveCwd) => {
+      let out = '';
+      let settled = false;
+      const finish = (val: string | undefined) => {
+        if (settled) return;
+        settled = true;
+        resolveCwd(val);
+      };
+      try {
+        const proc = spawn('/usr/sbin/lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        proc.stdout.on('data', (chunk: Buffer) => { out += chunk.toString(); });
+        proc.on('error', () => finish(undefined));
+        proc.on('exit', () => {
+          const match = out.match(/^n(.+)$/m);
+          finish(match ? match[1].trim() : undefined);
+        });
+        // Belt-and-suspenders timeout in case lsof hangs
+        setTimeout(() => { try { proc.kill('SIGKILL'); } catch {} finish(undefined); }, 1500);
+      } catch {
+        finish(undefined);
+      }
+    });
+  }
+  return undefined;
 }

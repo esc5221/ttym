@@ -279,28 +279,6 @@ export class WorkspaceStore {
     return deleted;
   }
 
-  /** Remap session IDs in all workspace layouts (for reboot restore) */
-  remapSessionIds(idMap: Map<number, number>): void {
-    if (idMap.size === 0) return;
-    let changed = false;
-    for (const ws of this.workspaces.values()) {
-      if (remapLayout(ws.layout, idMap)) {
-        ws.updatedAt = Date.now();
-        changed = true;
-      }
-      for (const member of ws.members) {
-        const nextId = idMap.get(member.sessionId);
-        if (nextId !== undefined) {
-          member.sessionId = nextId;
-          member.updatedAt = Date.now();
-          changed = true;
-        }
-      }
-      this.reconcileWorkspace(ws);
-    }
-    if (changed) this.scheduleSave();
-  }
-
   private normalizeWorkspace(ws: WorkspaceInfo): WorkspaceInfo {
     const normalized: WorkspaceInfo = {
       ...ws,
@@ -393,19 +371,3 @@ function sessionIdsToLayout(ids: number[]): LayoutNode {
   };
 }
 
-/** Recursively remap sessionIds in a layout tree. Returns true if anything changed. */
-function remapLayout(node: LayoutNode, idMap: Map<number, number>): boolean {
-  if (node.type === 'pane') {
-    const newId = idMap.get(node.sessionId);
-    if (newId !== undefined) {
-      node.sessionId = newId;
-      return true;
-    }
-    return false;
-  }
-  let changed = false;
-  for (const child of node.children) {
-    if (remapLayout(child, idMap)) changed = true;
-  }
-  return changed;
-}

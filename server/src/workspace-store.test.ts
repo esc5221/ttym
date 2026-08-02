@@ -482,50 +482,6 @@ describe('WorkspaceStore', () => {
     expect(ws!.layout).toEqual({ type: 'pane', sessionId: 0 });
   });
 
-  // ───── remapSessionIds ─────
-
-  it('remapSessionIds updates layout and member sessionIds', () => {
-    const dir = runtimeDir();
-    dirs.push(dir);
-    const store = new WorkspaceStore(dir);
-    store.create('ws1', 'test', {
-      type: 'split', axis: 'row', sizes: [0.5, 0.5],
-      children: [{ type: 'pane', sessionId: 100 }, { type: 'pane', sessionId: 200 }],
-    }, 'proj', [
-      { sessionId: 100, name: 'a', createdAt: 1, updatedAt: 1 },
-      { sessionId: 200, name: 'b', createdAt: 1, updatedAt: 1 },
-    ]);
-
-    const idMap = new Map([[100, 300], [200, 400]]);
-    store.remapSessionIds(idMap);
-
-    const ws = store.get('ws1')!;
-    expect(ws.members.map((m) => m.sessionId)).toEqual([300, 400]);
-    expect(ws.members.map((m) => m.name)).toEqual(['a', 'b']);
-    // Layout should also be remapped
-    const layout = ws.layout as { type: 'split'; children: Array<{ sessionId: number }> };
-    expect(layout.children.map((c) => c.sessionId)).toEqual([300, 400]);
-  });
-
-  it('remapSessionIds with empty map is a no-op', () => {
-    const dir = runtimeDir();
-    dirs.push(dir);
-    const store = new WorkspaceStore(dir);
-    const ws = store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
-    const originalUpdatedAt = ws.updatedAt;
-    store.remapSessionIds(new Map());
-    expect(store.get('ws1')!.updatedAt).toBe(originalUpdatedAt);
-  });
-
-  it('remapSessionIds ignores IDs not in the map', () => {
-    const dir = runtimeDir();
-    dirs.push(dir);
-    const store = new WorkspaceStore(dir);
-    store.create('ws1', 'test', { type: 'pane', sessionId: 5 });
-    store.remapSessionIds(new Map([[999, 1000]]));
-    expect(store.get('ws1')!.members[0].sessionId).toBe(5);
-  });
-
   // ───── reconcileWorkspace: auto-name collision ─────
 
   it('reconcile auto-renames members when names collide', () => {
