@@ -241,13 +241,24 @@ function waitForExit(pid, maxMs = 5000) {
   return false;
 }
 
+/**
+ * Signal a pid, treating "already gone" as success.
+ *
+ * Every alive-check-then-kill here races the process's own exit: it can die
+ * between the two calls, and the bare ESRCH used to escape as a stack trace
+ * (seen during the b45f036e restart). Gone is what we wanted anyway.
+ */
+function signalSafe(pid, sig) {
+  try { process.kill(pid, sig); return true; } catch { return false; }
+}
+
 function cmdStop() {
   const pid = readPid();
   if (!pid) {
     console.log('ttym is not running');
     process.exit(1);
   }
-  process.kill(pid, 'SIGTERM');
+  signalSafe(pid, 'SIGTERM');
   waitForExit(pid);
   console.log(`ttym stopped (pid ${pid})`);
 }
@@ -255,12 +266,26 @@ function cmdStop() {
 function cmdRestart() {
   const pid = readPid();
   if (pid) {
-    process.kill(pid, 'SIGTERM');
+    signalSafe(pid, 'SIGTERM');
     if (!waitForExit(pid)) {
       console.error(`failed to stop pid ${pid}, force killing`);
-      process.kill(pid, 'SIGKILL');
+      signalSafe(pid, 'SIGKILL');
       waitForExit(pid, 2000);
     }
+  }
+
+  // A supervised server (launchd KeepAlive in production) is respawned the
+  // moment it dies. Starting our own on top of that races two servers for the
+  // same holders — the race that lost session 973. If a new pid shows up on
+  // its own, report it and stand down.
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    const fresh = readPid();
+    if (fresh && fresh !== pid) {
+      console.log(`ttym restarted by its service manager (pid ${fresh})`);
+      return;
+    }
+    execSync('sleep 0.1');
   }
   cmdStart();
 }

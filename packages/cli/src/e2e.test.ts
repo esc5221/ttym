@@ -140,6 +140,22 @@ suite('cli end to end', () => {
     expect(out).toContain('timeout: still running');
   }, 20_000);
 
+  it('restart keeps the sessions alive — the holder guarantee through the CLI', async () => {
+    // g1/g2 are still running from the grammar tests above.
+    const before = ((await api('/api/sessions')) ?? []).map((s: { id: number; pid: number }) => `${s.id}:${s.pid}`).sort();
+    expect(before.length).toBe(2);
+
+    ttym(['restart']);
+    await until(async () => ((await api('/api/sessions')) ?? []).length === 2, 20_000);
+
+    // Same session ids, same child pids: the PTYs never died.
+    const after = ((await api('/api/sessions')) ?? []).map((s: { id: number; pid: number }) => `${s.id}:${s.pid}`).sort();
+    expect(after).toEqual(before);
+
+    // And the screen survived the swap.
+    await until(() => ttym(['screen', 'default:g2']).includes('COLON_GRAMMAR'));
+  }, 40_000);
+
   it('cleans up the grammar suite sessions', async () => {
     ttym(['workspace', 'remove', 'default/default', 'g1']);
     ttym(['workspace', 'remove', 'default/default', 'g2']);
