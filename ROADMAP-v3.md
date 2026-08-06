@@ -7,7 +7,7 @@ Phase 0/0.5는 RFD에 없다 — 프로덕션을 켜둔 채 개발하기 위한 
 제약: **프로덕션 서버(port 7690, pid 2713)는 Phase 5까지 절대 정지하지 않는다.**
 개발·검증은 전부 dev 서버(port 7691, `~/.ttym-dev`, worktree `~/study/ttym-v3`)에서 한다.
 
-진행: **24/49 (48%)**
+진행: **25/49 (51%)**
 
 ---
 
@@ -111,13 +111,13 @@ A·B 이후. **시작부터 완료까지 클라이언트 3개가 전부 동작�
 - [ ] `workspaces.json` v2→v3 변환을 실데이터로 검증
       ⚠ Phase 2-A 의존 — 변환기가 아직 없어 지금은 검증 불가
 
-## Phase 5 — 프로덕션 교체 · 4/5 (2026-08-06 완료)
+## Phase 5 — 프로덕션 교체 · 5/5 ✔ (2026-08-06)
 
 - [x] `workspaces.json` 백업 — `~/.ttym/pre-v3-swap/`
 - [x] holder pid·세션·claude 목록 기록 (교체 후 대조용)
 - [x] dist 교체 후 서버 재시작 → **세션 15/16 복구, claude 39/39 생존**
 - [x] 대조 및 실동작 검증 — 프로덕션 `await`이 transcript만 반환(4초)
-- [ ] 세션 973 처리 — holder는 살아있으나 접근 불가 (아래)
+- [x] 세션 973 처리 — 고아 holder 정리 (내용 불필요로 판단)
 
 ### 교체에서 배운 것
 
@@ -134,7 +134,7 @@ holder는 클라이언트를 하나만 받으므로 나중에 붙은 쪽이 세�
 새 holder를 spawn했고, `main.rs:221`의 "clean stale" 이 원본 holder의 소켓을
 지웠다. 원본(pid 65568)은 v2 바이너리라 rebind 로직이 없어 스스로 살아나지 못한다.
 안의 claude는 지금도 돌고 있지만 도달할 경로가 없다.
-`claudeLastSessionId=38e47f4c-…`, cwd=`/Users/lullu` — `claude --resume`으로 대화 복구 가능.
+`claudeLastSessionId`는 백업에 남겼으나 내용이 불필요해 holder째 정리했다.
 
 - v3 holder였다면 `570cfcc`의 rebind가 5초 안에 복구했을 상황이다
 - 교체 후 새로 만들어지는 holder부터는 이 시나리오에 면역
