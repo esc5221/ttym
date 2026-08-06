@@ -7,7 +7,7 @@ Phase 0/0.5는 RFD에 없다 — 프로덕션을 켜둔 채 개발하기 위한 
 제약: **프로덕션 서버(port 7690, pid 2713)는 Phase 5까지 절대 정지하지 않는다.**
 개발·검증은 전부 dev 서버(port 7691, `~/.ttym-dev`, worktree `~/study/ttym-v3`)에서 한다.
 
-진행: **18/44 (41%)**
+진행: **21/46 (46%)**
 
 ---
 
@@ -33,17 +33,23 @@ Phase 0/0.5는 RFD에 없다 — 프로덕션을 켜둔 채 개발하기 위한 
       - 무거운 snapshot(1.2s)이 먼저, 가벼운 layout(6KB)이 나중이었음
       - deadline 초과 시 layout만 유실 = `b45f036e` 사고 구조
 - [x] RFD §9-4 교체 후 mark 유효성 — **조건부 유효**
-      - 교체 전후 버퍼 완전 일치 (3040행 / 240KB), 20000행 출력해도 동일
-      - 이유: holder ring(1MB) > xterm scrollback(3000행 ≈ 240KB)
-      - 손익분기 행당 350 bytes. 프로덕션 실측 161~194 bytes → 마진 2배 미만
+      - zsh 세션: 교체 전후 버퍼 완전 일치 (3040행 / 240KB), 20000행 출력해도 동일
+      - 이유: holder ring(1MB) > 해당 세션의 xterm 사용량(240KB, 행당 79B)
+      - ⚠ Phase 1에서 claude 세션은 행당 913B로 측정됨 → xterm 3000행 ≈ 2.7MB > ring 1MB
+        agent 세션의 교체 손실은 재검증 필요 (Phase 4로 이관)
 
-## Phase 1 — RFD §9 미해결 · 2/5
+## Phase 1 — RFD §9 미해결 · 4/5
 
 RFD가 "B 착수 전 해소" 라고 명시한 항목들.
 
-- [ ] **Codex alternate screen 사용 여부** ← 다음. 15분
-      쓴다면 B의 mark 방식이 에이전트별로 갈라진다
-- [~] 스크롤백 소요량 — 행당 161~194B 측정됨. 응답 1회분이 3000행 중 얼마인지 미측정
+- [x] **Codex alternate screen 사용 여부** — 미사용 확인. B 설계가 갈라지지 않음
+      - Claude Code 기준선이 RFD 관측과 일치(`?1049h` 미출현, `?2004h`/`?25l` 출현) → 방법론 유효
+      - Codex도 부팅·실제 응답 중 모두 `?1049h`/`?1047h`/`?47h` 미출현
+- [x] 스크롤백 소요량 — 긴 응답 1회 = 103행 (3000행의 3.4%, 29회분)
+      - Claude 긴 응답 94,065 B → 103행 (913 B/행)
+      - Codex 짧은 응답 43,319 B → 39행 (1111 B/행)
+      - RFD 6.1의 "응답이 3000행을 넘는다"는 우려는 현실적이지 않음
+      - 다만 행당 바이트가 커서 **holder ring(1MB)이 xterm(약 2.7MB)보다 작다** → 아래 재검증
 - [ ] "응답"의 경계 정의 — 도구 호출 중간 출력을 transcript에 포함할지 (결정 사항)
 - [x] 복원된 세션의 mark — Phase 0.5-4에서 해소
 - [ ] `workspaces.json` v2→v3 변환 검증 방법 — 무엇과 비교해 검증할지
@@ -78,9 +84,10 @@ A·B 이후. **시작부터 완료까지 클라이언트 3개가 전부 동작�
 - [ ] `native/` 정렬 (Tauri — 빌드 체인 별도)
 - [ ] `demo/` 정렬 + WS에서 CREATE/LIST/DESTROY 제거
 
-## Phase 4 — 교체 리허설 (dev) · 1/4
+## Phase 4 — 교체 리허설 (dev) · 1/5
 
-- [x] 기본 무중단 교체 실증 — holder·세션 id·자식 pid·화면 내용 전부 보존
+- [x] 기본 무중단 교체 실증 — holder·세션 id·자식 pid·화면 내용 전부 보존 (zsh 세션)
+- [ ] **agent 세션 교체 손실 실측** — ring 1MB가 xterm 2.7MB보다 작아 스크롤백 유실 가능
 - [ ] v2 holder ↔ v3 서버 교차 검증 (프로덕션의 살아있는 holder는 구 바이너리)
 - [ ] `workspaces.json` v2→v3 변환을 실데이터로 검증
 - [ ] 롤백 리허설 (v3 → v2 되돌리기)
@@ -93,11 +100,13 @@ A·B 이후. **시작부터 완료까지 클라이언트 3개가 전부 동작�
 - [ ] 대조: holder 16 / 세션 16 / claude 인스턴스 생존
 - [ ] 실패 시 롤백 절차 실행
 
-## Backlog — 미해결로 남은 것
+## Backlog — 미해결로 남은 것 · 0/8
 
 - [ ] run 디렉토리 누적 정리 정책 (snapshot 184 / meta 240 / 19MB, 세션은 16개)
 - [ ] `ttym.log` 로테이션 (130MB, 무한 증가)
 - [ ] holder ring 크기 결정 (현재 1MB, `--ring-size` 인자는 있으나 서버가 안 넘김)
+      Phase 1 측정 결과 agent 세션은 행당 913B → 3000행이면 2.7MB 필요
+- [ ] `TTYM_RUNTIME_DIR`이 긴 경로면 holder가 panic (unix socket SUN_LEN ~104B 초과)
 - [ ] flaky test 1건 규명 (`b2f615d9`에서 73/73 중 1건 실패 후 재실행 통과)
 - [ ] `ttym restart` ESRCH 에러 (`b45f036e`에서 미해결)
 - [ ] agent-bus 활성화 여부 결정 (현재 `null`, SQLite 파일만 존재)
