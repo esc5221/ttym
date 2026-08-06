@@ -8,3 +8,6 @@ native/node_modules/
 native/dist/
 native/src-tauri/target/
 native/src-tauri/gen/
+
+# Reference repos cloned for design research (not part of the build)
+.context/
