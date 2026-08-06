@@ -77,7 +77,7 @@ function fetchJson(port, path) {
       });
     });
     req.on('error', reject);
-    req.setTimeout(HTTP_TIMEOUT_MS, () => { req.destroy(); reject(new Error(`timeout after ${HTTP_TIMEOUT_MS}ms`)); });
+    req.setTimeout(timeoutMs, () => { req.destroy(); reject(new Error(`timeout after ${timeoutMs}ms`)); });
   });
 }
 
@@ -93,7 +93,7 @@ function fetchDelete(port, path) {
   return fetchRequest(port, 'DELETE', path);
 }
 
-function fetchRequest(port, method, path, body) {
+function fetchRequest(port, method, path, body, timeoutMs = HTTP_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const data = body === undefined ? null : JSON.stringify(body);
     const baseHeaders = { 'Connection': 'close' };
@@ -1315,12 +1315,15 @@ async function cmdWorkspace() {
     // submits the prompt, and holds the reply until the agent's hook settles
     // it. Nothing polls, so a fast answer comes back as fast as it lands.
     const text = payload.replace(/[\r\n]+$/, '');
+    // The server holds this request open until the agent's hook settles it, so
+    // the socket timeout has to outlast the interaction timeout, not the
+    // default 5s meant for ordinary calls.
     const response = await fetchRequest(port, 'POST', `/api/sessions/${member.sessionId}/interactions`, {
       prompt: text,
       timeoutMs,
       submit: 'cr',
-    });
-    const interaction = response?.body?.interaction ?? null;
+    }, timeoutMs + 15_000);
+    const interaction = response?.interaction ?? null;
     const completed = interaction?.status === 'completed';
 
     // `--raw` predates transcripts and meant "the screen with its escapes".
