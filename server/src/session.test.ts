@@ -194,3 +194,51 @@ describe('Session (holder-backed)', () => {
     expect(Buffer.concat(chunks.map((chunk) => chunk.data)).toString('binary')).toContain('aborted');
   });
 });
+
+describe('Session transcript marking', () => {
+  it('returns only the rows written after the mark', async () => {
+    mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
+    const session = await Session.create(
+      20, ['/bin/sh', '-lc', 'stty -echo; exec cat'],
+      80, 24, TEST_RUNTIME_DIR,
+    );
+    sessions.push(session);
+    await new Promise((r) => setTimeout(r, 200));
+
+    session.write(Buffer.from('BEFORE_MARK\n'));
+    await waitFor(() => session.snapshot().includes('BEFORE_MARK') ? true : undefined);
+
+    const mark = session.markCursor();
+    expect(mark).not.toBeNull();
+
+    session.write(Buffer.from('AFTER_MARK\n'));
+    await waitFor(() => session.snapshot().includes('AFTER_MARK') ? true : undefined);
+
+    const transcript = session.transcriptSince(mark!);
+    expect(transcript).not.toBeNull();
+    expect(transcript).toContain('AFTER_MARK');
+    expect(transcript).not.toContain('BEFORE_MARK');
+  });
+
+  it('reports null once the marked row scrolls out of the buffer', async () => {
+    mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
+    const session = await Session.create(
+      21, ['/bin/sh', '-lc', 'stty -echo; exec cat'],
+      80, 24, TEST_RUNTIME_DIR,
+    );
+    sessions.push(session);
+    await new Promise((r) => setTimeout(r, 200));
+
+    const mark = session.markCursor()!;
+    expect(mark.line).toBeGreaterThanOrEqual(0);
+
+    // Push past the 3000-row scrollback so the marked row is discarded.
+    // The session runs `cat`, so write the rows rather than a shell loop.
+    const flood = Array.from({ length: 4000 }, (_, i) => `flood ${i}`).join('\n') + '\n';
+    session.write(Buffer.from(flood));
+    await waitFor(() => mark.line < 0 ? true : undefined, 40_000);
+
+    // A stale index would still be in range and would return unrelated output.
+    expect(session.transcriptSince(mark)).toBeNull();
+  }, 60_000);
+});

@@ -12,6 +12,12 @@ import { SyncBlockFilter } from './sync-block.js';
 export type SessionStatus = 'attached' | 'detached' | 'dead';
 export type ViewerMode = 'readwrite' | 'readonly';
 
+/** An xterm marker: `line` tracks its row, and goes to -1 once it scrolls out. */
+export interface TerminalMarker {
+  readonly line: number;
+  dispose(): void;
+}
+
 export interface SessionInfo {
   id: number;
   pid: number;
@@ -419,6 +425,39 @@ export class Session {
 
   snapshot(): string {
     return this.serializer.serialize();
+  }
+
+  /**
+   * Mark the row the next output will land on, so a later call can read back
+   * everything written since.
+   *
+   * A plain `baseY + cursorY` stops meaning the same row once the scrollback
+   * starts discarding lines: the number stays in range and quietly points at
+   * unrelated output. An xterm marker follows the row and reports `line === -1`
+   * once that row scrolls away, which is what lets `transcriptSince` tell "the
+   * range is gone" apart from "the range is empty".
+   */
+  markCursor(): TerminalMarker | null {
+    return this.term.registerMarker(0) ?? null;
+  }
+
+  /**
+   * Rendered rows from `marker` up to the cursor.
+   *
+   * Returns null once the marker has scrolled out of the buffer — any range we
+   * could return at that point would be someone else's output.
+   */
+  transcriptSince(marker: TerminalMarker): string | null {
+    if (marker.line < 0) return null;
+    const buf = this.term.buffer.active;
+    const end = buf.baseY + buf.cursorY;
+    const rows: string[] = [];
+    for (let i = marker.line; i <= end; i++) {
+      const line = buf.getLine(i);
+      if (line) rows.push(line.translateToString(true));
+    }
+    while (rows.length > 0 && rows[rows.length - 1] === '') rows.pop();
+    return rows.join('\n');
   }
 
   /** Seed headless xterm with a previously saved snapshot (for reboot restore) */
