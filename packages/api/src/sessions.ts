@@ -1,5 +1,5 @@
 import { request, type BaseUrl } from './transport.js';
-import type { SessionInfo, SessionMeta } from './types.js';
+import type { SessionAnnotations, SessionInfo, SessionMeta, SessionRuntime } from './types.js';
 
 export function listSessions(base: BaseUrl): Promise<SessionInfo[]> {
   return request(base, '/api/sessions');
@@ -36,4 +36,20 @@ export function sendToSession(base: BaseUrl, sessionId: number, data: string): P
 
 export function resizeSession(base: BaseUrl, sessionId: number, cols: number, rows: number): Promise<{ ok: boolean }> {
   return request(base, `/api/sessions/${sessionId}/resize`, { method: 'POST', body: { cols, rows } });
+}
+
+export function getSessionRuntime(base: BaseUrl, sessionId: number): Promise<SessionRuntime> {
+  return request(base, `/api/sessions/${sessionId}/runtime`);
+}
+
+export function getSessionAnnotations(base: BaseUrl, sessionId: number): Promise<SessionAnnotations> {
+  return request(base, `/api/sessions/${sessionId}/annotations`);
+}
+
+export function patchSessionAnnotations(
+  base: BaseUrl,
+  sessionId: number,
+  patch: SessionAnnotations,
+): Promise<SessionAnnotations> {
+  return request(base, `/api/sessions/${sessionId}/annotations`, { method: 'PATCH', body: patch });
 }

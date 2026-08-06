@@ -189,6 +189,7 @@ export class Session {
   private _generation = '';
   private _appliedOffset = 0;
   private _recoveryGap = false;
+  private _exitCode: number | null = null;
   private supportsReplay = false;
   private readonly syncFilter = new SyncBlockFilter();
   private syncBlocksStarted = 0;
@@ -214,6 +215,8 @@ export class Session {
   get appliedOffset(): number { return this._appliedOffset; }
   /** True when recovery could not reach back to the checkpoint. */
   get recoveryGap(): boolean { return this._recoveryGap; }
+  /** Exit code once the PTY has died; -1 unknown, -2 lease lost. */
+  get exitCode(): number | null { return this._exitCode; }
 
   /**
    * Seed the terminal from a saved checkpoint before any delta is applied.
@@ -496,6 +499,7 @@ export class Session {
         if (!this.closed) {
           this.closed = true;
           this._diedAt = Date.now();
+          this._exitCode = -1;
           for (const cb of this.exitCbs) cb(-1);
           this.exitCbs = [];
         }
@@ -534,6 +538,7 @@ export class Session {
         this.debug(`holder EXIT code=${code}`);
         this.closed = true;
         this._diedAt = Date.now();
+        this._exitCode = code;
         for (const cb of this.exitCbs) cb(code);
         this.exitCbs = [];
         break;
@@ -545,6 +550,7 @@ export class Session {
         this.closed = true;
         this._evicted = true;
         this._diedAt = Date.now();
+        this._exitCode = -2;
         for (const cb of this.exitCbs) cb(-2);
         this.exitCbs = [];
         break;

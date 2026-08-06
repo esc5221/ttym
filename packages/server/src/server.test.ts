@@ -322,6 +322,68 @@ describe('meta ownership over HTTP', () => {
     expect(mixed.status).toBe(400);
   });
 
+  it('assembles the runtime view and keeps it read-only by construction', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const id = await createSession(port);
+
+    // Agent mapping arrives the way it does in production: through the hook path.
+    await fetch(`http://127.0.0.1:${port}/api/internal/sessions/${id}/agent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ claudeSessionId: 'cs-1', claudeActive: true }),
+    });
+
+    const rt = await (await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/runtime`)).json();
+    expect(rt.terminal.cols).toBe(80);
+    expect(rt.process.state).toBe('running');
+    expect(rt.process.pid).toBeGreaterThan(0);
+    expect(rt.agent.kind).toBe('claude-code');
+    expect(rt.agent.externalSessionId).toBe('cs-1');
+    expect(rt.agent.activeInteractionId).toBeNull();
+
+    // There is no write method on /runtime at all.
+    const write = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/runtime`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ terminal: { cols: 999 } }),
+    });
+    expect(write.status).toBe(404);
+  });
+
+  it('serves annotations without the server-owned keys mixed in', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const id = await createSession(port);
+
+    await fetch(`http://127.0.0.1:${port}/api/internal/sessions/${id}/agent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ claudeSessionId: 'cs-2' }),
+    });
+    const patched = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/annotations`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket: 'TT-9' }),
+    });
+    expect(patched.status).toBe(200);
+
+    const ann = await patched.json();
+    expect(ann.ticket).toBe('TT-9');
+    expect(ann.claudeSessionId).toBeUndefined(); // runtime never leaks into this view
+
+    // The compat surface still shows everything merged.
+    const meta = await (await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/meta`)).json();
+    expect(meta.ticket).toBe('TT-9');
+    expect(meta.claudeSessionId).toBe('cs-2');
+
+    // And the new surface refuses runtime keys just like the old one.
+    const bad = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/annotations`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stopSeq: '1' }),
+    });
+    expect(bad.status).toBe(400);
+  });
+
   it('annotations cannot stall an await — the C acceptance test', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const id = await createSession(port);

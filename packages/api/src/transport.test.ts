@@ -81,6 +81,8 @@ describe('endpoint shapes', () => {
     await api.workspaces.removeMember('a b', 3);
     await api.workspaces.split('w', { targetSessionId: 1 });
     await api.interactions.submit(2, { prompt: 'q', timeoutMs: 5 });
+    await api.sessions.runtime(7);
+    await api.sessions.patchAnnotations(7, { ticket: 'T' });
 
     expect(calls.map((c) => `${c.init.method ?? 'GET'} ${c.url.pathname}`)).toEqual([
       'GET /api/sessions/7/screen',
@@ -89,6 +91,8 @@ describe('endpoint shapes', () => {
       'DELETE /api/workspaces/a%20b/members/3',
       'POST /api/workspaces/w/split',
       'POST /api/sessions/2/interactions',
+      'GET /api/sessions/7/runtime',
+      'PATCH /api/sessions/7/annotations',
     ]);
   });
 

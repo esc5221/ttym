@@ -55,3 +55,29 @@ export interface Interaction {
   createdAt: number;
   completedAt: number | null;
 }
+
+/** Server-owned view of a session, assembled by GET /runtime. Read-only. */
+export interface SessionRuntime {
+  terminal: {
+    cols: number;
+    rows: number;
+    lastSeq: number;
+    appliedOffset: number;
+    generation: string;
+    recoveryGap: boolean;
+  };
+  process: {
+    pid: number;
+    state: 'running' | 'dead' | 'evicted';
+    exitCode: number | null;
+  };
+  agent: {
+    kind: 'claude-code' | 'codex' | null;
+    externalSessionId: string | null;
+    active: boolean;
+    activeInteractionId: string | null;
+  };
+}
+
+/** User-owned keys. Free-form; the server refuses its own keys here. */
+export type SessionAnnotations = Record<string, unknown>;

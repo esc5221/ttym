@@ -8,7 +8,7 @@ import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
 import { CMD, encode, encodeData, decode, toBuffer, jsonPayload, parseJson } from './protocol.js';
-import { API_VERSION, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
+import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
@@ -390,6 +390,85 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     if (!session || session.isDead) { json(404, { error: 'not found' }); return true; }
     json(200, { screen: session.snapshot() });
     return true;
+  }
+
+  // GET /api/sessions/:id/runtime — the server-owned view, assembled rather
+  // than stored: terminal geometry from the session, process state from the
+  // holder, the agent mapping from runtime meta, and the in-flight interaction.
+  const runtimeMatch = path.match(/^\/api\/sessions\/(\d+)\/runtime$/);
+  if (runtimeMatch && req.method === 'GET') {
+    const id = parseInt(runtimeMatch[1], 10);
+    const session = manager.get(id);
+    if (!session) { json(404, { error: 'not found' }); return true; }
+    manager.getMeta(id).then((meta) => {
+      const agentKind = meta.claudeSessionId || meta.claudeLastSessionId
+        ? 'claude-code'
+        : meta.codexSessionId || meta.codexLastSessionId ? 'codex' : null;
+      json(200, {
+        terminal: {
+          cols: session.cols,
+          rows: session.rows,
+          lastSeq: session.ring.nextSeq - 1,
+          appliedOffset: session.appliedOffset,
+          generation: session.generation,
+          recoveryGap: session.recoveryGap,
+        },
+        process: {
+          pid: session.childPid,
+          state: session.isDead ? (session.evicted ? 'evicted' : 'dead') : 'running',
+          exitCode: session.exitCode,
+        },
+        agent: {
+          kind: agentKind,
+          externalSessionId: meta.claudeSessionId ?? meta.codexSessionId ?? null,
+          active: meta.claudeActive === true || meta.codexActive === true,
+          activeInteractionId: interactions.pending(id)?.id ?? null,
+        },
+      });
+    });
+    return true;
+  }
+
+  // GET|PATCH /api/sessions/:id/annotations — the user-owned half of meta.
+  // Same store underneath; the split is in what each surface will accept.
+  const annotationsMatch = path.match(/^\/api\/sessions\/(\d+)\/annotations$/);
+  if (annotationsMatch) {
+    const id = parseInt(annotationsMatch[1], 10);
+    if (!manager.get(id)) { json(404, { error: 'not found' }); return true; }
+
+    if (req.method === 'GET') {
+      manager.getMeta(id).then((meta) => {
+        const annotations: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(meta)) {
+          if (!isRuntimeMetaKey(key)) annotations[key] = value;
+        }
+        json(200, annotations);
+      });
+      return true;
+    }
+
+    if (req.method === 'PATCH') {
+      readBody().then(async (body) => {
+        try {
+          const patch = JSON.parse(body);
+          if (typeof patch !== 'object' || patch === null) { json(400, { error: 'body must be object' }); return; }
+          const owned = runtimeMetaKeys(patch);
+          if (owned.length > 0) {
+            json(400, { error: `runtime keys are server-owned: ${owned.join(', ')}` });
+            return;
+          }
+          const merged = await manager.setMeta(id, patch);
+          const annotations: Record<string, unknown> = {};
+          for (const [key, value] of Object.entries(merged)) {
+            if (!isRuntimeMetaKey(key)) annotations[key] = value;
+          }
+          json(200, annotations);
+        } catch {
+          json(400, { error: 'invalid body' });
+        }
+      });
+      return true;
+    }
   }
 
   // GET /api/sessions/:id/meta

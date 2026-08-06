@@ -31,6 +31,10 @@ export function createApi(base: BaseUrl) {
       patchMeta: (id: number, patch: Parameters<typeof sessions.patchSessionMeta>[2]) =>
         sessions.patchSessionMeta(base, id, patch),
       send: (id: number, data: string) => sessions.sendToSession(base, id, data),
+      runtime: (id: number) => sessions.getSessionRuntime(base, id),
+      annotations: (id: number) => sessions.getSessionAnnotations(base, id),
+      patchAnnotations: (id: number, patch: Parameters<typeof sessions.patchSessionAnnotations>[2]) =>
+        sessions.patchSessionAnnotations(base, id, patch),
       resize: (id: number, cols: number, rows: number) => sessions.resizeSession(base, id, cols, rows),
     },
     workspaces: {
