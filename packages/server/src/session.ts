@@ -292,7 +292,10 @@ export class Session {
     proc.unref();
 
     // Wait for socket to appear (holder needs a moment)
-    await waitForSocket(socketPath, 3000);
+    // 10s, not 3: on a machine already running a fleet of agents, a holder
+    // plus its shell can take longer than 3s to reach the socket, and the old
+    // limit turned load into spurious 'spawn failed' errors.
+    await waitForSocket(socketPath, 10_000);
 
     // Connect and wait for STATE
     const sock = await connectSocket(socketPath);

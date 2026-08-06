@@ -5,7 +5,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 
 const TEST_RUNTIME_DIR = resolve('/tmp', `ttym-test-${process.pid}`);
 
-function waitFor<T>(fn: () => T | undefined, timeoutMs = 5_000, intervalMs = 25): Promise<T> {
+function waitFor<T>(fn: () => T | undefined, timeoutMs = 15_000, intervalMs = 25): Promise<T> {
   const startedAt = Date.now();
   return new Promise((resolve, reject) => {
     const tick = () => {

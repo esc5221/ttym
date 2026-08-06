@@ -33,7 +33,7 @@ class TestClient {
 
   send(frame: Uint8Array) { this.ws.send(frame); }
 
-  next(predicate: (frame: Frame) => boolean, timeoutMs = 10_000): Promise<Frame> {
+  next(predicate: (frame: Frame) => boolean, timeoutMs = 20_000): Promise<Frame> {
     const existingIndex = this.frames.findIndex(predicate);
     if (existingIndex !== -1) {
       return Promise.resolve(this.frames.splice(existingIndex, 1)[0]!);
@@ -278,7 +278,11 @@ describe('meta ownership over HTTP', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24 }),
     });
-    return (await res.json()).id;
+    const body = await res.json();
+    // Fail here with the server's message rather than three asserts later with
+    // a mystery 404 from an /undefined/ URL.
+    if (!body?.id) throw new Error(`session create failed: ${res.status} ${JSON.stringify(body)}`);
+    return body.id;
   }
 
   it('refuses runtime keys on the public surface, and names them', async () => {
