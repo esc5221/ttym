@@ -7,7 +7,7 @@ Phase 0/0.5는 RFD에 없다 — 프로덕션을 켜둔 채 개발하기 위한 
 제약: **프로덕션 서버(port 7690, pid 2713)는 Phase 5까지 절대 정지하지 않는다.**
 개발·검증은 전부 dev 서버(port 7691, `~/.ttym-dev`, worktree `~/study/ttym-v3`)에서 한다.
 
-진행: **16/49 (32%)**
+진행: **20/49 (40%)**
 
 ---
 
@@ -50,10 +50,12 @@ RFD가 "B 착수 전 해소" 라고 명시한 항목들.
       - RFD 6.1의 "응답이 3000행을 넘는다"는 우려는 현실적이지 않음
       - 다만 행당 바이트가 커서 **holder ring(1MB)이 xterm(약 2.7MB)보다 작다** → 아래 재검증
 - [ ] "응답"의 경계 정의 — 도구 호출 중간 출력을 transcript에 포함할지 (결정 사항)
+      B 구현 중 관측: transcript 끝에 다음 프롬프트 입력창 렌더가 섞인다.
+      끝점을 Stop 시점 커서로 잡는 한 TUI가 그 뒤 그리는 것도 들어온다
 - [x] 복원된 세션의 mark — Phase 0.5-4에서 해소
 - [ ] `workspaces.json` v2→v3 변환 검증 방법 — 무엇과 비교해 검증할지
 
-## Phase 2 — RFD A·B·C · 0/9
+## Phase 2 — RFD A·B·C · 4/9
 
 셋은 상호 독립. 순서 없음.
 
@@ -63,10 +65,18 @@ RFD가 "B 착수 전 해소" 라고 명시한 항목들.
 - [ ] 판정: 중첩 layout에 세션을 추가·제거해도 형제 서브트리와 sizes가 입력과 동일
 
 ### B. interaction과 transcript
-- [ ] mark 기반 구간 추출 (`baseY + cursorY`)
-- [ ] interaction 리소스를 서버가 소유 (200/202 + Location으로 이어받기)
-- [ ] Stop hook 직결 → CLI 1초 폴링 제거
-- [ ] 판정: 이전 대화가 있는 세션의 await 반환값이 이번 요청의 출력만 포함
+- [x] mark 기반 구간 추출 — **xterm marker 사용** (`63a1fce`)
+      RFD가 적은 `baseY + cursorY`는 스크롤백이 밀리면 범위 안에 머문 채
+      남의 출력을 가리킨다(실측). marker는 `line === -1`로 소실을 알려주므로
+      "구간이 사라졌다"와 "구간이 비었다"를 구분할 수 있다
+- [x] interaction 리소스를 서버가 소유 (`9849fe8`, `e47d1a0`)
+      200/202 + Location, timeout은 pending 유지 → id로 이어받기
+- [x] Stop hook 직결 → CLI 1초 폴링 제거 (`e47d1a0`, `735800f`)
+      `POST /api/internal/sessions/:id/stop` ← `ttym hook report-stop`
+      StopFailure·SessionEnd도 등록 — 실패로 끝난 턴이 ~120ms에 정리됨
+      (기존에는 timeout까지 blocking)
+- [x] **판정 통과** — 이전 대화가 있는 실제 Claude 세션에서 검증
+      transcript는 이번 응답만, 같은 시점 screen은 19행 전체(이전 대화 포함)
 
 ### C. runtime / annotations 분리
 - [ ] `meta` → `/runtime` (서버 소유, 읽기 전용) + `/annotations` (사용자 소유)
