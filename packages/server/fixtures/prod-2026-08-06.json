@@ -1,0 +1,4896 @@
+{
+ "capturedAt": "2026-08-06T10:58:08.807Z",
+ "source": "production ~/.ttym/run (de-identified)",
+ "nextId": 1002,
+ "workspaces": {
+  "version": 2,
+  "workspaces": [
+   {
+    "id": "16b5cfdf",
+    "project": "default",
+    "name": "ws-1",
+    "layout": {
+     "type": "split",
+     "axis": "row",
+     "sizes": [
+      0.3333333333333333,
+      0.3333333333333333,
+      0.3333333333333333
+     ],
+     "children": [
+      {
+       "type": "pane",
+       "sessionId": 940
+      },
+      {
+       "type": "pane",
+       "sessionId": 994
+      },
+      {
+       "type": "pane",
+       "sessionId": 983
+      }
+     ]
+    },
+    "members": [
+     {
+      "sessionId": 940,
+      "name": "term-940",
+      "tags": [],
+      "createdAt": 1780899854919,
+      "updatedAt": 1780899854919
+     },
+     {
+      "sessionId": 994,
+      "name": "term-994",
+      "tags": [],
+      "createdAt": 1785918011361,
+      "updatedAt": 1785918011361
+     },
+     {
+      "sessionId": 983,
+      "name": "term-983",
+      "tags": [],
+      "createdAt": 1785745157138,
+      "updatedAt": 1785745157138
+     }
+    ],
+    "createdAt": 1780366817991,
+    "updatedAt": 1785918011361
+   },
+   {
+    "id": "8c2d5bd9",
+    "project": "default",
+    "name": "ws-2",
+    "layout": {
+     "type": "pane",
+     "sessionId": 974
+    },
+    "members": [
+     {
+      "sessionId": 974,
+      "name": "term-974",
+      "tags": [],
+      "createdAt": 1784514538616,
+      "updatedAt": 1784514538616
+     }
+    ],
+    "createdAt": 1784514519949,
+    "updatedAt": 1786011420257
+   },
+   {
+    "id": "4a428dab",
+    "project": "default",
+    "name": "ws-3",
+    "layout": {
+     "type": "split",
+     "axis": "row",
+     "sizes": [
+      0.5,
+      0.5
+     ],
+     "children": [
+      {
+       "type": "pane",
+       "sessionId": 980
+      },
+      {
+       "type": "pane",
+       "sessionId": 981
+      }
+     ]
+    },
+    "members": [
+     {
+      "sessionId": 980,
+      "name": "term-980",
+      "tags": [],
+      "createdAt": 1785742967530,
+      "updatedAt": 1785742967530
+     },
+     {
+      "sessionId": 981,
+      "name": "term-981",
+      "tags": [],
+      "createdAt": 1785742973959,
+      "updatedAt": 1785742973959
+     }
+    ],
+    "createdAt": 1785742965840,
+    "updatedAt": 1785742973959
+   },
+   {
+    "id": "90497157",
+    "project": "default",
+    "name": "ws-4",
+    "layout": {
+     "type": "split",
+     "axis": "row",
+     "sizes": [
+      0.5,
+      0.5
+     ],
+     "children": [
+      {
+       "type": "pane",
+       "sessionId": 985
+      },
+      {
+       "type": "pane",
+       "sessionId": 986
+      }
+     ]
+    },
+    "members": [
+     {
+      "sessionId": 985,
+      "name": "term-985",
+      "tags": [],
+      "createdAt": 1785761824205,
+      "updatedAt": 1785761824205
+     },
+     {
+      "sessionId": 986,
+      "name": "term-986",
+      "tags": [],
+      "createdAt": 1785761841304,
+      "updatedAt": 1785761841304
+     }
+    ],
+    "createdAt": 1785761823008,
+    "updatedAt": 1785839362586
+   },
+   {
+    "id": "cfbb8f3b",
+    "project": "default",
+    "name": "ws-5",
+    "layout": {
+     "type": "split",
+     "axis": "row",
+     "sizes": [
+      0.3333333333333333,
+      0.3333333333333333,
+      0.3333333333333333
+     ],
+     "children": [
+      {
+       "type": "pane",
+       "sessionId": 987
+      },
+      {
+       "type": "pane",
+       "sessionId": 988
+      },
+      {
+       "type": "pane",
+       "sessionId": 989
+      }
+     ]
+    },
+    "members": [
+     {
+      "sessionId": 987,
+      "name": "term-987",
+      "tags": [],
+      "createdAt": 1785831515097,
+      "updatedAt": 1785831515097
+     },
+     {
+      "sessionId": 988,
+      "name": "term-988",
+      "tags": [],
+      "createdAt": 1785832728697,
+      "updatedAt": 1785832728697
+     },
+     {
+      "sessionId": 989,
+      "name": "term-989",
+      "tags": [],
+      "createdAt": 1785898918717,
+      "updatedAt": 1785898918717
+     }
+    ],
+    "createdAt": 1785831513937,
+    "updatedAt": 1785902341955
+   },
+   {
+    "id": "1299b4a6",
+    "project": "default",
+    "name": "ws-6",
+    "layout": {
+     "type": "split",
+     "axis": "row",
+     "sizes": [
+      0.5,
+      0.5
+     ],
+     "children": [
+      {
+       "type": "pane",
+       "sessionId": 998
+      },
+      {
+       "type": "pane",
+       "sessionId": 999
+      }
+     ]
+    },
+    "members": [
+     {
+      "sessionId": 998,
+      "name": "term-998",
+      "tags": [],
+      "createdAt": 1785945155353,
+      "updatedAt": 1785945155353
+     },
+     {
+      "sessionId": 999,
+      "name": "term-999",
+      "tags": [],
+      "createdAt": 1785945166094,
+      "updatedAt": 1785945166094
+     }
+    ],
+    "createdAt": 1785901768586,
+    "updatedAt": 1785945166094
+   },
+   {
+    "id": "dc893085",
+    "project": "default",
+    "name": "ws-7",
+    "layout": {
+     "type": "split",
+     "axis": "row",
+     "sizes": [
+      0.5,
+      0.5
+     ],
+     "children": [
+      {
+       "type": "pane",
+       "sessionId": 1000
+      },
+      {
+       "type": "pane",
+       "sessionId": 1001
+      }
+     ]
+    },
+    "members": [
+     {
+      "sessionId": 1000,
+      "name": "term-1000",
+      "tags": [],
+      "createdAt": 1785986417422,
+      "updatedAt": 1785986417422
+     },
+     {
+      "sessionId": 1001,
+      "name": "term-1001",
+      "tags": [],
+      "createdAt": 1785986421706,
+      "updatedAt": 1785986421706
+     }
+    ],
+    "createdAt": 1785986415807,
+    "updatedAt": 1785986421706
+   }
+  ]
+ },
+ "metas": [
+  {
+   "id": 1000,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-2550ad24",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-06T03:20:22.406Z",
+    "claudeLastStoppedAt": "2026-08-06T06:54:41.783Z",
+    "stopSeq": "0",
+    "stopAt": "1785999281"
+   }
+  },
+  {
+   "id": 1001,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-3febd4d1",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-06T10:15:13.052Z",
+    "claudeLastStoppedAt": "2026-08-06T10:36:58.822Z",
+    "stopSeq": "0",
+    "stopAt": "1786012619"
+   }
+  },
+  {
+   "id": 130,
+   "meta": {
+    "claudeSessionId": "agent-e8465051"
+   }
+  },
+  {
+   "id": 139,
+   "meta": {
+    "claudeSessionId": "agent-4eac9568"
+   }
+  },
+  {
+   "id": 140,
+   "meta": {
+    "claudeSessionId": "agent-627f817d"
+   }
+  },
+  {
+   "id": 144,
+   "meta": {
+    "claudeSessionId": "agent-ba8f245a"
+   }
+  },
+  {
+   "id": 151,
+   "meta": {
+    "claudeSessionId": "agent-ba8f245a"
+   }
+  },
+  {
+   "id": 152,
+   "meta": {
+    "claudeSessionId": "agent-ba8f245a"
+   }
+  },
+  {
+   "id": 153,
+   "meta": {
+    "claudeSessionId": "agent-ba8f245a"
+   }
+  },
+  {
+   "id": 154,
+   "meta": {
+    "claudeSessionId": "agent-ba8f245a"
+   }
+  },
+  {
+   "id": 163,
+   "meta": {
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-90fae039",
+    "claudeLastSessionId": "agent-90fae039",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-03-13T15:01:18.173Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 164,
+   "meta": {
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-ba8f245a",
+    "claudeLastSessionId": "agent-ba8f245a",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-03-13T15:00:49.373Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 165,
+   "meta": {
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-4eac9568",
+    "claudeLastSessionId": "agent-4eac9568",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-03-13T15:05:35.187Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 166,
+   "meta": {
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-90fae039",
+    "claudeLastSessionId": "agent-90fae039",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-03-13T15:05:45.886Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 170,
+   "meta": {
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-90fae039",
+    "claudeLastSessionId": "agent-90fae039",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-03-13T15:05:56.232Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 175,
+   "meta": {
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-ba8f245a",
+    "claudeLastSessionId": "agent-ba8f245a",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-03-13T15:07:18.582Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 176,
+   "meta": {
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-ba8f245a",
+    "claudeLastSessionId": "agent-ba8f245a",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-03-13T15:12:02.039Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 177,
+   "meta": {
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-ba8f245a",
+    "claudeLastSessionId": "agent-ba8f245a",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-03-13T15:13:08.198Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 253,
+   "meta": {
+    "project": "demo",
+    "workspaceId": "6b6cdc49",
+    "workspaceName": "ws",
+    "memberName": "lead",
+    "role": "agent",
+    "name": "lead",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-f8a7c053",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-15T08:06:08.534Z",
+    "claudeLastStoppedAt": "2026-03-15T08:26:43.086Z"
+   }
+  },
+  {
+   "id": 255,
+   "meta": {
+    "project": "demo",
+    "workspaceId": "6b6cdc49",
+    "workspaceName": "ws",
+    "memberName": "runner",
+    "role": "executor",
+    "name": "runner"
+   }
+  },
+  {
+   "id": 278,
+   "meta": {
+    "project": "default",
+    "workspaceId": "af1f0a6e",
+    "workspaceName": "ws",
+    "memberName": "codex-alpha",
+    "role": "agent",
+    "name": "codex-alpha"
+   }
+  },
+  {
+   "id": 279,
+   "meta": {
+    "project": "default",
+    "workspaceId": "af1f0a6e",
+    "workspaceName": "ws",
+    "memberName": "codex-beta",
+    "role": "agent",
+    "name": "codex-beta"
+   }
+  },
+  {
+   "id": 280,
+   "meta": {
+    "project": "default",
+    "workspaceId": "af1f0a6e",
+    "workspaceName": "ws",
+    "memberName": "codex-gamma",
+    "role": "agent",
+    "name": "codex-gamma"
+   }
+  },
+  {
+   "id": 297,
+   "meta": {
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-a0b0fec8",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-16T02:36:47.320Z",
+    "codexLastStoppedAt": "2026-03-16T03:43:02.933Z",
+    "stopSeq": "0",
+    "stopAt": "1773632583"
+   }
+  },
+  {
+   "id": 301,
+   "meta": {
+    "project": "default",
+    "workspaceId": "d66df7aa",
+    "workspaceName": "ws",
+    "memberName": "codex-color",
+    "role": "agent",
+    "name": "codex-color"
+   }
+  },
+  {
+   "id": 305,
+   "meta": {
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-1f689daf",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-16T03:51:25.364Z",
+    "codexLastStoppedAt": "2026-03-16T03:54:19.963Z",
+    "stopSeq": "0",
+    "stopAt": "1773633260"
+   }
+  },
+  {
+   "id": 388,
+   "meta": {
+    "codexSessionId": "agent-f149ce16",
+    "codexLastSessionId": "agent-f149ce16",
+    "codexActive": true,
+    "codexLastStartedAt": "2026-03-18T08:06:45.021Z",
+    "codexLastStoppedAt": null
+   }
+  },
+  {
+   "id": 389,
+   "meta": {
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-213e1e4d",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-18T08:07:03.859Z",
+    "codexLastStoppedAt": "2026-03-18T08:13:29.732Z",
+    "stopSeq": "0",
+    "stopAt": "1773821609"
+   }
+  },
+  {
+   "id": 390,
+   "meta": {
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-33f62040",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-18T08:07:17.498Z",
+    "codexLastStoppedAt": "2026-03-18T08:13:20.663Z",
+    "stopSeq": "0",
+    "stopAt": "1773821600"
+   }
+  },
+  {
+   "id": 391,
+   "meta": {
+    "project": "default",
+    "workspaceId": "9a8e31b1",
+    "workspaceName": "ws",
+    "memberName": "codex-1",
+    "role": "agent",
+    "name": "codex-1"
+   }
+  },
+  {
+   "id": 392,
+   "meta": {
+    "project": "default",
+    "workspaceId": "9a8e31b1",
+    "workspaceName": "ws",
+    "memberName": "codex-2",
+    "role": "agent",
+    "name": "codex-2"
+   }
+  },
+  {
+   "id": 393,
+   "meta": {
+    "project": "default",
+    "workspaceId": "9a8e31b1",
+    "workspaceName": "ws",
+    "memberName": "codex-3",
+    "role": "agent",
+    "name": "codex-3"
+   }
+  },
+  {
+   "id": 623,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 625,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 629,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 633,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 634,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 635,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 637,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-33ca064a",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-19T13:13:19.651Z",
+    "claudeLastStoppedAt": "2026-03-20T02:28:33.984Z",
+    "stopSeq": "0",
+    "stopAt": "1773973714"
+   }
+  },
+  {
+   "id": 639,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-dc3bd50a",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-19T14:15:09.943Z",
+    "claudeLastStoppedAt": "2026-03-19T14:46:43.642Z",
+    "stopSeq": "0",
+    "stopAt": "1773931603"
+   }
+  },
+  {
+   "id": 640,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-d90f1f05",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-20T03:30:31.459Z",
+    "claudeLastStoppedAt": "2026-03-20T05:58:40.685Z",
+    "stopSeq": "0",
+    "stopAt": "1773986320"
+   }
+  },
+  {
+   "id": 641,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 642,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-332d22e4",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-20T06:34:17.368Z",
+    "claudeLastStoppedAt": "2026-03-20T07:26:17.939Z",
+    "stopSeq": "0",
+    "stopAt": "1773991578"
+   }
+  },
+  {
+   "id": 644,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 648,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 654,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 657,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 658,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 659,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 670,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 672,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 674,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-3b43e971",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-22T16:22:07.855Z",
+    "claudeLastStoppedAt": "2026-03-22T16:39:48.569Z",
+    "stopSeq": "0",
+    "stopAt": "1774244092",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-fa9b57cf",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-23T03:05:04.845Z",
+    "codexLastStoppedAt": "2026-03-23T05:34:52.433Z"
+   }
+  },
+  {
+   "id": 675,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-f211aa35",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-22T16:56:38.960Z",
+    "claudeLastStoppedAt": "2026-03-22T16:58:34.641Z",
+    "stopSeq": "0",
+    "stopAt": "1774198714"
+   }
+  },
+  {
+   "id": 676,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-216298ca",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-23T02:52:30.522Z",
+    "claudeLastStoppedAt": "2026-03-23T03:27:28.053Z",
+    "stopSeq": "0",
+    "stopAt": "1774236448",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-4ca168ce",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-23T02:52:38.325Z",
+    "codexLastStoppedAt": "2026-03-23T02:54:00.314Z"
+   }
+  },
+  {
+   "id": 678,
+   "meta": {
+    "cwd": "/Users/user",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-4fee49c9",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-22T14:37:20.843Z",
+    "codexLastStoppedAt": "2026-03-22T15:08:29.701Z",
+    "stopSeq": "0",
+    "stopAt": "1774192109"
+   }
+  },
+  {
+   "id": 679,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-08ea9000",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-22T16:00:34.070Z",
+    "claudeLastStoppedAt": "2026-03-22T16:15:00.162Z",
+    "stopSeq": "0",
+    "stopAt": "1774196100"
+   }
+  },
+  {
+   "id": 687,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-3cd2e92c",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-24T05:23:12.291Z",
+    "claudeLastStoppedAt": "2026-03-24T06:20:26.766Z",
+    "stopSeq": "0",
+    "stopAt": "1774333226",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-daebade3",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-24T06:18:43.235Z",
+    "codexLastStoppedAt": "2026-03-24T06:19:41.769Z"
+   }
+  },
+  {
+   "id": 688,
+   "meta": {
+    "cwd": "/Users/user",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-4e555167",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-24T05:04:20.487Z",
+    "codexLastStoppedAt": "2026-03-24T05:05:51.806Z",
+    "stopSeq": "0",
+    "stopAt": "1774328751"
+   }
+  },
+  {
+   "id": 689,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 691,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 692,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "resume",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-20e667fb",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-26T04:05:12.466Z",
+    "claudeLastStoppedAt": "2026-03-26T04:06:16.336Z",
+    "stopSeq": "0",
+    "stopAt": "1774497976"
+   }
+  },
+  {
+   "id": 693,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-b60bf6c5",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-25T13:29:59.022Z",
+    "claudeLastStoppedAt": "2026-03-26T11:06:51.551Z",
+    "stopSeq": "0",
+    "stopAt": "1774523211",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-520cc779",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-25T09:20:45.540Z",
+    "codexLastStoppedAt": "2026-03-25T09:23:56.704Z"
+   }
+  },
+  {
+   "id": 694,
+   "meta": {
+    "cwd": "/Users/user",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-8b360934",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-25T05:58:52.344Z",
+    "codexLastStoppedAt": "2026-03-25T05:59:43.624Z",
+    "stopSeq": "0",
+    "stopAt": "1774428672",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-57eb8692",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-25T08:49:57.917Z",
+    "claudeLastStoppedAt": "2026-03-25T08:51:12.728Z"
+   }
+  },
+  {
+   "id": 695,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 696,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-2a3a01b0",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-25T12:53:46.329Z",
+    "claudeLastStoppedAt": "2026-03-25T13:28:44.564Z",
+    "stopSeq": "0",
+    "stopAt": "1774445324"
+   }
+  },
+  {
+   "id": 697,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-71aececc",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-26T10:30:16.567Z",
+    "claudeLastStoppedAt": "2026-03-26T11:05:39.054Z",
+    "stopSeq": "0",
+    "stopAt": "1774523139",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-dd97a213",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-26T07:57:30.057Z",
+    "codexLastStoppedAt": "2026-03-26T07:59:49.660Z"
+   }
+  },
+  {
+   "id": 698,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 699,
+   "meta": {
+    "cwd": "/Users/user",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-ec800cb7",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-25T11:38:33.346Z",
+    "codexLastStoppedAt": "2026-03-25T12:14:53.520Z",
+    "stopSeq": "0",
+    "stopAt": "1774440893"
+   }
+  },
+  {
+   "id": 701,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-736261b0",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-25T11:47:24.433Z",
+    "claudeLastStoppedAt": "2026-03-25T12:29:19.200Z",
+    "stopSeq": "0",
+    "stopAt": "1774441759",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-6cdac830",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-25T12:11:12.674Z",
+    "codexLastStoppedAt": "2026-03-25T12:13:10.444Z"
+   }
+  },
+  {
+   "id": 702,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-45098ffc",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-25T14:33:01.108Z",
+    "claudeLastStoppedAt": "2026-03-25T17:04:04.033Z",
+    "stopSeq": "0",
+    "stopAt": "1774458244",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-a5fa6158",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-25T16:30:07.699Z",
+    "codexLastStoppedAt": "2026-03-25T16:32:14.942Z"
+   }
+  },
+  {
+   "id": 703,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-99d6f689",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-25T15:05:34.633Z",
+    "claudeLastStoppedAt": "2026-03-25T16:26:40.872Z",
+    "stopSeq": "0",
+    "stopAt": "1774456000"
+   }
+  },
+  {
+   "id": 704,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-a29e5458",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-25T16:28:02.554Z",
+    "claudeLastStoppedAt": "2026-03-25T16:28:19.790Z",
+    "stopSeq": "0",
+    "stopAt": "1774456099"
+   }
+  },
+  {
+   "id": 705,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 706,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 707,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 708,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 709,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 710,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 711,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 723,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 725,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 729,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-b4c8d55c",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-30T03:05:52.804Z",
+    "claudeLastStoppedAt": "2026-03-30T04:36:53.774Z",
+    "stopSeq": "0",
+    "stopAt": "1774845413"
+   }
+  },
+  {
+   "id": 731,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-56138bd5",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-30T03:54:04.953Z",
+    "claudeLastStoppedAt": "2026-03-30T06:04:04.221Z",
+    "stopSeq": "0",
+    "stopAt": "1774850644",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-ebee54ea",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-30T04:21:03.317Z",
+    "codexLastStoppedAt": "2026-03-30T04:21:55.682Z"
+   }
+  },
+  {
+   "id": 732,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 734,
+   "meta": {
+    "cwd": "/Users/user",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-7bbc4ae4",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-30T11:41:31.612Z",
+    "codexLastStoppedAt": "2026-03-30T11:45:36.934Z",
+    "stopSeq": "0",
+    "stopAt": "1774871137"
+   }
+  },
+  {
+   "id": 735,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-a797504c",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-30T13:25:13.505Z",
+    "claudeLastStoppedAt": "2026-04-02T11:03:18.082Z",
+    "stopSeq": "0",
+    "stopAt": "1775127798"
+   }
+  },
+  {
+   "id": 736,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-7fff30d7",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-30T11:57:46.935Z",
+    "claudeLastStoppedAt": "2026-03-30T17:18:26.474Z",
+    "stopSeq": "0",
+    "stopAt": "1774891106"
+   }
+  },
+  {
+   "id": 737,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 738,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-d7fcda3f",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-03T12:55:38.811Z",
+    "claudeLastStoppedAt": "2026-04-03T13:28:03.025Z",
+    "stopSeq": "0",
+    "stopAt": "1775222883",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-26597047",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-03T10:32:01.503Z",
+    "codexLastStoppedAt": "2026-04-03T10:34:01.919Z"
+   }
+  },
+  {
+   "id": 739,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-a3ddeef3",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-06T03:58:07.127Z",
+    "claudeLastStoppedAt": "2026-04-06T04:05:39.006Z",
+    "stopSeq": "0",
+    "stopAt": "1775448339",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-0350a4d6",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-05T03:19:19.156Z",
+    "codexLastStoppedAt": "2026-04-05T03:20:36.580Z"
+   }
+  },
+  {
+   "id": 740,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 741,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-00b1c503",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-01T07:22:47.221Z",
+    "claudeLastStoppedAt": "2026-04-01T07:24:25.713Z",
+    "stopSeq": "0",
+    "stopAt": "1775028265"
+   }
+  },
+  {
+   "id": 742,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-e44900a6",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-01T08:23:54.744Z",
+    "claudeLastStoppedAt": "2026-04-01T09:04:16.734Z",
+    "stopSeq": "0",
+    "stopAt": "1775034256"
+   }
+  },
+  {
+   "id": 743,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 744,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-da6a7d1c",
+    "claudeLastSessionId": "agent-da6a7d1c",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-04-03T10:33:52.693Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 745,
+   "meta": {
+    "cwd": "/Users/user",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-7bbc4ae4",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-03-30T11:41:31.612Z",
+    "codexLastStoppedAt": "2026-03-30T11:45:36.934Z",
+    "stopSeq": "0",
+    "stopAt": "1774871137"
+   }
+  },
+  {
+   "id": 746,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-7fff30d7",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-03-30T11:57:46.935Z",
+    "claudeLastStoppedAt": "2026-03-30T17:18:26.474Z",
+    "stopSeq": "0",
+    "stopAt": "1774891106"
+   }
+  },
+  {
+   "id": 747,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 748,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-d7fcda3f",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-03T12:55:38.811Z",
+    "claudeLastStoppedAt": "2026-04-03T13:28:03.025Z",
+    "stopSeq": "0",
+    "stopAt": "1775222883",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-26597047",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-03T10:32:01.503Z",
+    "codexLastStoppedAt": "2026-04-03T10:34:01.919Z"
+   }
+  },
+  {
+   "id": 749,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-a3ddeef3",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-06T03:58:07.127Z",
+    "claudeLastStoppedAt": "2026-04-06T04:05:39.006Z",
+    "stopSeq": "0",
+    "stopAt": "1775448339",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-0350a4d6",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-05T03:19:19.156Z",
+    "codexLastStoppedAt": "2026-04-05T03:20:36.580Z"
+   }
+  },
+  {
+   "id": 750,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 751,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-d598be4d",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-06T06:16:10.295Z",
+    "claudeLastStoppedAt": "2026-04-06T06:26:36.738Z",
+    "stopSeq": "0",
+    "stopAt": "1775456796"
+   }
+  },
+  {
+   "id": 753,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "resume",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-073f986c",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-06T08:45:15.621Z",
+    "claudeLastStoppedAt": "2026-04-06T08:45:29.578Z",
+    "stopSeq": "0",
+    "stopAt": "1775465129"
+   }
+  },
+  {
+   "id": 754,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-a3ddeef3",
+    "claudeLastSessionId": "agent-a3ddeef3",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-04-06T08:45:07.275Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 758,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 764,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 765,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 766,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": "agent-140525e4",
+    "claudeLastSessionId": "agent-140525e4",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-04-12T13:48:23.327Z",
+    "claudeLastStoppedAt": null,
+    "stopSeq": "0",
+    "stopAt": "1775966665",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-3e4cb386",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-12T04:02:29.224Z",
+    "codexLastStoppedAt": "2026-04-12T04:02:36.394Z"
+   }
+  },
+  {
+   "id": 768,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-6b7964de",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-18T06:06:51.328Z",
+    "claudeLastStoppedAt": "2026-04-20T16:40:17.037Z",
+    "stopSeq": "0",
+    "stopAt": "1776703217",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-c2ff815b",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-13T15:43:28.448Z",
+    "codexLastStoppedAt": "2026-04-13T15:48:11.453Z"
+   }
+  },
+  {
+   "id": 769,
+   "meta": {
+    "cwd": "/Users/user",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-cfb82dbc",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-13T15:50:40.665Z",
+    "codexLastStoppedAt": "2026-04-14T11:59:45.723Z",
+    "stopSeq": "0",
+    "stopAt": "1776167985"
+   }
+  },
+  {
+   "id": 77,
+   "meta": {
+    "claudeSessionId": "agent-90fae039"
+   }
+  },
+  {
+   "id": 770,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-f62a5a1c",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-19T12:12:50.899Z",
+    "claudeLastStoppedAt": "2026-04-19T13:32:23.958Z",
+    "stopSeq": "0",
+    "stopAt": "1776605544",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-3d2a586b",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-18T09:29:47.530Z",
+    "codexLastStoppedAt": "2026-04-18T09:31:24.615Z"
+   }
+  },
+  {
+   "id": 771,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-bd7ee851",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-14T03:52:03.278Z",
+    "claudeLastStoppedAt": "2026-04-14T03:54:29.070Z",
+    "stopSeq": "0",
+    "stopAt": "1776138869"
+   }
+  },
+  {
+   "id": 772,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-84b8cbee",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-14T06:15:32.499Z",
+    "claudeLastStoppedAt": "2026-04-14T07:11:59.451Z",
+    "stopSeq": "0",
+    "stopAt": "1776150719"
+   }
+  },
+  {
+   "id": 773,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-93019826",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-14T09:27:20.701Z",
+    "claudeLastStoppedAt": "2026-04-14T09:49:49.204Z",
+    "stopSeq": "0",
+    "stopAt": "1776160189"
+   }
+  },
+  {
+   "id": 777,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-958bb6db",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-22T14:19:18.749Z",
+    "claudeLastStoppedAt": "2026-04-22T15:17:52.877Z",
+    "stopSeq": "0",
+    "stopAt": "1776871072",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-0a464c3d",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-17T10:05:15.238Z",
+    "codexLastStoppedAt": "2026-04-17T10:07:46.380Z"
+   }
+  },
+  {
+   "id": 778,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-597b69c0",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-15T07:49:55.499Z",
+    "claudeLastStoppedAt": "2026-04-16T03:41:03.873Z",
+    "stopSeq": "0",
+    "stopAt": "1776310863"
+   }
+  },
+  {
+   "id": 780,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-32458fba",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-15T07:22:21.794Z",
+    "claudeLastStoppedAt": "2026-04-16T02:51:45.729Z",
+    "stopSeq": "0",
+    "stopAt": "1776307905"
+   }
+  },
+  {
+   "id": 781,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 782,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-7a04f4b3",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-15T07:13:55.405Z",
+    "claudeLastStoppedAt": "2026-04-15T07:18:43.250Z",
+    "stopSeq": "0",
+    "stopAt": "1776237523"
+   }
+  },
+  {
+   "id": 783,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-56833a6e",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-20T10:06:46.856Z",
+    "claudeLastStoppedAt": "2026-04-20T10:07:25.112Z",
+    "stopSeq": "0",
+    "stopAt": "1776679645",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-c6be61c2",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-20T05:42:29.932Z",
+    "codexLastStoppedAt": "2026-04-20T05:45:16.669Z"
+   }
+  },
+  {
+   "id": 788,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-7cb541bb",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-20T11:21:55.245Z",
+    "claudeLastStoppedAt": "2026-04-20T11:59:22.709Z",
+    "stopSeq": "0",
+    "stopAt": "1776686362",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-e9e45247",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-20T10:50:52.252Z",
+    "codexLastStoppedAt": "2026-04-20T10:55:43.052Z"
+   }
+  },
+  {
+   "id": 789,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-5176d010",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-17T05:20:54.893Z",
+    "claudeLastStoppedAt": "2026-04-20T03:15:56.994Z",
+    "stopSeq": "0",
+    "stopAt": "1776654957"
+   }
+  },
+  {
+   "id": 790,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-7672687c",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-20T03:10:10.356Z",
+    "claudeLastStoppedAt": "2026-04-20T03:27:08.001Z",
+    "stopSeq": "0",
+    "stopAt": "1776655628",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-da860768",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-17T07:38:20.576Z",
+    "codexLastStoppedAt": "2026-04-17T07:43:22.978Z"
+   }
+  },
+  {
+   "id": 791,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-d22f129c",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-17T06:34:20.869Z",
+    "claudeLastStoppedAt": "2026-04-17T07:18:54.229Z",
+    "stopSeq": "0",
+    "stopAt": "1776410334"
+   }
+  },
+  {
+   "id": 792,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 798,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-4512af59",
+    "claudeLastSessionId": "agent-4512af59",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-04-19T15:04:35.424Z",
+    "claudeLastStoppedAt": null,
+    "stopSeq": "0",
+    "stopAt": "1776611013"
+   }
+  },
+  {
+   "id": 799,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 801,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-ac58fa53",
+    "claudeLastSessionId": "agent-ac58fa53",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-08-06T07:01:04.677Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 802,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 803,
+   "meta": {
+    "codexSessionId": "agent-1874d2bb",
+    "codexLastSessionId": "agent-1874d2bb",
+    "codexActive": true,
+    "codexLastStartedAt": "2026-08-06T07:02:50.613Z",
+    "codexLastStoppedAt": null
+   }
+  },
+  {
+   "id": 804,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-ee9fa003",
+    "claudeLastSessionId": "agent-ee9fa003",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-08-06T07:04:15.637Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 805,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 806,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 807,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 808,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 809,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-96e19b30",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-20T11:24:10.526Z",
+    "claudeLastStoppedAt": "2026-04-20T11:28:01.524Z",
+    "stopSeq": "0",
+    "stopAt": "1776684481",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-4a293f92",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-20T08:25:46.459Z",
+    "codexLastStoppedAt": "2026-04-20T08:31:24.896Z"
+   }
+  },
+  {
+   "id": 810,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-dab50b33",
+    "claudeLastSessionId": "agent-dab50b33",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-08-06T07:14:56.512Z",
+    "claudeLastStoppedAt": null,
+    "stopSeq": "0",
+    "stopAt": "1776927969"
+   }
+  },
+  {
+   "id": 811,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-dd3c0f4f",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-20T17:07:05.510Z",
+    "claudeLastStoppedAt": "2026-04-21T03:36:35.077Z",
+    "stopSeq": "0",
+    "stopAt": "1776742595"
+   }
+  },
+  {
+   "id": 812,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-dafe3566",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-20T17:07:08.590Z",
+    "claudeLastStoppedAt": "2026-04-22T02:31:03.289Z",
+    "stopSeq": "0",
+    "stopAt": "1776825063"
+   }
+  },
+  {
+   "id": 813,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-aee36997",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-21T05:26:27.758Z",
+    "claudeLastStoppedAt": "2026-04-23T06:33:09.221Z",
+    "stopSeq": "0",
+    "stopAt": "1776925989"
+   }
+  },
+  {
+   "id": 814,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 815,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 835,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 838,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-6b7964de",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-30T07:33:28.653Z",
+    "claudeLastStoppedAt": "2026-04-30T11:32:19.306Z",
+    "stopSeq": "0",
+    "stopAt": "1777548739"
+   }
+  },
+  {
+   "id": 839,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "resume",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-f4f52660",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-29T03:43:49.644Z",
+    "claudeLastStoppedAt": "2026-04-29T06:23:28.320Z",
+    "stopSeq": "0",
+    "stopAt": "1777443808"
+   }
+  },
+  {
+   "id": 840,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 841,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 842,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 843,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 845,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 846,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 847,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-5c205cd8",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-04-24T11:30:50.215Z",
+    "claudeLastStoppedAt": "2026-04-24T11:41:01.170Z",
+    "stopSeq": "0",
+    "stopAt": "1777030861"
+   }
+  },
+  {
+   "id": 848,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 849,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 851,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 853,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-c9d74b7b",
+    "claudeLastSessionId": "agent-c9d74b7b",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-04-27T05:05:14.819Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 855,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 856,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 857,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest/trees/main/backend",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-c70e4325",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-06-01T11:34:32.362Z",
+    "claudeLastStoppedAt": "2026-06-01T11:54:05.318Z",
+    "stopSeq": "0",
+    "stopAt": "1780314845"
+   }
+  },
+  {
+   "id": 858,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 859,
+   "meta": {
+    "cwd": "/Users/user",
+    "codexSessionId": null,
+    "codexLastSessionId": "agent-43118449",
+    "codexActive": false,
+    "codexLastStartedAt": "2026-04-30T03:01:17.213Z",
+    "codexLastStoppedAt": "2026-04-30T09:47:28.625Z",
+    "stopSeq": "0",
+    "stopAt": "1777542448"
+   }
+  },
+  {
+   "id": 863,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-46f8b743",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-05-12T05:44:58.976Z",
+    "claudeLastStoppedAt": "2026-05-12T08:10:53.541Z",
+    "stopSeq": "0",
+    "stopAt": "1778573453"
+   }
+  },
+  {
+   "id": 865,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionId": "agent-a2f31f50",
+    "claudeActive": true,
+    "claudeLastStoppedAt": null,
+    "claudeLastSessionId": "agent-a2f31f50",
+    "stopSeq": "0",
+    "stopAt": "1778401358",
+    "claudeSessionSource": "resume",
+    "claudeLastStartedAt": "2026-05-12T10:54:43.491Z"
+   }
+  },
+  {
+   "id": 866,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionId": null,
+    "claudeActive": false,
+    "claudeLastStoppedAt": "2026-05-10T08:08:34.511Z",
+    "claudeLastSessionId": "agent-718869ea",
+    "stopSeq": "0",
+    "stopAt": "1778400514"
+   }
+  },
+  {
+   "id": 867,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-037aaad5",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-05-28T07:35:57.944Z",
+    "claudeLastStoppedAt": "2026-05-28T07:38:19.576Z",
+    "stopSeq": "0",
+    "stopAt": "1779953899"
+   }
+  },
+  {
+   "id": 868,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-b80f5a9f",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-05-11T03:05:00.321Z",
+    "claudeLastStoppedAt": "2026-05-11T06:13:42.637Z",
+    "stopSeq": "0",
+    "stopAt": "1778480022"
+   }
+  },
+  {
+   "id": 869,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 870,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 872,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 874,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 877,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 878,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-8361be41",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-05-11T17:01:31.386Z",
+    "claudeLastStoppedAt": "2026-05-11T17:07:59.934Z",
+    "stopSeq": "0",
+    "stopAt": "1778519280"
+   }
+  },
+  {
+   "id": 879,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 881,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 882,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 883,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 885,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-b6527519",
+    "claudeLastSessionId": "agent-b6527519",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-05-12T08:00:18.974Z",
+    "claudeLastStoppedAt": null,
+    "stopSeq": "0",
+    "stopAt": "1778572702"
+   }
+  },
+  {
+   "id": 886,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 888,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-8cdcc0b8",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-05-13T06:08:18.496Z",
+    "claudeLastStoppedAt": "2026-05-13T07:04:40.527Z",
+    "stopSeq": "0",
+    "stopAt": "1778655880"
+   }
+  },
+  {
+   "id": 889,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 890,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 891,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-fd8f9a8e",
+    "claudeLastSessionId": "agent-fd8f9a8e",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-05-13T06:00:54.911Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 892,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-56e8b557",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-06-01T11:54:12.492Z",
+    "claudeLastStoppedAt": "2026-06-02T16:27:08.657Z",
+    "stopSeq": "0",
+    "stopAt": "1780417628"
+   }
+  },
+  {
+   "id": 893,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 894,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 895,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 896,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 897,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 901,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "resume",
+    "claudeSessionId": "agent-ebea4a0d",
+    "claudeLastSessionId": "agent-ebea4a0d",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-05-26T03:34:42.880Z",
+    "claudeLastStoppedAt": null,
+    "stopSeq": "0",
+    "stopAt": "1779463276"
+   }
+  },
+  {
+   "id": 902,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest"
+   }
+  },
+  {
+   "id": 903,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest"
+   }
+  },
+  {
+   "id": 904,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest/trees/deploy-prod"
+   }
+  },
+  {
+   "id": 906,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 907,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-59f889a7",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-05-22T05:27:41.681Z",
+    "claudeLastStoppedAt": "2026-05-22T06:10:42.246Z",
+    "stopSeq": "0",
+    "stopAt": "1779430242",
+    "codexSessionId": "agent-b1d79274",
+    "codexLastSessionId": "agent-b1d79274",
+    "codexActive": true,
+    "codexLastStartedAt": "2026-05-26T09:14:57.768Z",
+    "codexLastStoppedAt": null
+   }
+  },
+  {
+   "id": 908,
+   "meta": {
+    "cwd": "/Users/user",
+    "seq": "1",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-f74a8f05",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-06-02T14:46:16.571Z",
+    "claudeLastStoppedAt": "2026-06-02T14:48:13.505Z",
+    "stopSeq": "1",
+    "stopAt": "1780411693"
+   }
+  },
+  {
+   "id": 909,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "seq": "1"
+   }
+  },
+  {
+   "id": 910,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-1fde40d4",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-05-22T15:12:28.275Z",
+    "claudeLastStoppedAt": "2026-05-23T05:02:46.209Z",
+    "stopSeq": "0",
+    "stopAt": "1779512566"
+   }
+  },
+  {
+   "id": 913,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-1984ea1e",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-06-19T07:15:40.950Z",
+    "claudeLastStoppedAt": "2026-06-19T08:06:10.238Z",
+    "stopSeq": "0",
+    "stopAt": "1781856370",
+    "codexSessionId": "agent-1f5973c7",
+    "codexLastSessionId": "agent-1f5973c7",
+    "codexActive": true,
+    "codexLastStartedAt": "2026-06-19T08:38:07.292Z",
+    "codexLastStoppedAt": null
+   }
+  },
+  {
+   "id": 915,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest/trees/docs-system"
+   }
+  },
+  {
+   "id": 916,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-aafaf072",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-06-14T11:56:42.579Z",
+    "claudeLastStoppedAt": "2026-06-14T17:03:31.560Z",
+    "stopSeq": "0",
+    "stopAt": "1781456611"
+   }
+  },
+  {
+   "id": 917,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "codexSessionId": "agent-338110d4",
+    "codexLastSessionId": "agent-338110d4",
+    "codexActive": true,
+    "codexLastStartedAt": "2026-05-28T16:08:23.080Z",
+    "codexLastStoppedAt": null
+   }
+  },
+  {
+   "id": 918,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-96b1375d",
+    "claudeLastSessionId": "agent-96b1375d",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-05-29T06:45:10.939Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 919,
+   "meta": {
+    "codexSessionId": "agent-3093ac8a",
+    "codexLastSessionId": "agent-3093ac8a",
+    "codexActive": true,
+    "codexLastStartedAt": "2026-07-16T07:09:05.039Z",
+    "codexLastStoppedAt": null
+   }
+  },
+  {
+   "id": 920,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 921,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 922,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 923,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 926,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-d3c2b07d",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-06-05T08:54:00.164Z",
+    "claudeLastStoppedAt": "2026-06-05T10:50:11.087Z",
+    "stopSeq": "0",
+    "stopAt": "1780656611"
+   }
+  },
+  {
+   "id": 932,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-2b469c5d",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-06-08T06:22:56.182Z",
+    "claudeLastStoppedAt": "2026-06-08T06:30:49.966Z",
+    "stopSeq": "0",
+    "stopAt": "1780900250"
+   }
+  },
+  {
+   "id": 933,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest"
+   }
+  },
+  {
+   "id": 937,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest"
+   }
+  },
+  {
+   "id": 940,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 94750,
+   "meta": {
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-69a3c531",
+    "claudeLastSessionId": "agent-69a3c531",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-08-06T08:02:02.080Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 948,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 949,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 955,
+   "meta": {
+    "cwd": "/Users/user",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-c635fecd",
+    "claudeLastSessionId": "agent-c635fecd",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-06-19T06:31:07.390Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 956,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-monorepo-3",
+    "codexSessionId": "agent-0ff901d0",
+    "codexLastSessionId": "agent-0ff901d0",
+    "codexActive": true,
+    "codexLastStartedAt": "2026-06-23T09:30:09.615Z",
+    "codexLastStoppedAt": null
+   }
+  },
+  {
+   "id": 958,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "codexSessionId": "agent-b34137d3",
+    "codexLastSessionId": "agent-b34137d3",
+    "codexActive": true,
+    "codexLastStartedAt": "2026-06-23T08:05:23.451Z",
+    "codexLastStoppedAt": null
+   }
+  },
+  {
+   "id": 959,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest"
+   }
+  },
+  {
+   "id": 968,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest/trees/twin-set",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-c05b9c06",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-07-08T07:50:22.729Z",
+    "claudeLastStoppedAt": "2026-07-08T07:51:39.149Z",
+    "stopSeq": "0",
+    "stopAt": "1783497099"
+   }
+  },
+  {
+   "id": 969,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest/trees/twin-set",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": "agent-9b2883b1",
+    "claudeLastSessionId": "agent-9b2883b1",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-07-08T07:50:58.806Z",
+    "claudeLastStoppedAt": null
+   }
+  },
+  {
+   "id": 971,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest/trees/exp-problem-gen-0722",
+    "codexSessionId": "agent-763d9431",
+    "codexLastSessionId": "agent-763d9431",
+    "codexActive": true,
+    "codexLastStartedAt": "2026-07-12T03:48:41.161Z",
+    "codexLastStoppedAt": null
+   }
+  },
+  {
+   "id": 974,
+   "meta": {
+    "cwd": "/Users/user/claude-work",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": "agent-ab588178",
+    "claudeLastSessionId": "agent-ab588178",
+    "claudeActive": true,
+    "claudeLastStartedAt": "2026-08-03T06:21:54.880Z",
+    "claudeLastStoppedAt": null,
+    "stopSeq": "0",
+    "stopAt": "1785722972"
+   }
+  },
+  {
+   "id": 975,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest/trees/exp-twin-set-0702"
+   }
+  },
+  {
+   "id": 980,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-edf99084",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-06T10:24:47.335Z",
+    "claudeLastStoppedAt": "2026-08-06T10:40:26.123Z",
+    "stopSeq": "0",
+    "stopAt": "1786012826"
+   }
+  },
+  {
+   "id": 981,
+   "meta": {
+    "cwd": "/Users/user"
+   }
+  },
+  {
+   "id": 983,
+   "meta": {
+    "cwd": "/Users/user/mainpy/hyper-play"
+   }
+  },
+  {
+   "id": 984,
+   "meta": {
+    "cwd": "/Users/user/mainpy/hyper-play",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-a94ef828",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-04T09:03:42.339Z",
+    "claudeLastStoppedAt": "2026-08-04T09:07:00.378Z",
+    "stopSeq": "0",
+    "stopAt": "1785834420"
+   }
+  },
+  {
+   "id": 985,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-9e684143",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-04T02:35:59.060Z",
+    "claudeLastStoppedAt": "2026-08-04T07:32:16.292Z",
+    "stopSeq": "0",
+    "stopAt": "1785828736"
+   }
+  },
+  {
+   "id": 986,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-a0b9149d",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-06T07:05:58.669Z",
+    "claudeLastStoppedAt": "2026-08-06T10:55:01.604Z",
+    "stopSeq": "0",
+    "stopAt": "1786013701"
+   }
+  },
+  {
+   "id": 987,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "compact",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-93089b50",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-06T07:04:37.151Z",
+    "claudeLastStoppedAt": "2026-08-06T10:42:52.039Z",
+    "stopSeq": "0",
+    "stopAt": "1786012972"
+   }
+  },
+  {
+   "id": 988,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-d264bfff",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-05T02:55:34.130Z",
+    "claudeLastStoppedAt": "2026-08-05T03:40:15.260Z",
+    "stopSeq": "0",
+    "stopAt": "1785901215"
+   }
+  },
+  {
+   "id": 989,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "clear",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-bcff7447",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-05T07:39:49.787Z",
+    "claudeLastStoppedAt": "2026-08-06T06:37:22.185Z",
+    "stopSeq": "0",
+    "stopAt": "1785998242"
+   }
+  },
+  {
+   "id": 990,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest/trees/feat-sandbox-runtime-core/sandbox-worker"
+   }
+  },
+  {
+   "id": 991,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-0ff2cf8b",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-05T03:49:40.861Z",
+    "claudeLastStoppedAt": "2026-08-05T05:15:47.598Z",
+    "stopSeq": "0",
+    "stopAt": "1785906947"
+   }
+  },
+  {
+   "id": 992,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-bad8cfdb",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-05T06:43:10.097Z",
+    "claudeLastStoppedAt": "2026-08-05T06:47:46.714Z",
+    "stopSeq": "0",
+    "stopAt": "1785912466"
+   }
+  },
+  {
+   "id": 993,
+   "meta": {
+    "cwd": "/Users/user/turing/gpai/gpai-forest"
+   }
+  },
+  {
+   "id": 994,
+   "meta": {
+    "cwd": "/Users/user/mainpy/hyper-play",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-352cce61",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-05T11:23:45.288Z",
+    "claudeLastStoppedAt": "2026-08-06T10:47:26.220Z",
+    "stopSeq": "0",
+    "stopAt": "1786013246"
+   }
+  },
+  {
+   "id": 998,
+   "meta": {
+    "cwd": "/Users/user/study/computer",
+    "claudeSessionSource": "startup",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-76569d0c",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-05T15:52:57.219Z",
+    "claudeLastStoppedAt": "2026-08-05T17:26:18.466Z",
+    "stopSeq": "0",
+    "stopAt": "1785950778"
+   }
+  },
+  {
+   "id": 999,
+   "meta": {
+    "cwd": "/Users/user/study/computer",
+    "claudeSessionSource": "fork",
+    "claudeSessionId": null,
+    "claudeLastSessionId": "agent-06b6d87a",
+    "claudeActive": false,
+    "claudeLastStartedAt": "2026-08-05T16:00:34.891Z",
+    "claudeLastStoppedAt": "2026-08-05T16:17:41.979Z",
+    "stopSeq": "0",
+    "stopAt": "1785946662"
+   }
+  }
+ ],
+ "snapshots": [
+  {
+   "id": 1000,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 32101,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785986417406,
+   "savedAt": 1786013877224,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 1001,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 190321,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785986421687,
+   "savedAt": 1786013655073,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 122,
+   "cols": 116,
+   "rows": 67,
+   "screenBytes": 210,
+   "createdAt": 1773382111714,
+   "savedAt": 1773382114501,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 129,
+   "cols": 98,
+   "rows": 38,
+   "screenBytes": 1338,
+   "createdAt": 1773384557044,
+   "savedAt": 1773410598284,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 130,
+   "cols": 83,
+   "rows": 30,
+   "screenBytes": 14030,
+   "createdAt": 1773384557039,
+   "savedAt": 1773412555978,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 139,
+   "cols": 98,
+   "rows": 38,
+   "screenBytes": 10324,
+   "createdAt": 1773391512549,
+   "savedAt": 1773411660238,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 140,
+   "cols": 83,
+   "rows": 30,
+   "screenBytes": 25186,
+   "createdAt": 1773391512685,
+   "savedAt": 1773412553976,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 144,
+   "cols": 78,
+   "rows": 61,
+   "screenBytes": 250,
+   "createdAt": 1773412281185,
+   "savedAt": 1773412601015,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 152,
+   "cols": 98,
+   "rows": 77,
+   "screenBytes": 210,
+   "createdAt": 1773412610391,
+   "savedAt": 1773412808032,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 153,
+   "cols": 100,
+   "rows": 30,
+   "screenBytes": 210,
+   "createdAt": 1773412643800,
+   "savedAt": 1773412647056,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 154,
+   "cols": 100,
+   "rows": 30,
+   "screenBytes": 106,
+   "createdAt": 1773412718616,
+   "savedAt": 1773412720117,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 163,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 38299,
+   "createdAt": 1773413698986,
+   "savedAt": 1773414054398,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 164,
+   "cols": 73,
+   "rows": 77,
+   "screenBytes": 211,
+   "createdAt": 1773413705332,
+   "savedAt": 1773414029377,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 165,
+   "cols": 148,
+   "rows": 77,
+   "screenBytes": 1755,
+   "createdAt": 1773413705487,
+   "savedAt": 1773414081427,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 166,
+   "cols": 126,
+   "rows": 62,
+   "screenBytes": 567,
+   "createdAt": 1773413705659,
+   "savedAt": 1773414081429,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 170,
+   "cols": 148,
+   "rows": 77,
+   "screenBytes": 213,
+   "createdAt": 1773414339815,
+   "savedAt": 1773414342677,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 172,
+   "cols": 298,
+   "rows": 77,
+   "screenBytes": 3397,
+   "createdAt": 1773414358495,
+   "savedAt": 1773414496694,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 175,
+   "cols": 140,
+   "rows": 40,
+   "screenBytes": 213,
+   "createdAt": 1773414433579,
+   "savedAt": 1773414436761,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 176,
+   "cols": 140,
+   "rows": 40,
+   "screenBytes": 256,
+   "createdAt": 1773414716520,
+   "savedAt": 1773414717093,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 177,
+   "cols": 140,
+   "rows": 40,
+   "screenBytes": 298,
+   "createdAt": 1773414785058,
+   "savedAt": 1773414785945,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 190,
+   "cols": 58,
+   "rows": 61,
+   "screenBytes": 210,
+   "createdAt": 1773417599139,
+   "savedAt": 1773417602307,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 253,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 32513,
+   "createdAt": 1773561966968,
+   "savedAt": 1773563286089,
+   "hasCheckpointFields": false,
+   "cmdLen": 2
+  },
+  {
+   "id": 255,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 945,
+   "createdAt": 1773562409735,
+   "savedAt": 1773562639515,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 297,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 96548,
+   "createdAt": 1773628560504,
+   "savedAt": 1773632724973,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 298,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 6526,
+   "createdAt": 1773628566060,
+   "savedAt": 1773630087534,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 301,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 1107,
+   "createdAt": 1773631466651,
+   "savedAt": 1773631475950,
+   "hasCheckpointFields": false,
+   "cmdLen": 6
+  },
+  {
+   "id": 305,
+   "cols": 126,
+   "rows": 62,
+   "screenBytes": 16747,
+   "createdAt": 1773633067178,
+   "savedAt": 1773638346679,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 329,
+   "cols": 126,
+   "rows": 62,
+   "screenBytes": 258,
+   "createdAt": 1773660121852,
+   "savedAt": 1773660127252,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 371,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 163677,
+   "createdAt": 1773797539427,
+   "savedAt": 1773797561937,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 376,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 1011,
+   "createdAt": 1773806171509,
+   "savedAt": 1773806175849,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 383,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 155142,
+   "createdAt": 1773818948572,
+   "savedAt": 1773818960257,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 387,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 330,
+   "createdAt": 1773820981657,
+   "savedAt": 1773836849931,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 388,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 9627,
+   "createdAt": 1773820981811,
+   "savedAt": 1773821622722,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 389,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 12512,
+   "createdAt": 1773820981946,
+   "savedAt": 1773821624724,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 390,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 12399,
+   "createdAt": 1773820984146,
+   "savedAt": 1773821628728,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 629,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 94,
+   "cwd": "/Users/user",
+   "createdAt": 1773907483685,
+   "savedAt": 1773907557670,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 633,
+   "cols": 83,
+   "rows": 30,
+   "screenBytes": 142,
+   "cwd": "/Users/user",
+   "createdAt": 1773907514296,
+   "savedAt": 1773907517636,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 634,
+   "cols": 83,
+   "rows": 30,
+   "screenBytes": 94,
+   "cwd": "/Users/user",
+   "createdAt": 1773907514754,
+   "savedAt": 1773907517636,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 635,
+   "cols": 83,
+   "rows": 30,
+   "screenBytes": 94,
+   "cwd": "/Users/user",
+   "createdAt": 1773907518913,
+   "savedAt": 1773907523643,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 637,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 34399,
+   "cwd": "/Users/user",
+   "createdAt": 1773925460413,
+   "savedAt": 1774098801831,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 639,
+   "cols": 126,
+   "rows": 62,
+   "screenBytes": 133783,
+   "cwd": "/Users/user",
+   "createdAt": 1773925588367,
+   "savedAt": 1773938126500,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 640,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 149005,
+   "cwd": "/Users/user",
+   "createdAt": 1773928217917,
+   "savedAt": 1774098032184,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 642,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 109385,
+   "cwd": "/Users/user",
+   "createdAt": 1773938130031,
+   "savedAt": 1774088588422,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 648,
+   "cols": 126,
+   "rows": 62,
+   "screenBytes": 5176,
+   "cwd": "/Users/user",
+   "createdAt": 1774012482523,
+   "savedAt": 1774015516522,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 654,
+   "cols": 126,
+   "rows": 62,
+   "screenBytes": 144,
+   "cwd": "/Users/user",
+   "createdAt": 1774099867504,
+   "savedAt": 1774099868677,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 670,
+   "cols": 318,
+   "rows": 76,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1774165372237,
+   "savedAt": 1774166235266,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 676,
+   "cols": 318,
+   "rows": 78,
+   "screenBytes": 460825,
+   "cwd": "/Users/user",
+   "createdAt": 1774188242099,
+   "savedAt": 1774324205773,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 678,
+   "cols": 104,
+   "rows": 36,
+   "screenBytes": 95237,
+   "cwd": "/Users/user",
+   "createdAt": 1774190173177,
+   "savedAt": 1774233243172,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 679,
+   "cols": 104,
+   "rows": 36,
+   "screenBytes": 87688,
+   "cwd": "/Users/user",
+   "createdAt": 1774190175824,
+   "savedAt": 1774198150277,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 687,
+   "cols": 78,
+   "rows": 76,
+   "screenBytes": 19254,
+   "cwd": "/Users/user",
+   "createdAt": 1774328332192,
+   "savedAt": 1774334410634,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 688,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 9264,
+   "cwd": "/Users/user",
+   "createdAt": 1774328333014,
+   "savedAt": 1774330106733,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 689,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 32191,
+   "cwd": "/Users/user",
+   "createdAt": 1774328445117,
+   "savedAt": 1774328625487,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 691,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 144,
+   "cwd": "/Users/user",
+   "createdAt": 1774337558429,
+   "savedAt": 1774337564717,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 694,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 8017,
+   "cwd": "/Users/user",
+   "createdAt": 1774418254674,
+   "savedAt": 1774436847378,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 695,
+   "cols": 114,
+   "rows": 40,
+   "screenBytes": 144,
+   "cwd": "/Users/user",
+   "createdAt": 1774436848695,
+   "savedAt": 1774436904452,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 698,
+   "cols": 114,
+   "rows": 40,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1774436900162,
+   "savedAt": 1774436904452,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 702,
+   "cols": 114,
+   "rows": 83,
+   "screenBytes": 119874,
+   "cwd": "/Users/user",
+   "createdAt": 1774446318307,
+   "savedAt": 1774495644240,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 703,
+   "cols": 114,
+   "rows": 83,
+   "screenBytes": 221551,
+   "cwd": "/Users/user",
+   "createdAt": 1774446321456,
+   "savedAt": 1774495640244,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 704,
+   "cols": 114,
+   "rows": 83,
+   "screenBytes": 95844,
+   "cwd": "/Users/user",
+   "createdAt": 1774452311592,
+   "savedAt": 1774495640257,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 708,
+   "cols": 126,
+   "rows": 62,
+   "screenBytes": 59628,
+   "cwd": "/Users/user",
+   "createdAt": 1774590912079,
+   "savedAt": 1774605107980,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 709,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 15603,
+   "cwd": "/Users/user",
+   "createdAt": 1774597796341,
+   "savedAt": 1774605436260,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 723,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 1264,
+   "cwd": "/Users/user",
+   "createdAt": 1774795900056,
+   "savedAt": 1774795912993,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 725,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 10659,
+   "cwd": "/Users/user",
+   "createdAt": 1774795902074,
+   "savedAt": 1774796192259,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 729,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 99576,
+   "cwd": "/Users/user",
+   "createdAt": 1774838042949,
+   "savedAt": 1774851077788,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 731,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 142026,
+   "cwd": "/Users/user",
+   "createdAt": 1774840342595,
+   "savedAt": 1774851293988,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 735,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 309995,
+   "cwd": "/Users/user",
+   "createdAt": 1774870824846,
+   "savedAt": 1775128009856,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 741,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 7995,
+   "cwd": "/Users/user",
+   "createdAt": 1775028161003,
+   "savedAt": 1775127221122,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 742,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 13974,
+   "cwd": "/Users/user",
+   "createdAt": 1775031681150,
+   "savedAt": 1775195854590,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 746,
+   "cols": 235,
+   "rows": 55,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1775452849176,
+   "savedAt": 1775465144766,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 747,
+   "cols": 235,
+   "rows": 55,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1775452850085,
+   "savedAt": 1775465144767,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 748,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 11894,
+   "cwd": "/Users/user",
+   "createdAt": 1775452851531,
+   "savedAt": 1775464915817,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 749,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 11074,
+   "cwd": "/Users/user",
+   "createdAt": 1775452852762,
+   "savedAt": 1775456128586,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 750,
+   "cols": 318,
+   "rows": 76,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1775452853537,
+   "savedAt": 1775465144767,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 751,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 92718,
+   "cwd": "/Users/user",
+   "createdAt": 1775452855839,
+   "savedAt": 1775464912818,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 753,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 2014,
+   "cwd": "/Users/user",
+   "createdAt": 1775464929072,
+   "savedAt": 1775465144769,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 754,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 374420,
+   "cwd": "/Users/user",
+   "createdAt": 1775464934115,
+   "savedAt": 1775465144769,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 764,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 25355,
+   "cwd": "/Users/user",
+   "createdAt": 1775720336859,
+   "savedAt": 1775751895126,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 765,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 12019,
+   "cwd": "/Users/user",
+   "createdAt": 1775723810341,
+   "savedAt": 1775724278608,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 766,
+   "cols": 75,
+   "rows": 62,
+   "screenBytes": 941,
+   "cwd": "/Users/user",
+   "createdAt": 1775791566450,
+   "savedAt": 1776001744184,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 77,
+   "cols": 98,
+   "rows": 38,
+   "screenBytes": 36951,
+   "createdAt": 1773370479329,
+   "savedAt": 1773412241760,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 771,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 25829,
+   "cwd": "/Users/user",
+   "createdAt": 1776138716441,
+   "savedAt": 1776230706288,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 772,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 39040,
+   "cwd": "/Users/user",
+   "createdAt": 1776138720189,
+   "savedAt": 1776152344627,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 773,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 30415,
+   "cwd": "/Users/user",
+   "createdAt": 1776147321979,
+   "savedAt": 1776229041549,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 778,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 308237,
+   "cwd": "/Users/user",
+   "createdAt": 1776219753705,
+   "savedAt": 1776332087384,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 78,
+   "cols": 96,
+   "rows": 70,
+   "screenBytes": 1225,
+   "createdAt": 1773370479441,
+   "savedAt": 1773370848397,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 780,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 202296,
+   "cwd": "/Users/user",
+   "createdAt": 1776235098799,
+   "savedAt": 1776319383664,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 781,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 170073,
+   "cwd": "/Users/user",
+   "createdAt": 1776235115797,
+   "savedAt": 1776318348688,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 782,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 111526,
+   "cwd": "/Users/user",
+   "createdAt": 1776237229314,
+   "savedAt": 1776318491822,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 783,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 231,
+   "cwd": "/Users/user",
+   "createdAt": 1776242373386,
+   "savedAt": 1776704807742,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 791,
+   "cols": 83,
+   "rows": 62,
+   "screenBytes": 146252,
+   "cwd": "/Users/user",
+   "createdAt": 1776403107676,
+   "savedAt": 1776619274379,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 799,
+   "cols": 114,
+   "rows": 62,
+   "screenBytes": 188,
+   "cwd": "/Users/user",
+   "createdAt": 1776608162715,
+   "savedAt": 1776609180727,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 801,
+   "cols": 82,
+   "rows": 43,
+   "screenBytes": 1550,
+   "cwd": "/Users/user",
+   "createdAt": 1776610272368,
+   "savedAt": 1776610971397,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 802,
+   "cols": 75,
+   "rows": 62,
+   "screenBytes": 94,
+   "cwd": "/Users/user",
+   "createdAt": 1776610327346,
+   "savedAt": 1776610331789,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 811,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 245380,
+   "cwd": "/Users/user",
+   "createdAt": 1776704815380,
+   "savedAt": 1776914999580,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 812,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 333201,
+   "cwd": "/Users/user",
+   "createdAt": 1776704816123,
+   "savedAt": 1776914996596,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 835,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 191339,
+   "cwd": "/Users/user",
+   "createdAt": 1777003807563,
+   "savedAt": 1777029129085,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 838,
+   "cols": 293,
+   "rows": 69,
+   "screenBytes": 285452,
+   "cwd": "/Users/user",
+   "createdAt": 1777012161368,
+   "savedAt": 1777549860521,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 839,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 232353,
+   "cwd": "/Users/user",
+   "createdAt": 1777012164425,
+   "savedAt": 1777443811084,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 840,
+   "cols": 293,
+   "rows": 69,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1777014128115,
+   "savedAt": 1777014131778,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 841,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 76906,
+   "cwd": "/Users/user",
+   "createdAt": 1777018714421,
+   "savedAt": 1777020013048,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 842,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 34306,
+   "cwd": "/Users/user",
+   "createdAt": 1777018714568,
+   "savedAt": 1777019992033,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 843,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 2738,
+   "cwd": "/Users/user",
+   "createdAt": 1777018714750,
+   "savedAt": 1777021770106,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 845,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 94,
+   "cwd": "/Users/user",
+   "createdAt": 1777029346346,
+   "savedAt": 1777029350277,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 846,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 68924,
+   "cwd": "/Users/user",
+   "createdAt": 1777029360527,
+   "savedAt": 1777175343207,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 847,
+   "cols": 114,
+   "rows": 62,
+   "screenBytes": 38952,
+   "cwd": "/Users/user",
+   "createdAt": 1777030013551,
+   "savedAt": 1777119322231,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 848,
+   "cols": 114,
+   "rows": 62,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1777030509211,
+   "savedAt": 1777119322240,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 851,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 94,
+   "cwd": "/Users/user",
+   "createdAt": 1777175491014,
+   "savedAt": 1777175500366,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 853,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 697,
+   "cwd": "/Users/user",
+   "createdAt": 1777266268096,
+   "savedAt": 1777276105498,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 855,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 1225,
+   "cwd": "/Users/user",
+   "createdAt": 1777266309808,
+   "savedAt": 1777275339746,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 856,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 99,
+   "cwd": "/Users/user",
+   "createdAt": 1777266322362,
+   "savedAt": 1777275339747,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 857,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 193643,
+   "cwd": "/Users/user/turing/gpai/gpai-forest/trees/main/backend",
+   "createdAt": 1780625412529,
+   "savedAt": 1780625436658,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 858,
+   "cols": 75,
+   "rows": 29,
+   "screenBytes": 825,
+   "cwd": "/Users/user",
+   "createdAt": 1778582635278,
+   "savedAt": 1778731051443,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 859,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 191959,
+   "cwd": "/Users/user",
+   "createdAt": 1777443752898,
+   "savedAt": 1777543058400,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 865,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 36277,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1778582635333,
+   "savedAt": 1778655730236,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 866,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 11236,
+   "cwd": "/Users/user",
+   "createdAt": 1778398642457,
+   "savedAt": 1778410376807,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 867,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 174164,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1778582635360,
+   "savedAt": 1779983737080,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 868,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 301110,
+   "cwd": "/Users/user",
+   "createdAt": 1778468695089,
+   "savedAt": 1778481503749,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 870,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 4868,
+   "cwd": "/Users/user",
+   "createdAt": 1778470243531,
+   "savedAt": 1778470322912,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 872,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 100,
+   "cwd": "/Users/user",
+   "createdAt": 1778487479055,
+   "savedAt": 1778487625225,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 874,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1778517725851,
+   "savedAt": 1778517731818,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 877,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 1534,
+   "cwd": "/Users/user",
+   "createdAt": 1778582635388,
+   "savedAt": 1778641639708,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 878,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 47172,
+   "cwd": "/Users/user",
+   "createdAt": 1778518886402,
+   "savedAt": 1778522007693,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 879,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1778518889669,
+   "savedAt": 1778518892876,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 882,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 89800,
+   "cwd": "/Users/user",
+   "createdAt": 1778582635415,
+   "savedAt": 1778660664052,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 885,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 189,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1778582635469,
+   "savedAt": 1779863049363,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 886,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 1829,
+   "cwd": "/Users/user",
+   "createdAt": 1778571519954,
+   "savedAt": 1778571555805,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 888,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 156123,
+   "cwd": "/Users/user",
+   "createdAt": 1778639283308,
+   "savedAt": 1778660381749,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 889,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 94,
+   "cwd": "/Users/user",
+   "createdAt": 1778641646595,
+   "savedAt": 1778641659725,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 891,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 43523,
+   "cwd": "/Users/user",
+   "createdAt": 1778641650926,
+   "savedAt": 1778665864879,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 892,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 245353,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1780625412581,
+   "savedAt": 1780625436672,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 893,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 50184,
+   "cwd": "/Users/user",
+   "createdAt": 1778660660263,
+   "savedAt": 1778665855876,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 894,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 96,
+   "cwd": "/Users/user",
+   "createdAt": 1778665859560,
+   "savedAt": 1778665864878,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 895,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 49028,
+   "cwd": "/Users/user",
+   "createdAt": 1778724075053,
+   "savedAt": 1780412474054,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 896,
+   "cols": 75,
+   "rows": 62,
+   "screenBytes": 94,
+   "cwd": "/Users/user",
+   "createdAt": 1778731015094,
+   "savedAt": 1778731057474,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 897,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 243097,
+   "cwd": "/Users/user",
+   "createdAt": 1778731050674,
+   "savedAt": 1779340111235,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 901,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 253779,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1778814926135,
+   "savedAt": 1779781579567,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 902,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 188,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1778836525487,
+   "savedAt": 1778836529219,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 904,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 17536,
+   "cwd": "/Users/user/turing/gpai/gpai-forest/trees/deploy-prod",
+   "createdAt": 1779067742964,
+   "savedAt": 1779462593998,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 906,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 160122,
+   "cwd": "/Users/user",
+   "createdAt": 1779340162819,
+   "savedAt": 1780412475047,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 907,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 278537,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1780475105893,
+   "savedAt": 1780539762761,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 908,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 155962,
+   "cwd": "/Users/user",
+   "createdAt": 1780475105983,
+   "savedAt": 1780475122102,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 909,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 12509,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1780475106232,
+   "savedAt": 1780475125058,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 910,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 136202,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1779462591320,
+   "savedAt": 1779781578541,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 913,
+   "cols": 75,
+   "rows": 62,
+   "screenBytes": 230893,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1780625412868,
+   "savedAt": 1781754855874,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 915,
+   "cols": 96,
+   "rows": 33,
+   "screenBytes": 254,
+   "cwd": "/Users/user/turing/gpai/gpai-forest/trees/docs-system",
+   "createdAt": 1779947399714,
+   "savedAt": 1779947404824,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 916,
+   "cols": 58,
+   "rows": 146,
+   "screenBytes": 214130,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1780625412906,
+   "savedAt": 1781494343941,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 917,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 84572,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1779984476602,
+   "savedAt": 1779986307118,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 918,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 2018,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1780037106720,
+   "savedAt": 1780037114980,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 92,
+   "cols": 65,
+   "rows": 55,
+   "screenBytes": 210,
+   "createdAt": 1773372774178,
+   "savedAt": 1773372805348,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 920,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 131086,
+   "cwd": "/Users/user",
+   "createdAt": 1780625413020,
+   "savedAt": 1780625447631,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 921,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 15607,
+   "cwd": "/Users/user",
+   "createdAt": 1780475107477,
+   "savedAt": 1780539698716,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 922,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 48147,
+   "cwd": "/Users/user",
+   "createdAt": 1780475107577,
+   "savedAt": 1780544637614,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 923,
+   "cols": 124,
+   "rows": 67,
+   "screenBytes": 270108,
+   "cwd": "/Users/user",
+   "createdAt": 1780625413068,
+   "savedAt": 1780990777441,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 926,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 233600,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1780625413268,
+   "savedAt": 1780800842895,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 93,
+   "cols": 65,
+   "rows": 26,
+   "screenBytes": 210,
+   "createdAt": 1773372798744,
+   "savedAt": 1773372802344,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 932,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 32928,
+   "cwd": "/Users/user",
+   "createdAt": 1780629632076,
+   "savedAt": 1780905583682,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 933,
+   "cols": 158,
+   "rows": 76,
+   "screenBytes": 190,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1780649639343,
+   "savedAt": 1780649644442,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 937,
+   "cols": 124,
+   "rows": 67,
+   "screenBytes": 1562,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1780821567117,
+   "savedAt": 1780840573595,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 94,
+   "cols": 65,
+   "rows": 26,
+   "screenBytes": 210,
+   "createdAt": 1773372799066,
+   "savedAt": 1773372802343,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 940,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 142988,
+   "cwd": "/Users/user",
+   "createdAt": 1782449625656,
+   "savedAt": 1786013504000,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 948,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 144981,
+   "cwd": "/Users/user",
+   "createdAt": 1782449627515,
+   "savedAt": 1785744917515,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 949,
+   "cols": 104,
+   "rows": 76,
+   "screenBytes": 322285,
+   "cwd": "/Users/user",
+   "createdAt": 1781077382483,
+   "savedAt": 1781166934500,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 955,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 1522,
+   "cwd": "/Users/user",
+   "createdAt": 1781850661698,
+   "savedAt": 1781850693528,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 968,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 11855,
+   "cwd": "/Users/user/turing/gpai/gpai-forest/trees/twin-set",
+   "createdAt": 1783497011823,
+   "savedAt": 1783502584327,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 969,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 1975,
+   "cwd": "/Users/user/turing/gpai/gpai-forest/trees/twin-set",
+   "createdAt": 1783497020209,
+   "savedAt": 1783502462197,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 971,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 6956,
+   "cwd": "/Users/user/turing/gpai/gpai-forest/trees/exp-problem-gen-0722",
+   "createdAt": 1783823833474,
+   "savedAt": 1784737502896,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 974,
+   "cols": 293,
+   "rows": 69,
+   "screenBytes": 70726,
+   "cwd": "/Users/user/claude-work",
+   "createdAt": 1784514538596,
+   "savedAt": 1786011451872,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 980,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 36493,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785742967512,
+   "savedAt": 1786013859220,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 983,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 15136,
+   "cwd": "/Users/user/mainpy/hyper-play",
+   "createdAt": 1785745157118,
+   "savedAt": 1786012463751,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 984,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 38114,
+   "cwd": "/Users/user/mainpy/hyper-play",
+   "createdAt": 1785745159654,
+   "savedAt": 1785917212454,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 985,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 412124,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785761824188,
+   "savedAt": 1786012440737,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 986,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 458496,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785761841287,
+   "savedAt": 1786013704291,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 987,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 100623,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785831515079,
+   "savedAt": 1786013859211,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 988,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 3379,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785832728682,
+   "savedAt": 1786013704290,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 989,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 3725,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785898918698,
+   "savedAt": 1786013859219,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 990,
+   "cols": 75,
+   "rows": 29,
+   "screenBytes": 6696,
+   "cwd": "/Users/user/turing/gpai/gpai-forest/trees/feat-sandbox-runtime-core/sandbox-worker",
+   "createdAt": 1785901285377,
+   "savedAt": 1785901447817,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 991,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 41744,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785901770186,
+   "savedAt": 1785945142756,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 992,
+   "cols": 145,
+   "rows": 69,
+   "screenBytes": 37957,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785901770917,
+   "savedAt": 1785945145759,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 993,
+   "cols": 75,
+   "rows": 29,
+   "screenBytes": 188,
+   "cwd": "/Users/user/turing/gpai/gpai-forest",
+   "createdAt": 1785902335741,
+   "savedAt": 1785902340609,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  },
+  {
+   "id": 994,
+   "cols": 96,
+   "rows": 69,
+   "screenBytes": 102149,
+   "cwd": "/Users/user/mainpy/hyper-play",
+   "createdAt": 1785918011342,
+   "savedAt": 1786013692078,
+   "hasCheckpointFields": false,
+   "cmdLen": 1
+  }
+ ],
+ "manifests": [
+  {
+   "id": 1000,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 1001,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 940,
+   "cols": 96,
+   "rows": 69,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 974,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 980,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 981,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 983,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 985,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 986,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 987,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 988,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 989,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 994,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 998,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  },
+  {
+   "id": 999,
+   "cols": 80,
+   "rows": 24,
+   "aliveAtCapture": true,
+   "socketPresent": true,
+   "generation": "absent"
+  }
+ ]
+}
