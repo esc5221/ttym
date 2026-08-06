@@ -6,6 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
+import { InteractionStore } from './interaction.js';
 import { CMD, encode, encodeData, decode, toBuffer, jsonPayload, parseJson } from './protocol.js';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
@@ -156,7 +157,7 @@ export interface TtymServer {
 
 // ───── HTTP API ─────
 
-function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, req: IncomingMessage, res: ServerResponse): boolean {
+function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, req: IncomingMessage, res: ServerResponse): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
 
@@ -251,6 +252,88 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
   }
 
   // POST /api/sessions/:id/send — send keys
+  // POST /api/sessions/:id/interactions — submit a prompt, wait for the answer
+  const interactionsMatch = path.match(/^\/api\/sessions\/(\d+)\/interactions$/);
+  if (interactionsMatch && req.method === 'POST') {
+    const id = parseInt(interactionsMatch[1], 10);
+    readBody().then(async (body) => {
+      const session = manager.get(id);
+      if (!session || session.isDead) { json(404, { error: 'not found' }); return; }
+      let prompt: string;
+      let timeoutMs = 120_000;
+      let submit: string = 'cr';
+      try {
+        const parsed = JSON.parse(body);
+        prompt = parsed.prompt;
+        if (typeof prompt !== 'string') { json(400, { error: 'prompt must be string' }); return; }
+        if (typeof parsed.timeoutMs === 'number') timeoutMs = parsed.timeoutMs;
+        if (typeof parsed.submit === 'string') submit = parsed.submit;
+      } catch {
+        json(400, { error: 'invalid body' }); return;
+      }
+
+      // Mark before writing: output that arrives between the two would
+      // otherwise fall outside the range and be dropped from the transcript.
+      const interaction = interactions.start(session, prompt);
+      // A PTY that exits mid-answer will never report Stop; settle the wait
+      // rather than hold the request open until its timeout.
+      session.onExit(() => interactions.abandonSession(id));
+      session.write(Buffer.from(prompt));
+      // Interactive TUIs read Enter as CR; a shell wants LF. Neither is right
+      // for both, so the caller says which, defaulting to the agent case.
+      if (submit === 'cr') session.write(Buffer.from([0x0d]));
+      else if (submit === 'lf') session.write(Buffer.from([0x0a]));
+      log(`HTTP INTERACTION session=${id} id=${interaction.id} len=${prompt.length}`);
+
+      const settled = await interactions.wait(interaction.id, timeoutMs);
+      if (settled && settled.status !== 'pending') { json(200, { interaction: settled }); return; }
+      // Still running. Hand back a handle instead of a wrong answer.
+      res.setHeader('Location', `/api/sessions/${id}/interactions/${interaction.id}`);
+      json(202, { interaction: settled ?? interaction });
+    });
+    return true;
+  }
+
+  // GET /api/sessions/:id/interactions/:iid — resume waiting on a 202
+  const interactionGet = path.match(/^\/api\/sessions\/(\d+)\/interactions\/([A-Za-z0-9_]+)$/);
+  if (interactionGet && req.method === 'GET') {
+    const iid = interactionGet[2];
+    const waitMs = parseInt(url.searchParams.get('wait') || '0', 10) || 0;
+    const existing = interactions.get(iid);
+    if (!existing) { json(404, { error: 'not found' }); return true; }
+    if (existing.status !== 'pending' || waitMs <= 0) { json(200, { interaction: existing }); return true; }
+    interactions.wait(iid, waitMs).then((settled) => {
+      const current = settled ?? existing;
+      if (current.status !== 'pending') { json(200, { interaction: current }); return; }
+      res.setHeader('Location', path);
+      json(202, { interaction: current });
+    });
+    return true;
+  }
+
+  // POST /api/internal/sessions/:id/stop — agent hook entry point
+  const stopMatch = path.match(/^\/api\/internal\/sessions\/(\d+)\/stop$/);
+  if (stopMatch && req.method === 'POST') {
+    const id = parseInt(stopMatch[1], 10);
+    readBody().then((body) => {
+      const session = manager.get(id);
+      if (!session) { json(404, { error: 'not found' }); return; }
+      // Claude reports Stop, StopFailure and SessionEnd; only the first means
+      // the agent answered. The rest still end the wait — an agent that died
+      // is not going to reply, and blocking to timeout would misreport that.
+      let outcome: 'completed' | 'failed' = 'completed';
+      try {
+        const parsed = body ? JSON.parse(body) : {};
+        if (parsed.event === 'StopFailure' || parsed.event === 'SessionEnd') outcome = 'failed';
+        if (parsed.outcome === 'failed') outcome = 'failed';
+      } catch { /* an empty or malformed body is treated as a plain Stop */ }
+      const settled = interactions.finish(session, outcome);
+      log(`HTTP STOP session=${id} outcome=${outcome} interaction=${settled?.id ?? 'none'}`);
+      json(200, { ok: true, interaction: settled });
+    });
+    return true;
+  }
+
   const sendMatch = path.match(/^\/api\/sessions\/(\d+)\/send$/);
   if (sendMatch && req.method === 'POST') {
     const id = parseInt(sendMatch[1], 10);
@@ -516,6 +599,7 @@ export async function createServer(port: number): Promise<TtymServer> {
   // they can be revived later by adding them back to a workspace.
   const workspaceStore = new WorkspaceStore(manager.runtimeDir);
   await workspaceStore.load();
+  const interactions = new InteractionStore();
   const restoreAllowlist = new Set<number>();
   for (const ws of workspaceStore.list()) {
     for (const m of ws.members) restoreAllowlist.add(m.sessionId);
@@ -533,7 +617,7 @@ export async function createServer(port: number): Promise<TtymServer> {
 
   const httpServer = createHttpServer((req, res) => {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
-    if (handleHttpApi(manager, workspaceStore, req, res)) return;
+    if (handleHttpApi(manager, workspaceStore, interactions, req, res)) return;
     if (handleDemoApp(req, res)) return;
     res.writeHead(404);
     res.end('not found');

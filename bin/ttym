@@ -1435,7 +1435,19 @@ const AGENTS = {
       {
         event: 'Stop',
         matcher: '',
-        command: resolve(__dirname, '..', 'scripts', 'ttym-claude-stop-hook.sh'),
+        command: `${resolve(__dirname, '..', 'scripts', 'ttym-claude-stop-hook.sh')} Stop`,
+      },
+      // A turn that ends without an answer still has to end the wait. Without
+      // these, `await` on a failed or closed session blocks until its timeout.
+      {
+        event: 'StopFailure',
+        matcher: '',
+        command: `${resolve(__dirname, '..', 'scripts', 'ttym-claude-stop-hook.sh')} StopFailure`,
+      },
+      {
+        event: 'SessionEnd',
+        matcher: '',
+        command: `${resolve(__dirname, '..', 'scripts', 'ttym-claude-stop-hook.sh')} SessionEnd`,
       },
     ],
     resumeArgs: (sid) => ['claude', '--resume', sid],
@@ -1707,6 +1719,31 @@ async function cmdAgent() {
   process.exit(1);
 }
 
+// ───── Agent hook entry point ─────
+
+/**
+ * Report that an agent finished a turn.
+ *
+ * Called by the installed hook scripts, not by hand — it exists so the hook
+ * does not have to rediscover the server port or the internal endpoint. The
+ * event name comes straight from the agent: Claude sends Stop when it answered
+ * and StopFailure / SessionEnd when it did not, and the server settles the
+ * waiting interaction accordingly.
+ */
+async function cmdReportStop() {
+  const sessionId = process.argv[4] || process.env.TTYM_SESSION_ID;
+  if (!sessionId) { console.error('session id required'); process.exit(1); }
+  const eventIdx = process.argv.indexOf('--event');
+  const event = eventIdx > 0 ? process.argv[eventIdx + 1] : 'Stop';
+  const port = getPort();
+  try {
+    await fetchPost(port, `/api/internal/sessions/${sessionId}/stop`, { event });
+  } catch (err) {
+    // A hook must never fail the agent's turn.
+    if (process.env.TTYM_HOOK_DEBUG) console.error(`stop report failed: ${err.message}`);
+  }
+}
+
 // ───── Main ─────
 
 const cmd = process.argv[2];
@@ -1722,7 +1759,12 @@ switch (cmd) {
   case 'workspace': await cmdWorkspace(); break;
   case 'meta':    await cmdMeta(); break;
   case 'agent':   await cmdAgent(); break;
-  case 'hook':    await cmdAgent(); break; // legacy alias
+  case 'hook':
+    // `hook report-stop` is the agent hook entry point; anything else is the
+    // legacy alias for `agent`.
+    if (process.argv[3] === 'report-stop') { await cmdReportStop(); break; }
+    await cmdAgent();
+    break;
   case 'log':     cmdLog(); break;
   default:
     console.log(`usage: ttym <command>`);
