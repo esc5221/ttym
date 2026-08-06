@@ -43,7 +43,7 @@ const MIME_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
 };
 
-function safeSend(ws: WebSocket, data: Buffer): boolean {
+function safeSend(ws: WebSocket, data: Uint8Array): boolean {
   if (ws.readyState !== WebSocket.OPEN) return false;
   try { ws.send(data); return true; } catch { return false; }
 }
@@ -758,7 +758,9 @@ export async function createServer(port: number): Promise<TtymServer> {
       const buf = toBuffer(raw);
       if (buf.length < 3) return;
 
-      const { sessionId, cmd, payload } = decode(buf);
+      const frame = decode(buf);
+      if (!frame) return;
+      const { sessionId, cmd, payload } = frame;
 
       switch (cmd) {
         case CMD.HELLO:
@@ -907,7 +909,7 @@ export async function createServer(port: number): Promise<TtymServer> {
           if (session && !session.isDead) {
             const viewer = session.getViewer(viewerId);
             if (viewer && viewer.mode === 'readwrite') {
-              session.write(payload);
+              session.write(Buffer.from(payload));
             }
           }
           break;
@@ -915,8 +917,8 @@ export async function createServer(port: number): Promise<TtymServer> {
 
         case CMD.RESIZE:
           if (payload.length >= 4) {
-            const cols = payload.readUInt16LE(0);
-            const rows = payload.readUInt16LE(2);
+            const cols = (payload[0] | (payload[1] << 8));
+            const rows = (payload[2] | (payload[3] << 8));
             if (cols > 0 && rows > 0) {
               const session = manager.get(sessionId);
               if (session && !session.isDead) {

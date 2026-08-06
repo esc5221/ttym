@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
 import { createServer, TtymServer } from './server.js';
-import { CMD, decodeDataFrame, encode, toBuffer } from './protocol.js';
+import { CMD, decode, encode, toBuffer } from './protocol.js';
 import { rmSync } from 'node:fs';
 
-type Frame = ReturnType<typeof decodeDataFrame>;
+type Frame = NonNullable<ReturnType<typeof decode>>;
 
 class TestClient {
   private readonly frames: Frame[] = [];
@@ -18,7 +18,8 @@ class TestClient {
 
   constructor(readonly ws: WebSocket) {
     this.ws.on('message', (raw) => {
-      const frame = decodeDataFrame(toBuffer(raw));
+      const frame = decode(toBuffer(raw));
+      if (!frame) return;
       const waiterIndex = this.waiters.findIndex((waiter) => waiter.predicate(frame));
       if (waiterIndex !== -1) {
         const waiter = this.waiters.splice(waiterIndex, 1)[0]!;

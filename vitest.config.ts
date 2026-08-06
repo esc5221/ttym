@@ -6,6 +6,7 @@ export default defineConfig({
       'client/src/**/*.test.ts',
       'server/src/**/*.test.ts',
       'shared/src/**/*.test.ts',
+      'packages/*/src/**/*.test.ts',
     ],
     environment: 'node',
     testTimeout: 15_000,

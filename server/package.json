@@ -12,7 +12,8 @@
     "@xterm/addon-serialize": "^0.14.0",
     "@xterm/headless": "^6.0.0",
     "better-sqlite3": "^11.0.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "@ttym/protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
