@@ -251,3 +251,106 @@ describe('createServer', () => {
     expect(sessionRes.status).toBe(200);
   });
 });
+
+describe('meta ownership over HTTP', () => {
+  let server: TtymServer | null = null;
+  const runtimeDir = `/tmp/ttym-meta-test-${process.pid}`;
+
+  beforeEach(async () => {
+    process.env.TTYM_RUNTIME_DIR = runtimeDir;
+    server = await createServer(0);
+  });
+
+  afterEach(async () => {
+    if (server) {
+      server.manager.destroyAll();
+      await server.close();
+    }
+    server = null;
+    await new Promise((r) => setTimeout(r, 200));
+    try { rmSync(runtimeDir, { recursive: true }); } catch {}
+    delete process.env.TTYM_RUNTIME_DIR;
+  });
+
+  async function createSession(port: number): Promise<number> {
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24 }),
+    });
+    return (await res.json()).id;
+  }
+
+  it('refuses runtime keys on the public surface, and names them', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const id = await createSession(port);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/meta`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ claudeSessionId: 'spoofed', note: 'fine' }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain('claudeSessionId');
+
+    // The write must not have landed, not even the harmless part of it.
+    const meta = await (await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/meta`)).json();
+    expect(meta.claudeSessionId).toBeUndefined();
+    expect(meta.note).toBeUndefined();
+  });
+
+  it('lets hooks write the same keys through the internal path', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const id = await createSession(port);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/internal/sessions/${id}/agent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ claudeSessionId: 'real', claudeActive: true }),
+    });
+    expect(res.status).toBe(200);
+
+    const meta = await (await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/meta`)).json();
+    expect(meta.claudeSessionId).toBe('real');
+
+    // And the internal path takes nothing but runtime keys.
+    const mixed = await fetch(`http://127.0.0.1:${port}/api/internal/sessions/${id}/agent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ claudeSessionId: 'x', note: 'smuggled' }),
+    });
+    expect(mixed.status).toBe(400);
+  });
+
+  it('annotations cannot stall an await — the C acceptance test', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const id = await createSession(port);
+
+    // Write arbitrary user keys, including names that once meant protocol state
+    // to older clients but are spelled differently.
+    const note = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/meta`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket: 'TT-142', owner: 'lullu', sequence: '0' }),
+    });
+    expect(note.status).toBe(200);
+
+    // The interaction round trip still settles.
+    const submitted = fetch(`http://127.0.0.1:${port}/api/sessions/${id}/interactions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'ping', timeoutMs: 8000, submit: 'lf' }),
+    }).then((r) => r.json());
+
+    await new Promise((r) => setTimeout(r, 300));
+    await fetch(`http://127.0.0.1:${port}/api/internal/sessions/${id}/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'Stop' }),
+    });
+
+    const result = await submitted;
+    expect(result.interaction.status).toBe('completed');
+    expect(result.interaction.transcript).toContain('ping');
+  }, 15_000);
+});

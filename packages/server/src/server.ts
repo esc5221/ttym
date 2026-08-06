@@ -8,7 +8,7 @@ import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
 import { CMD, encode, encodeData, decode, toBuffer, jsonPayload, parseJson } from './protocol.js';
-import { API_VERSION } from '@ttym/protocol';
+import { API_VERSION, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
@@ -318,6 +318,28 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
+  // POST /api/internal/sessions/:id/agent — agent-state writes from hooks.
+  // Accepts only runtime keys; everything else belongs on the public meta.
+  const agentMetaMatch = path.match(/^\/api\/internal\/sessions\/(\d+)\/agent$/);
+  if (agentMetaMatch && req.method === 'POST') {
+    const id = parseInt(agentMetaMatch[1], 10);
+    readBody().then(async (body) => {
+      try {
+        const patch = JSON.parse(body);
+        if (typeof patch !== 'object' || patch === null || !isRuntimeOnlyPatch(patch)) {
+          json(400, { error: 'body must be an object of runtime keys only' });
+          return;
+        }
+        const merged = await manager.setMeta(id, patch);
+        log(`AGENT META session=${id} keys=${Object.keys(patch).join(',')}`);
+        json(200, merged);
+      } catch {
+        json(400, { error: 'invalid body' });
+      }
+    });
+    return true;
+  }
+
   // POST /api/internal/sessions/:id/stop — agent hook entry point
   const stopMatch = path.match(/^\/api\/internal\/sessions\/(\d+)\/stop$/);
   if (stopMatch && req.method === 'POST') {
@@ -386,6 +408,15 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         try {
           const patch = JSON.parse(body);
           if (typeof patch !== 'object' || patch === null) { json(400, { error: 'body must be object' }); return; }
+          // Protocol and agent state is server-owned. Writing it through the
+          // public surface is how an await used to be stalled from outside;
+          // hooks go through the internal agent endpoint instead.
+          const owned = runtimeMetaKeys(patch);
+          if (owned.length > 0) {
+            log(`META session=${id} rejected runtime keys=${owned.join(',')}`);
+            json(400, { error: `runtime keys are server-owned: ${owned.join(', ')}` });
+            return;
+          }
           const merged = await manager.setMeta(id, patch);
           log(`META session=${id} keys=${Object.keys(patch).join(',')}`);
           json(200, merged);

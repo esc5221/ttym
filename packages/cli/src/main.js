@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 import wsPkg from 'ws';
 import { request as apiRequest, ApiError } from '@ttym/api';
-import { API_VERSION } from '@ttym/protocol';
+import { API_VERSION, isRuntimeMetaKey } from '@ttym/protocol';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const { WebSocket } = wsPkg;
@@ -861,7 +861,27 @@ async function cmdMeta() {
 
   try {
     if (hasPatch) {
-      const result = await fetchPatch(port, `/api/sessions/${id}/meta`, patch);
+      // Runtime keys (the agent mapping the hooks maintain) are server-owned
+      // and travel through the internal endpoint; the public PATCH rejects
+      // them. Annotations keep going through the public surface. One command
+      // can carry both, so the patch is split.
+      const runtime = {};
+      const annotations = {};
+      for (const [key, value] of Object.entries(patch)) {
+        (isRuntimeMetaKey(key) ? runtime : annotations)[key] = value;
+      }
+      let result = null;
+      if (Object.keys(runtime).length > 0) {
+        result = await fetchPost(port, `/api/internal/sessions/${id}/agent`, runtime);
+        // A pre-split server has no internal endpoint but accepts runtime keys
+        // on the public PATCH; fall back so the hooks keep working against it.
+        if (result && result.error) {
+          result = await fetchPatch(port, `/api/sessions/${id}/meta`, runtime);
+        }
+      }
+      if (Object.keys(annotations).length > 0) {
+        result = await fetchPatch(port, `/api/sessions/${id}/meta`, annotations);
+      }
       console.log(JSON.stringify(result, null, 2));
     } else {
       const result = await fetchJson(port, `/api/sessions/${id}/meta`);

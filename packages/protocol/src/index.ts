@@ -119,3 +119,5 @@ export function textPayload(text: string): Uint8Array {
 export function payloadText(payload: Uint8Array): string {
   return decoder.decode(payload);
 }
+
+export { isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from './meta.js';
