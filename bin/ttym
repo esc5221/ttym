@@ -205,7 +205,11 @@ function cmdStart() {
   const env = {
     ...process.env,
     PORT: String(port),
-    TTYM_HOLDER_BIN: HOLDER_BIN,
+    // Default to the holder next to this CLI so the two stay in step, but let
+    // an explicit TTYM_HOLDER_BIN win — session.ts already honours it, and
+    // overwriting it here silently ignored anyone pinning a specific holder
+    // (a dev server, or a cross-version check against the installed one).
+    TTYM_HOLDER_BIN: process.env.TTYM_HOLDER_BIN || HOLDER_BIN,
   };
 
   const child = spawn('node', [SERVER_JS], {
