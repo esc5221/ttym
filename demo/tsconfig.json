@@ -8,5 +8,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["src", "../shared/src"]
+  "include": [
+    "src"
+  ]
 }

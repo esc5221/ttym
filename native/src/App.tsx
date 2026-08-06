@@ -6,7 +6,7 @@ import {
   memberNameBySession,
   reconcileSessionPanels,
   workspaceLabel,
-} from '../../shared/src/workspace-domain';
+} from '@ttym/shared';
 import {
   createWorkspace,
   getSessionMeta,

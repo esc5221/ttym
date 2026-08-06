@@ -12,7 +12,7 @@ import {
   shouldBootstrapWorkspacePanels,
   workspaceLabel,
   type LayoutNode,
-} from '../../shared/src/workspace-domain';
+} from '@ttym/shared';
 
 /** crypto.randomUUID fallback for non-secure contexts (HTTP over LAN) */
 function uuid(): string {

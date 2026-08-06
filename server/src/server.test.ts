@@ -31,7 +31,7 @@ class TestClient {
     });
   }
 
-  send(frame: Buffer) { this.ws.send(frame); }
+  send(frame: Uint8Array) { this.ws.send(frame); }
 
   next(predicate: (frame: Frame) => boolean, timeoutMs = 10_000): Promise<Frame> {
     const existingIndex = this.frames.findIndex(predicate);
@@ -185,7 +185,7 @@ describe('createServer', () => {
     const sid = created.sessionId;
     const first = await ws1.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid);
     expect([CMD.DATA, CMD.SNAPSHOT]).toContain(first.cmd);
-    expect(first.payload.toString('binary')).toContain('hello');
+    expect(Buffer.from(first.payload).toString('binary')).toContain('hello');
 
     ws1.send(encode(sid, CMD.DETACH));
     await ws1.next((f) => f.cmd === CMD.DETACH && f.sessionId === sid);
@@ -197,7 +197,7 @@ describe('createServer', () => {
     await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
     const replay = await ws2.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid);
     expect(replay.cmd).toBe(CMD.SNAPSHOT);
-    const replayText = replay.payload.toString('binary');
+    const replayText = Buffer.from(replay.payload).toString('binary');
     expect(replayText).toContain('hello');
     expect(replayText).not.toContain('\x1bc');
     expect(replayText).not.toContain('\x1b[?2026h');

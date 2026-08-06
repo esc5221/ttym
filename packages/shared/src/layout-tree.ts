@@ -1,4 +1,4 @@
-import type { LayoutNode, PaneNode, SplitNode } from './workspace-domain';
+import type { LayoutNode, PaneNode, SplitNode } from './workspace-domain.js';
 
 /**
  * Layout mutations that rewrite only the target node and its ancestors.

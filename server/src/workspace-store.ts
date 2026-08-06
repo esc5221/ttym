@@ -6,7 +6,7 @@ import {
   removePane,
   layoutSessionIds,
   layoutFromSessionIds,
-} from '../../shared/src/layout-tree.js';
+} from '@ttym/shared';
 
 // ───── Layout Tree Types ─────
 

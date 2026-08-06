@@ -3,7 +3,7 @@ import {
   layoutToSessionIds,
   sessionIdsToLayout,
   type LayoutNode,
-} from '../../../shared/src/workspace-domain';
+} from '@ttym/shared';
 
 export interface WorkspaceInfo {
   id: string;
