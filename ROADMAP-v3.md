@@ -7,7 +7,7 @@ Phase 0/0.5는 RFD에 없다 — 프로덕션을 켜둔 채 개발하기 위한 
 제약: **프로덕션 서버(port 7690, pid 2713)는 Phase 5까지 절대 정지하지 않는다.**
 개발·검증은 전부 dev 서버(port 7691, `~/.ttym-dev`, worktree `~/study/ttym-v3`)에서 한다.
 
-진행: **25/49 (51%)**
+진행: **29/49 (59%)**
 
 ---
 
@@ -145,8 +145,8 @@ CLI가 `fetchRequest`의 반환 구조를 잘못 읽었고(`response.body.intera
 
 ## Backlog — 미해결로 남은 것 · 0/8
 
-- [ ] run 디렉토리 누적 정리 정책 (snapshot 184 / meta 240 / 19MB, 세션은 16개)
-- [ ] `ttym.log` 로테이션 (130MB, 무한 증가)
+- [x] run 디렉토리 누적 정리 정책 — 미참조+14일 경과만 sweep, TTYM_GC_DAYS 조정 (`e355c72`)
+- [x] `ttym.log` 로테이션 — 64MB 초과 시 copy-truncate, append fd 전부 생존 (`7d147c0`)
 - [ ] holder ring 크기 결정 (현재 1MB, `--ring-size` 인자는 있으나 서버가 안 넘김)
       Phase 4 실측상 1MB로 충분해 보임 — 행 손실이 바이트 손실의 1/3
       대규모(3000행) 세션에서의 재확인은 남음
@@ -155,6 +155,6 @@ CLI가 `fetchRequest`의 반환 구조를 잘못 읽었고(`response.body.intera
       vibetunnel은 화면소거 시퀀스 지점에서만, orca는 UTF-8 경계까지 보정
 - [ ] agent 훅을 provider registry로 (paseo 방식) — 지금은 Claude Stop 하나에 고정
 - [ ] `StopFailure`/`SessionEnd` 미구독 → agent가 실패로 끝나면 await이 timeout까지 대기
-- [ ] flaky test 1건 규명 (`b2f615d9`에서 73/73 중 1건 실패 후 재실행 통과)
-- [ ] `ttym restart` ESRCH 에러 (`b45f036e`에서 미해결)
+- [x] flaky 규명 — 병렬 spawn 경쟁 + waitForSocket 3s 제품 버그. 8회 연속 클린 (`124d2a1`)
+- [x] `ttym restart` ESRCH + supervisor 감지 — launchd 재기동 시 경쟁 서버 안 띄움 (`f527ead`)
 - [ ] agent-bus 활성화 여부 결정 (현재 `null`, SQLite 파일만 존재)
