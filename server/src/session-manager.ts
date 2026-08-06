@@ -86,40 +86,46 @@ export class SessionManager {
 
     const manifests = files.filter((f) => f.startsWith('session-') && f.endsWith('.json'));
 
-    for (const filename of manifests) {
-      const manifestPath = resolve(this.runtimeDir, filename);
+    // Recover concurrently. A holder that never answers its handshake blocks
+    // for 10s (session.ts), and recovering in sequence made every later session
+    // queue behind it — worst case scaled with session count. Now the whole
+    // pass costs one timeout, not one per stuck holder.
+    await Promise.all(manifests.map((filename) => this.recoverOne(filename)));
+  }
+
+  private async recoverOne(filename: string): Promise<void> {
+    const manifestPath = resolve(this.runtimeDir, filename);
+    try {
+      const raw = await readFile(manifestPath, 'utf8');
+      const manifest: HolderManifest = JSON.parse(raw);
+
+      // Check holder process alive
       try {
-        const raw = await readFile(manifestPath, 'utf8');
-        const manifest: HolderManifest = JSON.parse(raw);
-
-        // Check holder process alive
-        try {
-          process.kill(manifest.pid, 0);
-        } catch {
-          console.log(`[mgr] stale holder pid=${manifest.pid} session=${manifest.id}, cleaning`);
-          await unlink(manifestPath).catch(() => {});
-          await unlink(manifest.socket).catch(() => {});
-          continue;
-        }
-
-        // Connect to holder
-        const session = await Session.recover(manifest, this.runtimeDir);
-        this.sessions.set(session.id, session);
-        this.nextId = Math.max(this.nextId, session.id + 1);
-
-        // Load persisted meta
-        await this.getMeta(session.id);
-        console.log(`[mgr] recovered session=${session.id} pid=${manifest.childPid}`);
-
-        // Wire exit cleanup (check identity to avoid deleting a replaced session)
-        session.onExit(() => {
-          const sid = session.id;
-          setTimeout(() => { if (this.sessions.get(sid) === session) this.sessions.delete(sid); }, 30_000);
-        });
-      } catch (e) {
-        console.error(`[mgr] failed to recover ${filename}:`, e);
+        process.kill(manifest.pid, 0);
+      } catch {
+        console.log(`[mgr] stale holder pid=${manifest.pid} session=${manifest.id}, cleaning`);
         await unlink(manifestPath).catch(() => {});
+        await unlink(manifest.socket).catch(() => {});
+        return;
       }
+
+      // Connect to holder
+      const session = await Session.recover(manifest, this.runtimeDir);
+      this.sessions.set(session.id, session);
+      this.nextId = Math.max(this.nextId, session.id + 1);
+
+      // Load persisted meta
+      await this.getMeta(session.id);
+      console.log(`[mgr] recovered session=${session.id} pid=${manifest.childPid}`);
+
+      // Wire exit cleanup (check identity to avoid deleting a replaced session)
+      session.onExit(() => {
+        const sid = session.id;
+        setTimeout(() => { if (this.sessions.get(sid) === session) this.sessions.delete(sid); }, 30_000);
+      });
+    } catch (e) {
+      console.error(`[mgr] failed to recover ${filename}:`, e);
+      await unlink(manifestPath).catch(() => {});
     }
   }
 
