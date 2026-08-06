@@ -483,16 +483,16 @@ headless 조작을 지향하면서 headless 세션을 금지하는 셈이 된다
 </div>
 
 <div class="task" data-id="D3">
-<div class="hd"><span class="id">D3</span><span class="cb">✓</span><span class="ttl">shadow projection으로 새 저장 모델 검증</span><span class="risk">폐기 25%</span></div>
+<div class="hd"><span class="id">D3</span><span class="cb">✓</span><span class="ttl">shadow projection — ADR-0001로 소멸</span><span class="risk">종결</span></div>
 <div class="bd">
-<p>v2가 계속 정본인 상태에서 같은 논리 연산을 새 형태로 투영하고,
-매 mutation마다 두 투영이 일치하는지 비교한다.
-핸들러가 두 파일을 제각각 쓰는 best-effort dual write는 금지한다.</p>
+<p>이 항목은 "새 저장 모델로의 일방향 변환"을 안전하게 만들기 위한 것이었다.
+승인된 <a href="adr-0001-membership.html">ADR-0001</a>이 그 변환 자체를 취소했다 —
+<code>members[]</code>가 장부로 남고 저장 포맷은 v2를 유지하므로, 투영할 새 형태가 없다.</p>
 
 <div class="find box">
-<p><b>되돌릴 수 없게 되는 지점</b>은 변환기를 실행하는 순간이 아니라,
-<b>v3로 표현할 수 없는 첫 mutation을 프로덕션에 기록하는 순간</b>이다.
-shadow projection은 그 지점을 최대한 늦춘다.</p>
+<p><b>이 항목의 위험이 어떻게 해소됐는가.</b> "되돌릴 수 없는 지점을 늦춘다"가 목적이었는데,
+ADR이 그 지점을 아예 없앴다. v2 왕복은 C3의 fixture 테스트가 영구 회귀로 고정하고 있다.
+클라이언트별 layout 등 닫힌 문의 재개 조건은 ADR에 명시돼 있다.</p>
 </div>
 </div>
 </div>
