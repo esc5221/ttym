@@ -65,6 +65,8 @@ interface LegacyStoreFile {
 
 export class WorkspaceStore {
   private workspaces = new Map<string, WorkspaceInfo>();
+  /** Runtime only: never written to workspaces.json, so the format is unchanged. */
+  private lastDiagnostics = new Map<string, string[]>();
   private readonly filePath: string;
   private dirty = false;
   private savePromise: Promise<void> | null = null;
@@ -300,27 +302,70 @@ export class WorkspaceStore {
     return normalized;
   }
 
+  /**
+   * Bring `members` in line with the layout without losing anything.
+   *
+   * This used to rebuild the list purely from the layout's leaves, so a member
+   * the layout did not mention was dropped — name, role and tags with it, and
+   * without a word. Two members holding the same name silently became one.
+   *
+   * Every mutation path now updates both sides together, so a mismatch means
+   * something outside those paths wrote the file or a bug did. Either way the
+   * answer is to report it, not to quietly pick a winner.
+   */
   private reconcileWorkspace(ws: WorkspaceInfo): void {
-    const sessionIds = layoutSessionIds(ws.layout);
+    const placed = layoutSessionIds(ws.layout);
     const now = Date.now();
-    const memberBySession = new Map(ws.members.map((member) => [member.sessionId, member]));
+    const bySession = new Map(ws.members.map((member) => [member.sessionId, member]));
     const usedNames = new Set<string>();
+    const reconciled: WorkspaceMemberInfo[] = [];
+    const problems: string[] = [];
 
-    ws.members = sessionIds.map((sessionId, index) => {
-      const existing = memberBySession.get(sessionId);
-      const preferredName = existing?.name && !usedNames.has(existing.name)
-        ? existing.name
-        : this.nextMemberName(usedNames, index + 1);
-      usedNames.add(preferredName);
-      return {
+    const claimName = (preferred: string | undefined, ordinal: number): string => {
+      if (preferred && !usedNames.has(preferred)) {
+        usedNames.add(preferred);
+        return preferred;
+      }
+      const fresh = this.nextMemberName(usedNames, ordinal);
+      if (preferred) problems.push(`duplicate name "${preferred}" renamed to "${fresh}"`);
+      usedNames.add(fresh);
+      return fresh;
+    };
+
+    // Members the layout places, in layout order.
+    placed.forEach((sessionId, index) => {
+      const existing = bySession.get(sessionId);
+      bySession.delete(sessionId);
+      reconciled.push({
         sessionId,
-        name: preferredName,
+        name: claimName(existing?.name, index + 1),
         role: existing?.role,
         tags: existing?.tags ?? [],
         createdAt: existing?.createdAt ?? now,
         updatedAt: existing?.updatedAt ?? now,
-      };
+      });
     });
+
+    // Anything left over is a member the layout does not show. Keep it — its
+    // name and role are the only record that it exists.
+    for (const orphan of bySession.values()) {
+      problems.push(`member "${orphan.name}" (session ${orphan.sessionId}) is not placed in the layout`);
+      reconciled.push({ ...orphan, name: claimName(orphan.name, reconciled.length + 1) });
+    }
+
+    ws.members = reconciled;
+
+    if (problems.length > 0) {
+      this.lastDiagnostics.set(ws.id, problems);
+      console.warn(`[ws ${ws.project}/${ws.name}] ${problems.join('; ')}`);
+    } else {
+      this.lastDiagnostics.delete(ws.id);
+    }
+  }
+
+  /** Problems the last reconcile found for a workspace, if any. Not persisted. */
+  diagnostics(id: string): string[] {
+    return this.lastDiagnostics.get(id) ?? [];
   }
 
   private nextMemberName(usedNames: Set<string>, start: number): string {

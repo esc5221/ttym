@@ -280,6 +280,71 @@ describe('WorkspaceStore', () => {
     expect(layoutIds(layout)).toEqual([1, 2, 3, 12]);
   });
 
+  it('keeps a member the layout does not place, and reports it', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+
+    // layout mentions only 41; 42 is a member the layout does not show.
+    const created = store.create('ws1', 'w', { type: 'pane', sessionId: 41 }, 'proj', [
+      { sessionId: 41, name: 'lead', role: 'agent', createdAt: 1, updatedAt: 1 },
+      { sessionId: 42, name: 'logs', role: 'shell', createdAt: 1, updatedAt: 1 },
+    ]);
+
+    const names = created.members.map((m) => m.name);
+    expect(names).toContain('lead');
+    expect(names).toContain('logs'); // used to disappear without a word
+    const logs = created.members.find((m) => m.sessionId === 42);
+    expect(logs?.role).toBe('shell'); // role survived too
+    expect(store.diagnostics(created.id).join(' ')).toContain('not placed in the layout');
+  });
+
+  it('renames a duplicate instead of dropping the member', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+
+    const created = store.create('ws1', 'w', {
+      type: 'split', axis: 'row', sizes: [0.5, 0.5],
+      children: [{ type: 'pane', sessionId: 1 }, { type: 'pane', sessionId: 2 }],
+    }, 'proj', [
+      { sessionId: 1, name: 'claude', createdAt: 1, updatedAt: 1 },
+      { sessionId: 2, name: 'claude', createdAt: 1, updatedAt: 1 },
+    ]);
+
+    // Both sessions are still members; the collision is resolved by renaming.
+    expect(created.members.map((m) => m.sessionId).sort()).toEqual([1, 2]);
+    expect(new Set(created.members.map((m) => m.name)).size).toBe(2);
+    expect(store.diagnostics(created.id).join(' ')).toContain('duplicate name');
+  });
+
+  it('reports nothing when the layout and members agree', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const created = store.create('ws1', 'w', { type: 'pane', sessionId: 7 }, 'proj', [
+      { sessionId: 7, name: 'only', createdAt: 1, updatedAt: 1 },
+    ]);
+    expect(store.diagnostics(created.id)).toEqual([]);
+  });
+
+  it('stays consistent across the normal mutation paths', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    let ws = store.create('ws1', 'w', { type: 'pane', sessionId: 1 }, 'proj', [
+      { sessionId: 1, name: 'a', createdAt: 1, updatedAt: 1 },
+    ]);
+
+    ws = store.addMember(ws.id, { sessionId: 2, name: 'b', tags: [] })!;
+    ws = store.splitRight(ws.id, 1, { sessionId: 3, name: 'c', tags: [] })!;
+    ws = store.removeMember(ws.id, 2)!;
+
+    // Members and layout describe the same set, so nothing is reported.
+    expect(layoutIds(ws.layout).sort()).toEqual(ws.members.map((m) => m.sessionId).sort());
+    expect(store.diagnostics(ws.id)).toEqual([]);
+  });
+
   // ───── Load edge cases ─────
 
   it('loads v2 format correctly', async () => {
