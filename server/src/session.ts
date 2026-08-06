@@ -98,6 +98,10 @@ class HolderFrameReader {
 // ───── Runtime dir ─────
 
 export function getHomeDir(): string {
+  // TTYM_HOME lets a dev server keep its pid file, logs, and runtime dir out of
+  // the production ~/.ttym — otherwise both write the same ttym.pid and the dev
+  // server unlinks it on shutdown.
+  if (process.env.TTYM_HOME) return resolve(process.env.TTYM_HOME);
   return resolve(process.env.HOME || '/tmp', '.ttym');
 }
 

@@ -12,7 +12,9 @@ import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
-const HOME_DIR = resolve(process.env.HOME || '/tmp', '.ttym');
+const HOME_DIR = process.env.TTYM_HOME
+  ? resolve(process.env.TTYM_HOME)
+  : resolve(process.env.HOME || '/tmp', '.ttym');
 const PID_FILE = resolve(HOME_DIR, 'ttym.pid');
 const LOG_FILE = resolve(HOME_DIR, 'ttym.log');
 const SERVER_JS = resolve(__dirname, 'ttym-server.js');
