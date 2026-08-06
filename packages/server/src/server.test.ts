@@ -301,6 +301,45 @@ describe('multi-byte input over the wire — the Korean IME regression', () => {
     expect(Buffer.from(echoed.payload).toString('utf8')).toContain('녕 ');
   });
 
+  it('fast Korean typing reassembles byte-exact through the PTY', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws = await openClient(port);
+    clients.push(ws);
+
+    ws.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', "printf 'ready\\n'; stty -echo; exec cat"],
+      cols: 120, rows: 24,
+    }))));
+    const created = await ws.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    ws.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ mode: 'readwrite' }))));
+    await ws.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+
+    // A sentence the way a browser IME actually commits it under fast typing:
+    // lone syllables (6-byte frames), word-final syllables committed together
+    // with their space (7 bytes — the old seq threshold), ASCII runs. The
+    // production symptom was words glued together minus their last syllable:
+    // "이거 안좋아하는게 …" arriving as "이안좋아하는들어갔는…".
+    const commits = [
+      '이', '거 ', '안', '좋', '아', '하', '는', '게 ',
+      '들', '어', '갔', '는', '데 ', 'l', 'i', 'n', 't', ' ',
+      '안', '걸', '렸', '고 ', '파', '일', '\n',
+    ];
+    for (const c of commits) {
+      ws.send(encode(sid, CMD.DATA, Buffer.from(c, 'utf8')));
+    }
+
+    const sentence = '이거 안좋아하는게 들어갔는데 lint 안걸렸고 파일';
+    let acc = '';
+    while (!acc.includes(sentence)) {
+      const f = await ws.next(
+        (fr) => fr.cmd === CMD.DATA && fr.sessionId === sid,
+      );
+      acc += Buffer.from(f.payload).toString('utf8');
+    }
+    expect(acc).toContain(sentence);
+  });
+
   it('a pasted line keeps its first four bytes', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws = await openClient(port);
