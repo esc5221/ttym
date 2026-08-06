@@ -1,5 +1,12 @@
 import { readFile, writeFile, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import {
+  insertPane,
+  splitPane,
+  removePane,
+  layoutSessionIds,
+  layoutFromSessionIds,
+} from '../../shared/src/layout-tree.js';
 
 // ───── Layout Tree Types ─────
 
@@ -215,7 +222,7 @@ export class WorkspaceStore {
       });
     }
 
-    ws.layout = appendSessionToLayout(ws.layout, member.sessionId);
+    ws.layout = insertPane(ws.layout, member.sessionId);
     this.reconcileWorkspace(ws);
     ws.updatedAt = now;
     this.scheduleSave();
@@ -241,7 +248,11 @@ export class WorkspaceStore {
       updatedAt: now,
     });
 
-    ws.layout = insertSessionRightOfTarget(ws.layout, targetSessionId, member.sessionId);
+    // A real split now: the target pane is replaced by a two-way split and
+    // keeps its slot size, so nothing else in the layout moves.
+    ws.layout = targetSessionId === undefined
+      ? insertPane(ws.layout, member.sessionId)
+      : splitPane(ws.layout, targetSessionId, member.sessionId);
     this.reconcileWorkspace(ws);
     ws.updatedAt = now;
     this.scheduleSave();
@@ -252,7 +263,7 @@ export class WorkspaceStore {
     const ws = this.workspaces.get(id);
     if (!ws) return null;
     ws.members = ws.members.filter((entry) => entry.sessionId !== sessionId);
-    ws.layout = removeSessionFromLayout(ws.layout, sessionId);
+    ws.layout = removePane(ws.layout, sessionId);
     this.reconcileWorkspace(ws);
     ws.updatedAt = Date.now();
     this.scheduleSave();
@@ -290,7 +301,7 @@ export class WorkspaceStore {
   }
 
   private reconcileWorkspace(ws: WorkspaceInfo): void {
-    const sessionIds = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+    const sessionIds = layoutSessionIds(ws.layout);
     const now = Date.now();
     const memberBySession = new Map(ws.members.map((member) => [member.sessionId, member]));
     const usedNames = new Set<string>();
@@ -324,50 +335,4 @@ export class WorkspaceStore {
   }
 }
 
-function layoutToSessionIds(node: LayoutNode): number[] {
-  if (node.type === 'pane') return [node.sessionId];
-  return node.children.flatMap(layoutToSessionIds);
-}
-
-function appendSessionToLayout(node: LayoutNode, sessionId: number): LayoutNode {
-  const sessionIds = layoutToSessionIds(node).filter((id) => id > 0);
-  if (sessionIds.includes(sessionId)) return node;
-  sessionIds.push(sessionId);
-  return sessionIdsToLayout(sessionIds);
-}
-
-function insertSessionRightOfTarget(node: LayoutNode, targetSessionId: number | undefined, sessionId: number): LayoutNode {
-  const sessionIds = layoutToSessionIds(node).filter((id) => id > 0);
-  if (sessionIds.includes(sessionId)) return node;
-  if (sessionIds.length === 0) return { type: 'pane', sessionId };
-  if (targetSessionId === undefined) {
-    sessionIds.push(sessionId);
-    return sessionIdsToLayout(sessionIds);
-  }
-
-  const targetIndex = sessionIds.indexOf(targetSessionId);
-  if (targetIndex === -1) {
-    sessionIds.push(sessionId);
-    return sessionIdsToLayout(sessionIds);
-  }
-
-  sessionIds.splice(targetIndex + 1, 0, sessionId);
-  return sessionIdsToLayout(sessionIds);
-}
-
-function removeSessionFromLayout(node: LayoutNode, sessionId: number): LayoutNode {
-  const sessionIds = layoutToSessionIds(node).filter((id) => id > 0 && id !== sessionId);
-  return sessionIdsToLayout(sessionIds);
-}
-
-function sessionIdsToLayout(ids: number[]): LayoutNode {
-  if (ids.length === 0) return { type: 'pane', sessionId: 0 };
-  if (ids.length === 1) return { type: 'pane', sessionId: ids[0] };
-  return {
-    type: 'split',
-    axis: 'row',
-    sizes: ids.map(() => 1 / ids.length),
-    children: ids.map((id) => ({ type: 'pane' as const, sessionId: id })),
-  };
-}
 

@@ -8,6 +8,11 @@ function runtimeDir() {
   return mkdtempSync(join(tmpdir(), 'ttym-ws-store-'));
 }
 
+function layoutIds(node: any): number[] {
+  if (node.type === 'pane') return node.sessionId > 0 ? [node.sessionId] : [];
+  return node.children.flatMap(layoutIds);
+}
+
 describe('WorkspaceStore', () => {
   const dirs: string[] = [];
 
@@ -145,16 +150,134 @@ describe('WorkspaceStore', () => {
     });
 
     expect(updated?.members.map((member) => member.name)).toEqual(['lead', 'worker', 'logs']);
+    // splitRight now splits the target pane in place instead of rebuilding the
+    // tree as a flat, evenly divided row. Pane 41's slot keeps its 0.5 share
+    // and is subdivided; pane 42 does not move.
     expect(updated?.layout).toEqual({
       type: 'split',
       axis: 'row',
-      sizes: [1 / 3, 1 / 3, 1 / 3],
+      sizes: [0.5, 0.5],
       children: [
-        { type: 'pane', sessionId: 41 },
-        { type: 'pane', sessionId: 43 },
+        {
+          type: 'split',
+          axis: 'row',
+          sizes: [0.5, 0.5],
+          children: [
+            { type: 'pane', sessionId: 41 },
+            { type: 'pane', sessionId: 43 },
+          ],
+        },
         { type: 'pane', sessionId: 42 },
       ],
     });
+  });
+
+  it('preserves nesting and sizes when a member is added', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    // The RFD's reproduction: row [0.7, 0.3] with a nested col [0.5, 0.5].
+    const created = store.create('ws1', 'nested', {
+      type: 'split',
+      axis: 'row',
+      sizes: [0.7, 0.3],
+      children: [
+        { type: 'pane', sessionId: 1 },
+        {
+          type: 'split',
+          axis: 'col',
+          sizes: [0.5, 0.5],
+          children: [
+            { type: 'pane', sessionId: 2 },
+            { type: 'pane', sessionId: 3 },
+          ],
+        },
+      ],
+    }, 'proj', [
+      { sessionId: 1, name: 'a', createdAt: 1, updatedAt: 1 },
+      { sessionId: 2, name: 'b', createdAt: 1, updatedAt: 1 },
+      { sessionId: 3, name: 'c', createdAt: 1, updatedAt: 1 },
+    ]);
+
+    const innerBefore = JSON.stringify((created.layout as any).children[1]);
+
+    const updated = store.addMember(created.id, { sessionId: 4, name: 'd', tags: [] });
+    const layout = updated!.layout as any;
+
+    // The sibling subtree comes out byte for byte as it went in.
+    expect(JSON.stringify(layout.children[1])).toBe(innerBefore);
+    // 0.7 : 0.3 still holds between the original two slots.
+    expect(Math.abs(layout.sizes[0] / layout.sizes[1] - 0.7 / 0.3)).toBeLessThan(1e-9);
+    expect(Math.abs(layout.sizes.reduce((a: number, b: number) => a + b, 0) - 1)).toBeLessThan(1e-9);
+    expect(layout.children.length).toBe(3);
+  });
+
+  it('preserves nesting and sizes when a member is removed', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const created = store.create('ws1', 'nested', {
+      type: 'split',
+      axis: 'row',
+      sizes: [0.6, 0.25, 0.15],
+      children: [
+        { type: 'pane', sessionId: 1 },
+        { type: 'pane', sessionId: 2 },
+        {
+          type: 'split',
+          axis: 'col',
+          sizes: [0.5, 0.5],
+          children: [
+            { type: 'pane', sessionId: 3 },
+            { type: 'pane', sessionId: 4 },
+          ],
+        },
+      ],
+    }, 'proj', [1, 2, 3, 4].map((id) => ({ sessionId: id, name: `m${id}`, createdAt: 1, updatedAt: 1 })));
+
+    const innerBefore = JSON.stringify((created.layout as any).children[2]);
+
+    const updated = store.removeMember(created.id, 2);
+    const layout = updated!.layout as any;
+
+    expect(JSON.stringify(layout.children[1])).toBe(innerBefore);
+    // 0.6 : 0.15 survives the removal of the 0.25 slot.
+    expect(Math.abs(layout.sizes[0] / layout.sizes[1] - 0.6 / 0.15)).toBeLessThan(1e-9);
+    expect(layoutIds(layout)).toEqual([1, 3, 4]);
+  });
+
+  it('does not flatten across a long run of adds and removes', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const created = store.create('ws1', 'nested', {
+      type: 'split',
+      axis: 'row',
+      sizes: [0.7, 0.3],
+      children: [
+        { type: 'pane', sessionId: 1 },
+        {
+          type: 'split',
+          axis: 'col',
+          sizes: [0.8, 0.2],
+          children: [
+            { type: 'pane', sessionId: 2 },
+            { type: 'pane', sessionId: 3 },
+          ],
+        },
+      ],
+    }, 'proj', [1, 2, 3].map((id) => ({ sessionId: id, name: `m${id}`, createdAt: 1, updatedAt: 1 })));
+
+    let ws = created;
+    for (const id of [10, 11, 12]) ws = store.addMember(ws.id, { sessionId: id, name: `n${id}`, tags: [] })!;
+    for (const id of [11, 10]) ws = store.removeMember(ws.id, id)!;
+
+    const layout = ws.layout as any;
+    // Still nested, and the inner split still carries its own 0.8 : 0.2.
+    expect(layout.children[1].type).toBe('split');
+    expect(Math.abs(layout.children[1].sizes[0] / layout.children[1].sizes[1] - 4)).toBeLessThan(1e-9);
+    expect(Math.abs(layout.sizes[0] / layout.sizes[1] - 0.7 / 0.3)).toBeLessThan(1e-9);
+    expect(layoutIds(layout)).toEqual([1, 2, 3, 12]);
   });
 
   // ───── Load edge cases ─────
