@@ -8,7 +8,7 @@ import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
 import { sweepRuntimeDir } from './run-gc.js';
-import { CMD, encode, encodeData, decode, toBuffer, jsonPayload, parseJson } from './protocol.js';
+import { CMD, encode, encodeData, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
 import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
@@ -897,7 +897,9 @@ export async function createServer(port: number): Promise<TtymServer> {
       const buf = toBuffer(raw);
       if (buf.length < 3) return;
 
-      const frame = decode(buf);
+      // Inbound frames come from a client: their DATA is bare input bytes,
+      // never seq-prefixed. decodeClientFrame, not decode.
+      const frame = decodeClientFrame(buf);
       if (!frame) return;
       const { sessionId, cmd, payload } = frame;
 

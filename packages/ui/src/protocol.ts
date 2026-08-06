@@ -3,7 +3,7 @@
  * (`./protocol`) keep working; the implementation lives in @ttym/protocol.
  */
 export {
-  CMD, encode, encodeData, decode, jsonPayload, parseJson,
+  CMD, encode, encodeData, decode, decodeServerFrame, decodeClientFrame, jsonPayload, parseJson,
   HEADER_BYTES, DATA_HEADER_BYTES,
 } from '@ttym/protocol';
 export type { DecodedFrame, CmdValue } from '@ttym/protocol';

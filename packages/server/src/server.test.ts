@@ -252,6 +252,81 @@ describe('createServer', () => {
   });
 });
 
+describe('multi-byte input over the wire — the Korean IME regression', () => {
+  let server: TtymServer | null = null;
+  const clients: TestClient[] = [];
+  const runtimeDir = `/tmp/ttym-ime-test-${process.pid}`;
+
+  beforeEach(async () => {
+    process.env.TTYM_RUNTIME_DIR = runtimeDir;
+    server = await createServer(0);
+  });
+
+  afterEach(async () => {
+    while (clients.length > 0) await clients.pop()!.close();
+    if (server) {
+      server.manager.destroyAll();
+      await server.close();
+    }
+    server = null;
+    await new Promise((r) => setTimeout(r, 200));
+    try { rmSync(runtimeDir, { recursive: true }); } catch {}
+    delete process.env.TTYM_RUNTIME_DIR;
+  });
+
+  it('a 4-byte IME commit reaches the PTY intact', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws = await openClient(port);
+    clients.push(ws);
+
+    ws.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', "printf 'ready\\n'; stty -echo; exec cat"],
+      cols: 80, rows: 24,
+    }))));
+    const created = await ws.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    ws.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ mode: 'readwrite' }))));
+    await ws.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+
+    // '녕 ' — the composition-plus-space commit that used to vanish: 4 bytes
+    // of payload put the frame at exactly the old seq threshold.
+    // Newline included: the PTY is canonical, so the line discipline holds
+    // input back from cat until one arrives. Five bytes — still past the old
+    // seq threshold that ate the frame.
+    ws.send(encode(sid, CMD.DATA, Buffer.from('녕 \n', 'utf8')));
+    const echoed = await ws.next(
+      (f) => f.cmd === CMD.DATA && f.sessionId === sid
+        && Buffer.from(f.payload).toString('utf8').includes('녕 '),
+    );
+    expect(Buffer.from(echoed.payload).toString('utf8')).toContain('녕 ');
+  });
+
+  it('a pasted line keeps its first four bytes', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws = await openClient(port);
+    clients.push(ws);
+
+    ws.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', "printf 'ready\\n'; stty -echo; exec cat"],
+      cols: 80, rows: 24,
+    }))));
+    const created = await ws.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    ws.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ mode: 'readwrite' }))));
+    await ws.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+
+    // The unified decode ate 'echo' off the front of exactly this shape —
+    // and the earlier probe passed anyway because the shell's error message
+    // still contained the marker. Assert the full line survives.
+    ws.send(encode(sid, CMD.DATA, Buffer.from('echo full-line-intact\n', 'utf8')));
+    const echoed = await ws.next(
+      (f) => f.cmd === CMD.DATA && f.sessionId === sid
+        && Buffer.from(f.payload).toString('utf8').includes('full-line-intact'),
+    );
+    expect(Buffer.from(echoed.payload).toString('utf8')).toContain('echo full-line-intact');
+  });
+});
+
 describe('meta ownership over HTTP', () => {
   let server: TtymServer | null = null;
   const runtimeDir = `/tmp/ttym-meta-test-${process.pid}`;

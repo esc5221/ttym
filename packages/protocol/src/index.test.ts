@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CMD, encode, encodeData, decode, jsonPayload, parseJson,
+  CMD, encode, encodeData, decode, decodeClientFrame, decodeServerFrame, jsonPayload, parseJson,
   HEADER_BYTES, DATA_HEADER_BYTES,
 } from './index.js';
 
@@ -88,5 +88,31 @@ describe('json payloads', () => {
   it('survives the frame round trip', () => {
     const frame = encode(3, CMD.LIST, jsonPayload([{ id: 1 }]));
     expect(parseJson(decode(frame)!.payload)).toEqual([{ id: 1 }]);
+  });
+});
+
+describe('direction asymmetry — the Korean input regression', () => {
+  it('client input DATA keeps every byte, even at 4+ bytes of payload', () => {
+    // '녕 ' — a Hangul syllable committed together with the space that ended
+    // its composition. 4 bytes of payload, 7 bytes of frame: exactly the
+    // shape the unified decode mistook for a seq-carrying server frame,
+    // eating all four bytes and making the syllable vanish on screen.
+    const input = new TextEncoder().encode('녕 ');
+    const frame = encode(3, CMD.DATA, input);
+    const decoded = decodeClientFrame(frame)!;
+    expect(decoded.seq).toBeUndefined();
+    expect(new TextDecoder().decode(decoded.payload)).toBe('녕 ');
+  });
+
+  it('a paste through the client path keeps its first four bytes', () => {
+    const input = new TextEncoder().encode('echo hello\n');
+    const decoded = decodeClientFrame(encode(1, CMD.DATA, input))!;
+    expect(new TextDecoder().decode(decoded.payload)).toBe('echo hello\n');
+  });
+
+  it('server output DATA still carries its sequence', () => {
+    const decoded = decodeServerFrame(encodeData(1, 42, new TextEncoder().encode('ok')))!;
+    expect(decoded.seq).toBe(42);
+    expect(new TextDecoder().decode(decoded.payload)).toBe('ok');
   });
 });
