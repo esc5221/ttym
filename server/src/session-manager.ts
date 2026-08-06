@@ -17,6 +17,12 @@ export interface SessionSnapshot {
   savedAt: number;
   screen: string; // xterm serialize output
   meta: SessionMeta;
+  /** Holder incarnation this screen belongs to; a mismatch invalidates it. */
+  generation?: string;
+  /** Stream offset the screen has been advanced through. */
+  appliedThroughOffset?: number;
+  /** Per-row soft-wrap bits, base64. Stored so a resize can reflow later. */
+  wrapFlags?: string;
 }
 
 export interface WorkspaceState {
@@ -109,14 +115,20 @@ export class SessionManager {
         return;
       }
 
-      // Connect to holder
-      const session = await Session.recover(manifest, this.runtimeDir);
+      // A checkpoint for this same holder covers far more scrollback than the
+      // ring does, so hand it over rather than letting the ring alone rebuild
+      // the screen.
+      const checkpoint = await this.readCheckpoint(manifest.id);
+      const session = await Session.recover(manifest, this.runtimeDir, false, checkpoint);
       this.sessions.set(session.id, session);
       this.nextId = Math.max(this.nextId, session.id + 1);
 
       // Load persisted meta
       await this.getMeta(session.id);
-      console.log(`[mgr] recovered session=${session.id} pid=${manifest.childPid}`);
+      console.log(
+        `[mgr] recovered session=${session.id} pid=${manifest.childPid}` +
+        (checkpoint ? ` via checkpoint@${checkpoint.offset}${session.recoveryGap ? ' GAP' : ''}` : ''),
+      );
 
       // Wire exit cleanup (check identity to avoid deleting a replaced session)
       session.onExit(() => {
@@ -192,10 +204,11 @@ export class SessionManager {
         continue;
       }
 
-      // Holder may have already brought this session back — keep that one.
+      // Holder already brought this session back, and recovery seeded the
+      // terminal from this very checkpoint. Keep the file: it is the larger and
+      // more accurate record of the screen, and deleting it here is what forced
+      // every swap to rebuild from the smaller raw ring instead.
       if (this.sessions.has(snap.id)) {
-        console.log(`[mgr] session=${snap.id} already alive via holder, dropping snapshot`);
-        await unlink(snapPath).catch(() => {});
         continue;
       }
 
@@ -281,6 +294,12 @@ export class SessionManager {
 
     const snap: SessionSnapshot = {
       version: 1,
+      // Where this screen sits in the holder's byte stream, and which holder
+      // incarnation it belongs to. Recovery seeds from here and replays only
+      // what came after.
+      generation: session.generation,
+      appliedThroughOffset: session.appliedOffset,
+      wrapFlags: session.wrapFlags(),
       id,
       cmd: session.info().cmd,
       cols: session.cols,
@@ -426,6 +445,21 @@ export class SessionManager {
   }
 
   // ───── Session Meta ─────
+
+  /**
+   * Load a session's checkpoint if one is on disk. Returns undefined when there
+   * is none or it predates offset tracking — recovery then replays the ring.
+   */
+  private async readCheckpoint(id: number): Promise<{ generation: string; offset: number; screen: string } | undefined> {
+    try {
+      const raw = await readFile(resolve(this.runtimeDir, `snapshot-${id}.json`), 'utf8');
+      const snap = JSON.parse(raw) as SessionSnapshot;
+      if (!snap.screen || typeof snap.appliedThroughOffset !== 'number') return undefined;
+      return { generation: snap.generation ?? '', offset: snap.appliedThroughOffset, screen: snap.screen };
+    } catch {
+      return undefined;
+    }
+  }
 
   private metaPath(id: number): string {
     return resolve(this.runtimeDir, `meta-${id}.json`);

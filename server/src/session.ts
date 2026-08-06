@@ -58,6 +58,8 @@ const H_CMD_ACQUIRE = 0x0c;
 const H_CMD_ACQUIRED = 0x0d;
 const H_CMD_DENIED = 0x0e;
 const H_CMD_EVICTED = 0x0f;
+const H_CMD_DUMP_SINCE = 0x10;
+const H_CMD_REPLAY = 0x11;
 
 /** Identifies this server process to holders, so an eviction is attributable. */
 const SERVER_INSTANCE_ID = `srv-${process.pid}-${Date.now().toString(36)}`;
@@ -184,6 +186,10 @@ export class Session {
   private _lastDirtyAt = 0;
   private _diedAt = 0;
   private _evicted = false;
+  private _generation = '';
+  private _appliedOffset = 0;
+  private _recoveryGap = false;
+  private supportsReplay = false;
   private readonly syncFilter = new SyncBlockFilter();
   private syncBlocksStarted = 0;
   private syncBlocksCompleted = 0;
@@ -202,6 +208,36 @@ export class Session {
   get diedAt(): number { return this._diedAt; }
   /** True when this server lost the lease rather than the PTY exiting. */
   get evicted(): boolean { return this._evicted; }
+  /** Holder incarnation this session is attached to. */
+  get generation(): string { return this._generation; }
+  /** Stream offset the terminal has been advanced through. */
+  get appliedOffset(): number { return this._appliedOffset; }
+  /** True when recovery could not reach back to the checkpoint. */
+  get recoveryGap(): boolean { return this._recoveryGap; }
+
+  /**
+   * Seed the terminal from a saved checkpoint before any delta is applied.
+   * Returns false when the checkpoint belongs to a different holder incarnation.
+   */
+  seedCheckpoint(generation: string, offset: number, screen: string): boolean {
+    if (generation && this._generation && generation !== this._generation) return false;
+    this.resetSyncEmissionState('seed checkpoint');
+    this.term.write(screen);
+    this._appliedOffset = offset;
+    return true;
+  }
+
+  /** Per-row soft-wrap flags, so a resize can reflow what was restored. */
+  wrapFlags(): string {
+    const buf = this.term.buffer.active;
+    const bits: number[] = [];
+    for (let i = 0; i < buf.length; i++) {
+      const byte = i >> 3;
+      if (bits[byte] === undefined) bits[byte] = 0;
+      if (buf.getLine(i)?.isWrapped) bits[byte] |= 1 << (i & 7);
+    }
+    return Buffer.from(bits.map((b) => b ?? 0)).toString('base64');
+  }
   markClean(): void { this._dirty = false; }
 
   private constructor(
@@ -266,7 +302,12 @@ export class Session {
   }
 
   /** Recover an existing session from a running holder */
-  static async recover(manifest: HolderManifest, runtimeDir: string, takeover = false): Promise<Session> {
+  static async recover(
+    manifest: HolderManifest,
+    runtimeDir: string,
+    takeover = false,
+    checkpoint?: { generation: string; offset: number; screen: string },
+  ): Promise<Session> {
     const sock = await connectSocket(manifest.socket);
 
     const session = new Session(
@@ -276,20 +317,54 @@ export class Session {
       manifest.createdAt,
     );
 
-    await session.connectHolder(sock, true, takeover);
+    await session.connectHolder(sock, true, takeover, checkpoint);
 
     return session;
   }
 
   /** Connect to holder socket, receive STATE + DUMP for initial catch-up */
-  connectHolder(sock: Socket, _recovery = false, takeover = false): Promise<void> {
+  connectHolder(
+    sock: Socket,
+    _recovery = false,
+    takeover = false,
+    checkpoint?: { generation: string; offset: number; screen: string },
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       this.sock = sock;
       this.debug(`connectHolder recovery=${_recovery} takeover=${takeover}`);
       let gotState = false;
       let pendingDump = false;
       let awaitingLease = false;
+      let pendingReplay = false;
       const buffered: Array<{ cmd: number; payload: Buffer }> = [];
+
+      /**
+       * Catch the terminal up to the holder.
+       *
+       * With a checkpoint for this same holder incarnation we seed the screen
+       * from it and ask only for the bytes after it — the checkpoint holds a
+       * full 3000-row screen in ~571KB where the raw ring holds roughly a third
+       * of that. Without one, or against an older holder, fall back to
+       * replaying the whole ring.
+       */
+      const requestReplay = () => {
+        const usable = checkpoint
+          && (!checkpoint.generation || !this._generation || checkpoint.generation === this._generation)
+          && checkpoint.offset > 0;
+
+        if (usable && this.supportsReplay) {
+          if (this.seedCheckpoint(checkpoint!.generation, checkpoint!.offset, checkpoint!.screen)) {
+            pendingReplay = true;
+            const payload = Buffer.allocUnsafe(8);
+            payload.writeBigUInt64LE(BigInt(checkpoint!.offset), 0);
+            this.debug(`replay from checkpoint offset=${checkpoint!.offset}`);
+            writeFrame(sock, H_CMD_DUMP_SINCE, payload);
+            return;
+          }
+        }
+        pendingDump = true;
+        writeFrame(sock, H_CMD_DUMP_REQ);
+      };
 
       const timer = setTimeout(() => {
         this.debug(`handshake timeout recovery=${_recovery} gotState=${gotState} pendingDump=${pendingDump} buffered=${buffered.length}`);
@@ -307,6 +382,10 @@ export class Session {
               (this as any).childPid = state.childPid ?? this.childPid;
               this._cols = state.cols ?? this._cols;
               this._rows = state.rows ?? this._rows;
+              this._generation = state.generation ?? '';
+              this._appliedOffset = state.nextOffset ?? 0;
+              // nextOffset only appears on holders that track stream position.
+              this.supportsReplay = typeof state.nextOffset === 'number';
               try { this.term.resize(this._cols, this._rows); } catch {}
 
               // Claim the controller role before touching the PTY. Holders
@@ -321,9 +400,7 @@ export class Session {
                 return;
               }
 
-              // Always request DUMP to catch any output already in holder's ring
-              pendingDump = true;
-              writeFrame(sock, H_CMD_DUMP_REQ);
+              requestReplay();
             } catch (e) {
               clearTimeout(timer);
               reject(e);
@@ -335,8 +412,7 @@ export class Session {
             if (frame.cmd === H_CMD_ACQUIRED) {
               awaitingLease = false;
               this.debug(`lease acquired ${frame.payload.toString()}`);
-              pendingDump = true;
-              writeFrame(sock, H_CMD_DUMP_REQ);
+              requestReplay();
               continue;
             }
             if (frame.cmd === H_CMD_DENIED) {
@@ -348,6 +424,33 @@ export class Session {
               return;
             }
             // Output can arrive while the claim is in flight; keep it.
+            buffered.push(frame);
+            continue;
+          }
+
+          if (pendingReplay) {
+            if (frame.cmd === H_CMD_REPLAY) {
+              pendingReplay = false;
+              const base = Number(frame.payload.readBigUInt64LE(0));
+              const end = Number(frame.payload.readBigUInt64LE(8));
+              const gap = frame.payload[16] === 1;
+              const data = Buffer.from(frame.payload.subarray(17));
+              this._recoveryGap = gap;
+              this._appliedOffset = end;
+              this.debug(`got REPLAY base=${base} end=${end} gap=${gap} bytes=${data.length}`);
+              const finalize = () => {
+                for (const f of buffered) this.handleHolderFrame(f.cmd, f.payload);
+                buffered.length = 0;
+                clearTimeout(timer);
+                resolve();
+              };
+              if (data.length > 0) {
+                this.term.write(data, () => { this.processTerminalOutput(data, false); finalize(); });
+              } else {
+                finalize();
+              }
+              continue;
+            }
             buffered.push(frame);
             continue;
           }
@@ -410,6 +513,10 @@ export class Session {
         if (this.closed) return;
         if (payload.length < 4) return;
         const data = payload.subarray(4);
+        // Track the stream position so a checkpoint can say how far the screen
+        // has been advanced. The holder counts the same bytes, so starting from
+        // the offset it reported in STATE keeps the two in step.
+        this._appliedOffset += data.length;
 
         // Layer 2: headless xterm
         // When no viewers are attached, skip sync-filter + ring.push + broadcast.
@@ -704,4 +811,9 @@ interface HolderState {
   lease?: boolean;
   /** Whether another server currently holds it. */
   held?: boolean;
+  /** Identifies this holder incarnation; a checkpoint is only valid against it. */
+  generation?: string;
+  /** Oldest byte still replayable, and the total written so far. */
+  baseOffset?: number;
+  nextOffset?: number;
 }

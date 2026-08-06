@@ -31,6 +31,11 @@ const CMD_ACQUIRE: u8 = 0x0C;
 const CMD_ACQUIRED: u8 = 0x0D;
 const CMD_DENIED: u8 = 0x0E;
 const CMD_EVICTED: u8 = 0x0F;
+// Offset-addressed replay. DUMP_REQ still returns the whole ring for servers
+// that predate this; DUMP_SINCE lets a server that already holds a checkpoint
+// ask only for what came after it.
+const CMD_DUMP_SINCE: u8 = 0x10;
+const CMD_REPLAY: u8 = 0x11;
 
 /// How long a freshly accepted connection may stay unclaimed before we assume
 /// it is a legacy server and promote it.
@@ -42,14 +47,18 @@ struct Ring {
     buf: Vec<u8>,
     start: usize,
     len: usize,
+    /// Total bytes ever pushed. The ring holds the last `len` of them, so the
+    /// first byte still available sits at `written - len`.
+    written: u64,
 }
 
 impl Ring {
     fn new(capacity: usize) -> Self {
-        Ring { buf: vec![0u8; capacity], start: 0, len: 0 }
+        Ring { buf: vec![0u8; capacity], start: 0, len: 0, written: 0 }
     }
 
     fn push(&mut self, data: &[u8]) {
+        self.written += data.len() as u64;
         let cap = self.buf.len();
         if data.len() >= cap {
             let off = data.len() - cap;
@@ -71,6 +80,22 @@ impl Ring {
             self.start = (self.start + self.len - cap) % cap;
             self.len = cap;
         }
+    }
+
+    /// Absolute offset of the oldest byte still in the ring.
+    fn base_offset(&self) -> u64 { self.written - self.len as u64 }
+
+    /// Bytes from `offset` onward. Returns `(data, gap)` — gap is true when the
+    /// requested point has already been overwritten, in which case the caller
+    /// gets everything still held and must treat the result as incomplete
+    /// rather than as a continuation.
+    fn since(&self, offset: u64) -> (Vec<u8>, bool) {
+        let base = self.base_offset();
+        if offset <= base { return (self.dump(), offset < base); }
+        if offset >= self.written { return (Vec::new(), false); }
+        let skip = (offset - base) as usize;
+        let all = self.dump();
+        (all[skip..].to_vec(), false)
     }
 
     fn dump(&self) -> Vec<u8> {
@@ -313,14 +338,17 @@ fn main() {
 
     // ── Manifest ──
     let created_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+    // Identifies this holder incarnation. A checkpoint taken against a
+    // different generation belongs to a different PTY and must not be replayed.
+    let generation = format!("{}-{}", process::id(), created_at);
     let manifest = format!(
         concat!(
             r#"{{"id":{},"pid":{},"childPid":{},"cmd":"#,
-            r#"{},"cols":{},"rows":{},"socket":"{}","createdAt":{}}}"#
+            r#"{},"cols":{},"rows":{},"socket":"{}","createdAt":{},"generation":"{}"}}"#
         ),
         config.id, process::id(), child_pid.as_raw(),
         format_cmd_json(&config.cmd), config.cols, config.rows,
-        socket_path.display(), created_at,
+        socket_path.display(), created_at, generation,
     );
     fs::write(&manifest_path, &manifest).expect("write manifest");
     log(config.id, &format!("started pid={} child={} sock={}", process::id(), child_pid, socket_path.display()));
@@ -471,11 +499,13 @@ fn main() {
                     concat!(
                         r#"{{"id":{},"pid":{},"childPid":{},"cmd":"#,
                         r#"{},"cols":{},"rows":{},"createdAt":{},"nextSeq":{},"alive":{},"#,
-                        r#""lease":true,"held":{}}}"#
+                        r#""lease":true,"held":{},"generation":"{}","#,
+                        r#""baseOffset":{},"nextOffset":{}}}"#
                     ),
                     config.id, process::id(), child_pid.as_raw(),
                     format_cmd_json(&config.cmd), cols, rows,
                     created_at, seq, pty_alive, client.is_some(),
+                    generation, ring.base_offset(), ring.written,
                 );
                 let mut new_stream = stream;
                 let _ = write_frame(&mut new_stream, CMD_STATE, state.as_bytes());
@@ -626,6 +656,29 @@ fn main() {
                     if let Some(ref mut c) = client {
                         let _ = write_frame(c, CMD_DUMP_RESP, &data);
                     }
+                }
+                CMD_DUMP_SINCE => {
+                    // payload: u64 LE offset the server has already applied.
+                    // reply:   [u64 base][u64 end][u8 gap][bytes]
+                    //
+                    // gap=1 means the requested point fell out of the ring, so
+                    // what follows is not a continuation of the server's state
+                    // and it has to say so rather than paint a broken screen.
+                    let want = if payload.len() >= 8 {
+                        u64::from_le_bytes(payload[..8].try_into().unwrap())
+                    } else { 0 };
+                    let (data, gap) = ring.since(want);
+                    let mut resp = Vec::with_capacity(17 + data.len());
+                    resp.extend_from_slice(&ring.base_offset().to_le_bytes());
+                    resp.extend_from_slice(&ring.written.to_le_bytes());
+                    resp.push(if gap { 1 } else { 0 });
+                    resp.extend_from_slice(&data);
+                    if let Some(ref mut c) = client {
+                        let _ = write_frame(c, CMD_REPLAY, &resp);
+                    }
+                    log(config.id, &format!(
+                        "replay since={} base={} end={} gap={} bytes={}",
+                        want, ring.base_offset(), ring.written, gap, data.len()));
                 }
                 CMD_KILL => {
                     if pty_alive {
