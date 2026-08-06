@@ -1311,55 +1311,44 @@ async function cmdWorkspace() {
     const payload = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
     const timeoutMs = parseInt(readOption(args, '--timeout') || '120000', 10);
 
-    // 1. Bump seq
-    const prevMeta = await fetchJson(port, `/api/sessions/${member.sessionId}/meta`);
-    const nextSeq = String((parseInt(prevMeta?.seq || '0', 10) || 0) + 1);
-    await fetchPatch(port, `/api/sessions/${member.sessionId}/meta`, { seq: nextSeq });
+    // The server owns the request/response pairing now: it marks the buffer,
+    // submits the prompt, and holds the reply until the agent's hook settles
+    // it. Nothing polls, so a fast answer comes back as fast as it lands.
+    const text = payload.replace(/[\r\n]+$/, '');
+    const response = await fetchRequest(port, 'POST', `/api/sessions/${member.sessionId}/interactions`, {
+      prompt: text,
+      timeoutMs,
+      submit: 'cr',
+    });
+    const interaction = response?.body?.interaction ?? null;
+    const completed = interaction?.status === 'completed';
 
-    // 2. Send prompt then submit (split text and CR for TUI compatibility)
-    if (payload) {
-      const text = payload.replace(/[\r\n]+$/, '');
-      await fetchPost(port, `/api/sessions/${member.sessionId}/send`, { data: text });
-      await new Promise((r) => setTimeout(r, 50));
-      await fetchPost(port, `/api/sessions/${member.sessionId}/send`, { data: '\r' });
+    // `--raw` predates transcripts and meant "the screen with its escapes".
+    // Keep that meaning, and fall back to it when the marked rows are gone.
+    let output = interaction?.transcript ?? null;
+    if (hasFlag('--raw') || output === null) {
+      const screen = await fetchJson(port, `/api/sessions/${member.sessionId}/screen`).catch(() => null);
+      output = screen?.screen ?? '';
     }
 
-    // 3. Poll meta.stopSeq until it matches nextSeq
-    const deadline = Date.now() + timeoutMs;
-    let completed = false;
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const meta = await fetchJson(port, `/api/sessions/${member.sessionId}/meta`).catch(() => null);
-      if (meta && String(meta.stopSeq) === nextSeq) {
-        completed = true;
-        break;
-      }
-    }
-
-    // 4. Read screen
-    const screen = await fetchJson(port, `/api/sessions/${member.sessionId}/screen`).catch(() => null);
-    const rawScreen = screen?.screen ?? '';
-    const stripAnsi = (s) => s
-      .replace(/\u001b\[\d+C/g, ' ')              // cursor forward → space
-      .replace(/\u001b\[\d+D/g, '')               // cursor back → remove
-      .replace(/\u001b\[[0-9;?]*[a-zA-Z]/g, '')   // other CSI sequences
-      .replace(/\u001b\][^\u0007]*\u0007/g, '')    // OSC sequences
-      .replace(/\u001b[()][0-9A-B]/g, '')          // charset switches
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n');
-    const cleanScreen = stripAnsi(rawScreen);
-    const useRaw = hasFlag('--raw');
     const result = {
       workspace: `${workspace.project}/${workspace.name}`,
       member: member.name,
       sessionId: member.sessionId,
-      seq: nextSeq,
+      interaction: interaction ? { id: interaction.id, status: interaction.status } : null,
       completed,
-      screen: useRaw ? rawScreen : cleanScreen,
+      screen: output,
     };
     if (asJson) return printOutput(result, true);
-    if (!completed) console.error(`timeout: response not completed within ${timeoutMs}ms`);
-    process.stdout.write(result.screen);
+    if (interaction?.status === 'pending') {
+      console.error(`timeout: still running after ${timeoutMs}ms — resume with id ${interaction.id}`);
+    } else if (interaction?.status === 'failed') {
+      console.error('agent ended the turn without answering');
+    } else if (interaction && interaction.transcript === null) {
+      console.error('transcript unavailable: the marked rows scrolled out of the buffer');
+    }
+    process.stdout.write(output);
+    if (output && !output.endsWith('\n')) process.stdout.write('\n');
     return;
   }
 
