@@ -35,9 +35,18 @@ npx esbuild packages/server/src/index.ts \
   2>&1 | tail -1
 echo "      $(du -h "$DIST/ttym-server.js" | cut -f1) ttym-server.js"
 
-# 3. CLI + package.json
-echo "[3/3] Copying CLI..."
-cp "$ROOT/bin/ttym" "$DIST/ttym"
+# 3. CLI bundle + package.json
+# Bundled rather than copied: the source imports workspace TS packages, and
+# inlining ws means dist no longer needs the repo node_modules at runtime.
+echo "[3/3] Bundling CLI (esbuild)..."
+npx esbuild packages/cli/src/main.js \
+  --bundle \
+  --platform=node \
+  --format=esm \
+  --target=node20 \
+  --outfile="$DIST/ttym" \
+  --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url);' \
+  2>&1 | tail -1
 chmod +x "$DIST/ttym"
 echo '{"type":"module"}' > "$DIST/package.json"
 

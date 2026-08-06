@@ -8,6 +8,7 @@ import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
 import { CMD, encode, encodeData, decode, toBuffer, jsonPayload, parseJson } from './protocol.js';
+import { API_VERSION } from '@ttym/protocol';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
@@ -182,6 +183,12 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     req.on('data', (c) => body += c);
     req.on('end', () => resolve(body));
   });
+
+  // GET /api/version — lets a client refuse an incompatible server
+  if (path === '/api/version' && req.method === 'GET') {
+    json(200, { apiVersion: API_VERSION, role: 'ttym-server' });
+    return true;
+  }
 
   // GET /api/sessions
   if (path === '/api/sessions' && req.method === 'GET') {

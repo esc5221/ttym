@@ -14,6 +14,14 @@
  *   DATA frames insert a u32 LE sequence number before the payload.
  */
 
+/**
+ * Version of the HTTP + WS surface as a whole. Bumped on breaking changes so a
+ * CLI and a server from different builds refuse to half-work together —
+ * during the last swap a v2 CLI ran against a v3 server for hours with no way
+ * to tell.
+ */
+export const API_VERSION = 1;
+
 export const CMD = {
   DATA: 0x00,
   RESIZE: 0x01,

@@ -9,7 +9,7 @@
  * thunk. `createApi` binds it once if you would rather not repeat it.
  */
 export * from './types.js';
-export { ApiError, resolveBase, type BaseUrl } from './transport.js';
+export { ApiError, request, resolveBase, type BaseUrl, type RequestOptions } from './transport.js';
 export * from './sessions.js';
 export * from './workspaces.js';
 export * from './interactions.js';

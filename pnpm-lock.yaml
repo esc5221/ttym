@@ -28,6 +28,18 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  packages/cli:
+    dependencies:
+      '@ttym/api':
+        specifier: workspace:*
+        version: link:../api
+      '@ttym/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      ws:
+        specifier: ^8.18.0
+        version: 8.19.0
+
   packages/desktop:
     dependencies:
       '@tauri-apps/api':
