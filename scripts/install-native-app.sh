@@ -3,11 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="ttym-native.app"
-BUILD_APP="$ROOT/native/src-tauri/target/release/bundle/macos/$APP_NAME"
+BUILD_APP="$ROOT/packages/desktop/src-tauri/target/release/bundle/macos/$APP_NAME"
 
 if [ ! -d "$BUILD_APP" ]; then
   echo "release app bundle not found: $BUILD_APP"
-  echo "run: pnpm run native:release"
+  echo "run: pnpm run desktop:release"
   exit 1
 fi
 

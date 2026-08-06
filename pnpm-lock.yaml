@@ -22,88 +22,26 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@25.4.0)
 
-  client:
+  packages/api:
     dependencies:
-      '@ttym/api':
-        specifier: workspace:*
-        version: link:../packages/api
-      '@ttym/protocol':
-        specifier: workspace:*
-        version: link:../packages/protocol
       '@ttym/shared':
         specifier: workspace:*
-        version: link:../packages/shared
-      '@xterm/addon-fit':
-        specifier: ^0.10.0
-        version: 0.10.0(@xterm/xterm@5.5.0)
-      '@xterm/addon-webgl':
-        specifier: ^0.18.0
-        version: 0.18.0(@xterm/xterm@5.5.0)
-      '@xterm/xterm':
-        specifier: ^5.5.0
-        version: 5.5.0
-      react:
-        specifier: '>=18'
-        version: 18.3.1
-    devDependencies:
-      '@types/react':
-        specifier: ^18.0.0
-        version: 18.3.28
-      typescript:
-        specifier: ^5.5.0
-        version: 5.9.3
+        version: link:../shared
 
-  demo:
-    dependencies:
-      '@ttym/api':
-        specifier: workspace:*
-        version: link:../packages/api
-      '@ttym/client':
-        specifier: workspace:*
-        version: link:../client
-      '@ttym/shared':
-        specifier: workspace:*
-        version: link:../packages/shared
-      '@xterm/xterm':
-        specifier: ^5.5.0
-        version: 5.5.0
-      react:
-        specifier: ^18.3.0
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.3.0
-        version: 18.3.1(react@18.3.1)
-    devDependencies:
-      '@types/react':
-        specifier: ^18.0.0
-        version: 18.3.28
-      '@types/react-dom':
-        specifier: ^18.0.0
-        version: 18.3.7(@types/react@18.3.28)
-      '@vitejs/plugin-react':
-        specifier: ^4.0.0
-        version: 4.7.0(vite@5.4.21(@types/node@25.4.0))
-      typescript:
-        specifier: ^5.5.0
-        version: 5.9.3
-      vite:
-        specifier: ^5.0.0
-        version: 5.4.21(@types/node@25.4.0)
-
-  native:
+  packages/desktop:
     dependencies:
       '@tauri-apps/api':
         specifier: ^2.2.0
         version: 2.10.1
       '@ttym/api':
         specifier: workspace:*
-        version: link:../packages/api
-      '@ttym/client':
-        specifier: workspace:*
-        version: link:../client
+        version: link:../api
       '@ttym/shared':
         specifier: workspace:*
-        version: link:../packages/shared
+        version: link:../shared
+      '@ttym/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@xterm/xterm':
         specifier: ^5.5.0
         version: 5.5.0
@@ -133,24 +71,16 @@ importers:
         specifier: ^5.0.0
         version: 5.4.21(@types/node@25.4.0)
 
-  packages/api:
-    dependencies:
-      '@ttym/shared':
-        specifier: workspace:*
-        version: link:../shared
-
   packages/protocol: {}
 
-  packages/shared: {}
-
-  server:
+  packages/server:
     dependencies:
       '@ttym/protocol':
         specifier: workspace:*
-        version: link:../packages/protocol
+        version: link:../protocol
       '@ttym/shared':
         specifier: workspace:*
-        version: link:../packages/shared
+        version: link:../shared
       '@xterm/addon-serialize':
         specifier: ^0.14.0
         version: 0.14.0
@@ -176,6 +106,76 @@ importers:
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
+
+  packages/shared: {}
+
+  packages/ui:
+    dependencies:
+      '@ttym/api':
+        specifier: workspace:*
+        version: link:../api
+      '@ttym/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@ttym/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@xterm/addon-fit':
+        specifier: ^0.10.0
+        version: 0.10.0(@xterm/xterm@5.5.0)
+      '@xterm/addon-webgl':
+        specifier: ^0.18.0
+        version: 0.18.0(@xterm/xterm@5.5.0)
+      '@xterm/xterm':
+        specifier: ^5.5.0
+        version: 5.5.0
+      react:
+        specifier: '>=18'
+        version: 18.3.1
+    devDependencies:
+      '@types/react':
+        specifier: ^18.0.0
+        version: 18.3.28
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  packages/web:
+    dependencies:
+      '@ttym/api':
+        specifier: workspace:*
+        version: link:../api
+      '@ttym/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@ttym/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@xterm/xterm':
+        specifier: ^5.5.0
+        version: 5.5.0
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.0
+        version: 18.3.1(react@18.3.1)
+    devDependencies:
+      '@types/react':
+        specifier: ^18.0.0
+        version: 18.3.28
+      '@types/react-dom':
+        specifier: ^18.0.0
+        version: 18.3.7(@types/react@18.3.28)
+      '@vitejs/plugin-react':
+        specifier: ^4.0.0
+        version: 4.7.0(vite@5.4.21(@types/node@25.4.0))
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vite:
+        specifier: ^5.0.0
+        version: 5.4.21(@types/node@25.4.0)
 
 packages:
 

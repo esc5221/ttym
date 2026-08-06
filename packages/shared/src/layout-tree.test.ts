@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { LayoutNode } from './workspace-domain';
+import type { LayoutNode } from './workspace-domain.js';
 import {
   insertPane,
   splitPane,
@@ -7,7 +7,7 @@ import {
   resizeSplit,
   layoutSessionIds,
   layoutFromSessionIds,
-} from './layout-tree';
+} from './layout-tree.js';
 
 /** row 0.7/0.3 with a nested col 0.5/0.5 on the right — the RFD's example. */
 function nested(): LayoutNode {

@@ -7,7 +7,7 @@ import {
   sessionIdsToLayout,
   shouldBootstrapWorkspacePanels,
   type BasePanelState,
-} from './workspace-domain';
+} from './workspace-domain.js';
 
 interface TestPanel extends BasePanelState {
   tag?: string;

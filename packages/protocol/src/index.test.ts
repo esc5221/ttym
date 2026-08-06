@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CMD, encode, encodeData, decode, jsonPayload, parseJson,
   HEADER_BYTES, DATA_HEADER_BYTES,
-} from './index';
+} from './index.js';
 
 const bytes = (...n: number[]) => new Uint8Array(n);
 

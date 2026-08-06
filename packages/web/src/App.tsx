@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { TerminalMux, Terminal } from '@ttym/client';
+import { TerminalMux, Terminal } from '@ttym/ui';
 import * as api from '@ttym/api';
-import type { SessionInfo } from '@ttym/client';
+import type { SessionInfo } from '@ttym/ui';
 import '@xterm/xterm/css/xterm.css';
 import {
   MutationBarrier,

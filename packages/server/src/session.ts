@@ -144,8 +144,8 @@ function holderBin(): string {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const samedir = resolve(__dirname, 'ttym-holder');
   if (existsSync(samedir)) return samedir;
-  // 2. Dev: relative to server/src/
-  return resolve(__dirname, '../../holder/target/release/ttym-holder');
+  // 2. Dev: relative to packages/server/src/
+  return resolve(__dirname, '../../../holder/target/release/ttym-holder');
 }
 
 // ───── Session ─────

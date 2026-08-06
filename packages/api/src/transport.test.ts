@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { request, resolveBase, ApiError } from './transport';
-import { createApi } from './index';
+import { request, resolveBase, ApiError } from './transport.js';
+import { createApi } from './index.js';
 
 function stubFetch(handler: (url: URL, init: RequestInit) => Response | Promise<Response>) {
   const calls: Array<{ url: URL; init: RequestInit }> = [];

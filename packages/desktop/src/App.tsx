@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Terminal, TerminalMux, type SessionInfo } from '@ttym/client';
+import { Terminal, TerminalMux, type SessionInfo } from '@ttym/ui';
 import {
   MutationBarrier,
   formatCwd,

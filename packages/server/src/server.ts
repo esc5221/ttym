@@ -21,10 +21,10 @@ const DEBUG = true;
 const log = (...args: unknown[]) => DEBUG && console.log(`[srv ${new Date().toISOString().slice(11, 23)}]`, ...args);
 
 const SERVER_DIR = fileURLToPath(new URL('.', import.meta.url));
-// Works both from source (server/src/) and bundle (dist/)
+// Works both from source (packages/server/src/) and bundle (dist/)
 const DEMO_DIST_DIR = (() => {
-  const fromSource = resolve(SERVER_DIR, '../../demo/dist');
-  const fromBundle = resolve(SERVER_DIR, '../demo/dist');
+  const fromSource = resolve(SERVER_DIR, '../../web/dist');
+  const fromBundle = resolve(SERVER_DIR, '../packages/web/dist');
   try { require('fs').statSync(fromSource); return fromSource; } catch {}
   return fromBundle;
 })();
@@ -96,7 +96,7 @@ function handleDemoApp(req: IncomingMessage, res: ServerResponse): boolean {
     const served = await serveStaticFile(res, resolve(DEMO_DIST_DIR, 'index.html'));
     if (!served) {
       res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('demo build not found: run `pnpm --dir demo build`');
+      res.end('demo build not found: run `pnpm --dir packages/web build`');
     }
   })().catch((error) => {
     console.error('Static serve error:', error);

@@ -24,7 +24,7 @@ echo "      $(du -h "$DIST/ttym-holder" | cut -f1) ttym-holder"
 # 2. Server bundle
 echo "[2/3] Bundling server (esbuild)..."
 cd "$ROOT"
-npx esbuild server/src/index.ts \
+npx esbuild packages/server/src/index.ts \
   --bundle \
   --platform=node \
   --format=esm \
