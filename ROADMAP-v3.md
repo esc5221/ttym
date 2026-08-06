@@ -7,7 +7,7 @@ Phase 0/0.5는 RFD에 없다 — 프로덕션을 켜둔 채 개발하기 위한 
 제약: **프로덕션 서버(port 7690, pid 2713)는 Phase 5까지 절대 정지하지 않는다.**
 개발·검증은 전부 dev 서버(port 7691, `~/.ttym-dev`, worktree `~/study/ttym-v3`)에서 한다.
 
-진행: **20/49 (40%)**
+진행: **24/49 (48%)**
 
 ---
 
@@ -111,13 +111,37 @@ A·B 이후. **시작부터 완료까지 클라이언트 3개가 전부 동작�
 - [ ] `workspaces.json` v2→v3 변환을 실데이터로 검증
       ⚠ Phase 2-A 의존 — 변환기가 아직 없어 지금은 검증 불가
 
-## Phase 5 — 프로덕션 교체 · 0/5
+## Phase 5 — 프로덕션 교체 · 4/5 (2026-08-06 완료)
 
-- [ ] `workspaces.json` 백업 (RFD 6.2 — 일방향 변환, 롤백 경로 없음)
-- [ ] holder pid 16개 기록 (교체 후 대조용)
-- [ ] `kill -TERM 2713` → v3 서버 start
-- [ ] 대조: holder 16 / 세션 16 / claude 인스턴스 생존
-- [ ] 실패 시 롤백 절차 실행
+- [x] `workspaces.json` 백업 — `~/.ttym/pre-v3-swap/`
+- [x] holder pid·세션·claude 목록 기록 (교체 후 대조용)
+- [x] dist 교체 후 서버 재시작 → **세션 15/16 복구, claude 39/39 생존**
+- [x] 대조 및 실동작 검증 — 프로덕션 `await`이 transcript만 반환(4초)
+- [ ] 세션 973 처리 — holder는 살아있으나 접근 불가 (아래)
+
+### 교체에서 배운 것
+
+**launchd가 서버를 감시하고 있었다.** `~/Library/LaunchAgents/com.lullu.ttym-server.plist`,
+`KeepAlive: true`. `ttym stop`으로 죽이자 launchd가 즉시 새 서버를 띄웠고,
+거기에 `ttym start`로 하나를 더 띄워 **두 서버가 경쟁**했다.
+holder는 클라이언트를 하나만 받으므로 나중에 붙은 쪽이 세션을 가져갔고,
+포트를 잡은 쪽은 세션을 잃었다.
+
+- 올바른 절차: `launchctl kickstart -k gui/$UID/com.lullu.ttym-server`
+- `ttym stop` / `ttym start`는 launchd가 관리하지 않을 때만 쓴다
+
+**세션 973을 잃었다.** 경쟁 중 두 서버가 각각 973을 snapshot에서 복원하려
+새 holder를 spawn했고, `main.rs:221`의 "clean stale" 이 원본 holder의 소켓을
+지웠다. 원본(pid 65568)은 v2 바이너리라 rebind 로직이 없어 스스로 살아나지 못한다.
+안의 claude는 지금도 돌고 있지만 도달할 경로가 없다.
+`claudeLastSessionId=38e47f4c-…`, cwd=`/Users/lullu` — `claude --resume`으로 대화 복구 가능.
+
+- v3 holder였다면 `570cfcc`의 rebind가 5초 안에 복구했을 상황이다
+- 교체 후 새로 만들어지는 holder부터는 이 시나리오에 면역
+
+**CLI 경로를 dev에서 검증하지 않았다.** 엔드포인트는 curl로 확인했지만
+CLI가 `fetchRequest`의 반환 구조를 잘못 읽었고(`response.body.interaction`),
+소켓 타임아웃이 5초 기본값이라 blocking 요청을 끊었다. 배포 후에야 드러났다.
 
 ## Backlog — 미해결로 남은 것 · 0/8
 
