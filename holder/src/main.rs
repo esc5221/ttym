@@ -276,7 +276,7 @@ fn main() {
     set_nonblocking(master_fd);
 
     // ── Unix listener ──
-    let listener = UnixListener::bind(&socket_path).expect("bind");
+    let mut listener = UnixListener::bind(&socket_path).expect("bind");
     listener.set_nonblocking(true).unwrap();
     #[cfg(unix)] {
         use std::os::unix::fs::PermissionsExt;
@@ -309,6 +309,7 @@ fn main() {
     let mut linger_deadline: Option<Instant> = None;
     let mut read_buf = vec![0u8; 65536];
     let mut pending_input = Vec::new();
+    let mut last_socket_check = Instant::now();
 
     // Keep master OwnedFd alive
     let _master_keep: OwnedFd = master;
@@ -318,6 +319,36 @@ fn main() {
         // Linger check
         if let Some(deadline) = linger_deadline {
             if Instant::now() >= deadline { break; }
+        }
+
+        // Socket presence check.
+        //
+        // Another holder starting with the same id unlinks this path (see the
+        // "clean stale" remove_file above), and so does anything else that
+        // sweeps the runtime dir. The listener fd stays valid but nothing can
+        // reach it by path, so the server's recover() gets ENOENT, deletes the
+        // manifest, and this holder becomes unreachable forever while its PTY
+        // and child keep running. Rebind instead of stranding the session.
+        if pty_alive && last_socket_check.elapsed() >= Duration::from_secs(5) {
+            last_socket_check = Instant::now();
+            if !socket_path.exists() {
+                match UnixListener::bind(&socket_path) {
+                    Ok(fresh) => {
+                        let _ = fresh.set_nonblocking(true);
+                        #[cfg(unix)] {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ = fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600));
+                        }
+                        // Keep the current client: an established connection
+                        // survives its path being unlinked, so dropping it here
+                        // would break a server that is still attached.
+                        listener = fresh;
+                        let _ = fs::write(&manifest_path, &manifest);
+                        log(config.id, "socket vanished, rebound and rewrote manifest");
+                    }
+                    Err(e) => log(config.id, &format!("socket vanished, rebind failed: {}", e)),
+                }
+            }
         }
 
         // Build pollfds
