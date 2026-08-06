@@ -91,8 +91,9 @@ suite('cli end to end', () => {
       const screen = await api(`/api/sessions/${sessions[0].id}/screen`);
       return typeof screen?.screen === 'string' && screen.screen.includes('E2E_ROUNDTRIP');
     });
-    const shown = ttym(['workspace', 'screen', 'e2e/suite', 'sh']);
-    expect(shown).toContain('E2E_ROUNDTRIP');
+    // Poll the CLI path too: under load the render can land between the API
+    // confirmation above and a single-shot read here.
+    await until(() => ttym(['workspace', 'screen', 'e2e/suite', 'sh']).includes('E2E_ROUNDTRIP'));
   }, 20_000);
 
   it('structured output stays parseable', () => {

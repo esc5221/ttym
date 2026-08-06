@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
+import { sweepRuntimeDir } from './run-gc.js';
 import { CMD, encode, encodeData, decode, toBuffer, jsonPayload, parseJson } from './protocol.js';
 import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
@@ -724,6 +725,27 @@ export async function createServer(port: number): Promise<TtymServer> {
 
   await manager.boot(restoreAllowlist);
 
+  // Sweep the accumulation of dead sessions' files. Live sessions and every
+  // workspace member are always kept; the rest gets a two-week grace before
+  // it goes. TTYM_GC_DAYS=0 turns this off.
+  const gcDays = Number.parseInt(process.env.TTYM_GC_DAYS ?? '14', 10);
+  let gcTimer: NodeJS.Timeout | null = null;
+  if (gcDays > 0) {
+    const sweep = () => {
+      const keep = new Set<number>(restoreAllowlist);
+      for (const info of manager.list()) keep.add(info.id);
+      for (const ws of workspaceStore.list()) for (const m of ws.members) keep.add(m.sessionId);
+      sweepRuntimeDir(manager.runtimeDir, keep, gcDays * 24 * 60 * 60 * 1000)
+        .then(({ removed }) => {
+          if (removed.length > 0) console.log(`[gc] swept ${removed.length} orphaned files`);
+        })
+        .catch(() => {});
+    };
+    sweep();
+    gcTimer = setInterval(sweep, 24 * 60 * 60 * 1000);
+    gcTimer.unref();
+  }
+
   // Agent Bus is optional and currently disabled in the bundled server path.
   const agentBus = null as { close?: () => void } | null;
   const fileBridge = null as { stop?: () => void } | null;
@@ -1090,6 +1112,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     wss,
     httpServer,
     close: async () => {
+      if (gcTimer) clearInterval(gcTimer);
       fileBridge?.stop?.();
       agentBus?.close?.();
       // Save the workspace layouts first. They are a few KB, while
