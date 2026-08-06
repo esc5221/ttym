@@ -1,0 +1,224 @@
+<meta charset="utf-8">
+<title>ttym — 한 장 개요</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#ececed;height:100%}
+body{
+  font:400 15px/1.6 -apple-system,'SF Pro Text','Pretendard','Apple SD Gothic Neo',system-ui,sans-serif;
+  display:flex;align-items:center;justify-content:center;padding:24px;
+  -webkit-font-smoothing:antialiased;
+}
+
+.slide{
+  width:100%;max-width:1420px;aspect-ratio:16/9;
+  background:#fff;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.14);
+  padding:38px 46px 30px;display:flex;flex-direction:column;
+  container-type:inline-size;
+}
+
+/* everything scales with slide width so 16:9 always holds */
+.slide{font-size:clamp(9px,1.02cqi,15px)}
+.slide *{font-size:inherit}
+
+h1{font-size:2.5em;font-weight:800;letter-spacing:-.03em;line-height:1.1;color:#111}
+.tag{font-size:1.25em;color:#5b5b60;margin-top:.5em;font-weight:500;line-height:1.45}
+.tag b{color:#111;font-weight:700}
+
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:2em;padding-bottom:1.2em;border-bottom:2.5px solid #111}
+.proof{text-align:right;font-size:.95em;color:#6b6b70;line-height:1.7;white-space:nowrap;padding-top:.4em}
+.proof b{color:#111;font-weight:700}
+
+.body{flex:1;display:flex;gap:1.6em;padding-top:1.5em;min-height:0}
+
+/* ── left: stack ── */
+.stack{flex:1.32;display:flex;flex-direction:column;gap:.62em;min-width:0}
+.layer{border:2px solid;border-radius:7px;padding:.75em .95em;display:flex;gap:.9em;align-items:stretch}
+.layer .lbl{
+  writing-mode:vertical-rl;transform:rotate(180deg);
+  font-size:.88em;font-weight:800;letter-spacing:.12em;
+  display:flex;align-items:center;justify-content:center;padding:0 .1em;flex-shrink:0;
+}
+.layer .cells{display:flex;gap:.6em;flex:1;min-width:0}
+.cell{flex:1;min-width:0}
+.cell .nm{font-size:1.08em;font-weight:800;letter-spacing:-.01em;color:#111;display:flex;align-items:center;gap:.4em}
+.cell .ds{font-size:.9em;color:#4a4a4f;line-height:1.5;margin-top:.18em}
+.cell .mt{font-size:.78em;color:#8e8e93;margin-top:.22em;font-family:'SF Mono',Menlo,monospace}
+
+.l-consumer{border-color:#c9d8ea;background:#f6f9fd}
+.l-consumer .lbl{color:#5b7fa8}
+.l-contract{border-color:#d9cdea;background:#faf7fd}
+.l-contract .lbl{color:#7b62a8}
+.l-core{border-color:#e3d3bd;background:#fdfaf5}
+.l-core .lbl{color:#9a7745}
+.l-base{border-color:#c4dcc9;background:#f5fbf6}
+.l-base .lbl{color:#4d8259}
+
+.new{
+  font-size:.68em;font-weight:800;letter-spacing:.04em;
+  background:#111;color:#fff;padding:.18em .45em;border-radius:3px;vertical-align:.12em;
+}
+.flow{text-align:center;font-size:.8em;color:#a0a0a5;letter-spacing:.3em;line-height:1;margin:-.15em 0}
+
+/* ── right: what it adds up to ── */
+.side{flex:1;display:flex;flex-direction:column;gap:.9em;min-width:0}
+.card{border:2px solid #e6e6e8;border-radius:7px;padding:.85em 1em}
+.card h3{font-size:1.02em;font-weight:800;color:#111;margin-bottom:.45em;letter-spacing:-.01em}
+.card p{font-size:.9em;color:#4a4a4f;line-height:1.6}
+.card p+p{margin-top:.45em}
+.card.dark{background:#111;border-color:#111}
+.card.dark h3{color:#fff}
+.card.dark p{color:#c8c8cc}
+.card.dark b{color:#fff}
+
+ul.pt{list-style:none;margin:0}
+ul.pt li{font-size:.9em;color:#4a4a4f;line-height:1.55;padding-left:1.05em;position:relative;margin:.35em 0}
+ul.pt li:before{content:"—";position:absolute;left:0;color:#b0b0b5}
+ul.pt li b{color:#111;font-weight:700}
+
+.plan{flex:1;border:2px solid #e6e6e8;border-radius:7px;padding:.85em 1em;display:flex;flex-direction:column;min-height:0}
+.plan h3{font-size:1.02em;font-weight:800;color:#111;margin-bottom:.5em}
+.step{display:flex;gap:.6em;align-items:baseline;margin:.32em 0;font-size:.88em;line-height:1.5}
+.step .n{
+  flex-shrink:0;width:1.5em;height:1.5em;border-radius:3px;background:#111;color:#fff;
+  font-size:.8em;font-weight:800;display:flex;align-items:center;justify-content:center;
+}
+.step .n.q{background:#dcdce0;color:#6b6b70}
+.step .t{color:#3a3a3f}
+.step .t b{color:#111;font-weight:700}
+
+.foot{padding-top:1em;margin-top:1em;border-top:1px solid #e6e6e8;display:flex;justify-content:space-between;align-items:center;font-size:.82em;color:#8e8e93}
+.foot code{font-family:'SF Mono',Menlo,monospace;background:#f2f2f4;padding:.15em .4em;border-radius:3px;color:#4a4a4f}
+</style>
+
+<div class="slide">
+
+  <div class="head">
+    <div>
+      <h1>ttym</h1>
+      <div class="tag"><b>서버보다 오래 사는 PTY</b> 위에 세운 터미널 멀티플렉서.<br>
+      서버를 죽였다 살려도 그 안에서 돌던 에이전트·빌드·ssh가 그대로 살아 있다.</div>
+    </div>
+    <div class="proof">
+      2026-08-06 프로덕션 서버 무중단 교체<br>
+      <b>세션 15개 · claude 프로세스 38개 생존</b><br>
+      <span style="color:#a0a0a5">조사한 8개 프로젝트 중 이 성질을 가진 건 ttym뿐</span>
+    </div>
+  </div>
+
+  <div class="body">
+
+    <!-- ─────────── 계층 ─────────── -->
+    <div class="stack">
+
+      <div class="layer l-consumer">
+        <div class="lbl">CONSUMER</div>
+        <div class="cells">
+          <div class="cell">
+            <div class="nm">@ttym/demo</div>
+            <div class="ds">브라우저 대시보드. 워크스페이스·분할·에이전트 상태</div>
+            <div class="mt">1,992 loc</div>
+          </div>
+          <div class="cell">
+            <div class="nm">@ttym/native</div>
+            <div class="ds">Tauri 데스크톱 앱. 같은 계약 위의 다른 껍데기</div>
+            <div class="mt">1,682 loc</div>
+          </div>
+          <div class="cell">
+            <div class="nm">제3자 <span class="new">가능</span></div>
+            <div class="ds">CLI만 호출하면 된다. tmux를 쓰는 claude-squad처럼</div>
+            <div class="mt">shell · launchd · CI</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow">▲ &nbsp; ▲ &nbsp; ▲</div>
+
+      <div class="layer l-contract">
+        <div class="lbl">CONTRACT</div>
+        <div class="cells">
+          <div class="cell">
+            <div class="nm">@ttym/cli <span class="new">승격</span></div>
+            <div class="ds">headless 조작 표면. 생성·열거·입력·resize·종료·await.
+              <b>여기가 호환 경계</b> — 이 아래는 계속 바꿔도 된다</div>
+            <div class="mt">bin/ttym 1,781 loc → 패키지로</div>
+          </div>
+          <div class="cell">
+            <div class="nm">@ttym/protocol <span class="new">신설</span></div>
+            <div class="ds">wire 타입과 인코딩. 지금은 server·client에 <b>2벌로 갈라져</b> 손유지 중</div>
+            <div class="mt">중복 83줄 해소</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow">▲ &nbsp; ▲</div>
+
+      <div class="layer l-core">
+        <div class="lbl">CORE</div>
+        <div class="cells">
+          <div class="cell">
+            <div class="nm">@ttym/server</div>
+            <div class="ds">터미널 상태의 <b>권위</b> — 셀 그리드·스크롤백·마커.
+              세션 수명, 워크스페이스 레이아웃, 에이전트 interaction, 다중 뷰어 팬아웃</div>
+            <div class="mt">5,667 loc · Node + headless xterm</div>
+          </div>
+          <div class="cell">
+            <div class="nm">@ttym/client</div>
+            <div class="ds">웹 터미널 컴포넌트와 mux. demo·native가 함께 쓴다</div>
+            <div class="mt">1,100 loc</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow">▲</div>
+
+      <div class="layer l-base">
+        <div class="lbl">BASE</div>
+        <div class="cells">
+          <div class="cell">
+            <div class="nm">ttym-holder <span style="font-weight:600;color:#8e8e93;font-size:.85em">(Rust)</span></div>
+            <div class="ds">PTY를 소유하는 별도 프로세스. 서버와 unix socket으로만 이어져 있어
+              <b>서버가 죽어도 죽지 않는다.</b> 세션당 하나, 41일씩 산다</div>
+            <div class="mt">580 loc · detached · 세션당 RSS 0.6–1.2 MB</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ─────────── 합쳐지면 / 계획 ─────────── -->
+    <div class="side">
+
+      <div class="card dark">
+        <h3>합쳐지면</h3>
+        <p>에이전트 열댓 개를 한 화면에서 굴리고, <b>코어를 업그레이드해도 대화가 끊기지 않는</b> 작업 환경.</p>
+        <p>웹에서 보다가 CLI로 질문을 던지고, 스크립트가 같은 세션에 붙어 자동화한다 — 셋이 같은 계약을 쓴다.</p>
+      </div>
+
+      <div class="card">
+        <h3>이 구조라서 되는 것</h3>
+        <ul class="pt">
+          <li><b>무중단 업그레이드</b> — PTY가 서버 밖에 있다</li>
+          <li><b>이번 응답만 받기</b> — 서버가 셀을 알아 구간을 자른다</li>
+          <li><b>여러 얼굴</b> — 웹·앱·CLI가 한 코어를 공유</li>
+          <li><b>자동화</b> — UI 없이 CLI로 전부 조작된다</li>
+        </ul>
+      </div>
+
+      <div class="plan">
+        <h3>지금의 계획</h3>
+        <div class="step"><div class="n">1</div><div class="t"><b>레이아웃 트리 보존</b> — 지금은 멤버를 추가할 때마다 중첩·비율이 평탄해진다. 프로덕션 7/7이 이미 손상</div></div>
+        <div class="step"><div class="n">2</div><div class="t"><b>controller lease</b> — 새 접속이 기존 서버를 조용히 밀어낸다. 교체 중 세션 하나를 이렇게 잃었다</div></div>
+        <div class="step"><div class="n">3</div><div class="t"><b>체크포인트로 복구</b> — 571KB 렌더 스냅샷을 이미 쓰고 있으면서 교체 때는 버리고 1MB raw만 쓴다</div></div>
+        <div class="step"><div class="n">4</div><div class="t"><b>패키지 경계 정리</b> — protocol 신설, CLI 승격. 위 셋이 끝난 뒤</div></div>
+        <div class="step"><div class="n q">·</div><div class="t" style="color:#8e8e93">플러그인 API·저장소 추상화·holder 셀 모델은 <b style="color:#6b6b70">하지 않는다.</b> 두 번째 구현체가 실재할 때까지</div></div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="foot">
+    <div>Rust holder + TypeScript 코어 · pnpm workspace · <code>~/.ttym</code> 런타임 · launchd 관리</div>
+    <div>계층이 낮을수록 재설계에 강하다 — 아래부터 고친다</div>
+  </div>
+
+</div>
