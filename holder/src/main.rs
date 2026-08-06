@@ -24,6 +24,17 @@ const CMD_EXIT: u8 = 0x08;
 const CMD_KILL: u8 = 0x09;
 const CMD_PING: u8 = 0x0A;
 const CMD_PONG: u8 = 0x0B;
+// Controller lease. A server that speaks these announces itself before it can
+// drive the PTY; one that does not is treated as a legacy client and promoted
+// on arrival, which is how the old unconditional-eviction behaviour is kept.
+const CMD_ACQUIRE: u8 = 0x0C;
+const CMD_ACQUIRED: u8 = 0x0D;
+const CMD_DENIED: u8 = 0x0E;
+const CMD_EVICTED: u8 = 0x0F;
+
+/// How long a freshly accepted connection may stay unclaimed before we assume
+/// it is a legacy server and promote it.
+const LEASE_CLAIM_TIMEOUT: Duration = Duration::from_millis(1500);
 
 // ───── Ring buffer ─────
 
@@ -93,6 +104,23 @@ impl FrameReader {
         }
         self.buf[self.len..self.len + data.len()].copy_from_slice(data);
         self.len += data.len();
+    }
+
+    /// Put a decoded frame back at the head of the buffer.
+    ///
+    /// Used when a connection turns out to be a legacy server: the frame that
+    /// revealed it must still be processed once the connection is promoted.
+    fn push_back(&mut self, cmd: u8, payload: &[u8]) {
+        let flen = (1 + payload.len()) as u32;
+        let mut framed = Vec::with_capacity(4 + flen as usize);
+        framed.extend_from_slice(&flen.to_le_bytes());
+        framed.push(cmd);
+        framed.extend_from_slice(payload);
+        let total = framed.len() + self.len;
+        if total > self.buf.len() { self.buf.resize(total.next_power_of_two(), 0); }
+        self.buf.copy_within(0..self.len, framed.len());
+        self.buf[..framed.len()].copy_from_slice(&framed);
+        self.len = total;
     }
 
     fn next_frame(&mut self) -> Option<(u8, Vec<u8>)> {
@@ -304,6 +332,11 @@ fn main() {
     let mut rows = config.rows;
     let mut client: Option<UnixStream> = None;
     let mut reader = FrameReader::new();
+    // Accepted but not yet the controller: it has been sent STATE and we are
+    // waiting to see whether it claims the lease.
+    let mut pending: Option<(UnixStream, Instant)> = None;
+    let mut pending_reader = FrameReader::new();
+    let mut lease_generation: u64 = 0;
     let mut pty_alive = true;
     let mut exit_code: Option<i32> = None;
     let mut linger_deadline: Option<Instant> = None;
@@ -351,9 +384,11 @@ fn main() {
             }
         }
 
-        // Build pollfds
+        // Build pollfds. Slots are fixed; an absent client or pending
+        // connection is passed as fd -1, which poll ignores.
         let listener_fd = listener.as_raw_fd();
         let client_fd = client.as_ref().map(|c| c.as_raw_fd()).unwrap_or(-1);
+        let pending_fd = pending.as_ref().map(|(c, _)| c.as_raw_fd()).unwrap_or(-1);
         let mut fds = [
             libc::pollfd {
                 fd: master_fd,
@@ -364,14 +399,16 @@ fn main() {
             },
             libc::pollfd { fd: listener_fd, events: libc::POLLIN, revents: 0 },
             libc::pollfd { fd: client_fd, events: if client_fd >= 0 { libc::POLLIN } else { 0 }, revents: 0 },
+            libc::pollfd { fd: pending_fd, events: if pending_fd >= 0 { libc::POLLIN } else { 0 }, revents: 0 },
         ];
-        let nfds: libc::nfds_t = if client_fd >= 0 { 3 } else { 2 };
+        let nfds: libc::nfds_t = 4;
 
         let timeout_ms = match linger_deadline {
             Some(deadline) => deadline.checked_duration_since(Instant::now())
                 .map(|d| d.as_millis().min(5000) as i32)
                 .unwrap_or(0),
-            None => 5000,
+            // A parked connection needs the loop to wake up for its claim deadline.
+            None => if pending.is_some() { 200 } else { 5000 },
         };
 
         let n = unsafe { libc::poll(fds.as_mut_ptr(), nfds, timeout_ms) };
@@ -427,14 +464,18 @@ fn main() {
                 let _ = stream.set_nonblocking(false);
 
                 // Send STATE to new client
+                // "lease" tells a server it may claim the controller role. A
+                // server that does not know the field simply ignores it and is
+                // promoted on the claim timeout, exactly as before.
                 let state = format!(
                     concat!(
                         r#"{{"id":{},"pid":{},"childPid":{},"cmd":"#,
-                        r#"{},"cols":{},"rows":{},"createdAt":{},"nextSeq":{},"alive":{}}}"#
+                        r#"{},"cols":{},"rows":{},"createdAt":{},"nextSeq":{},"alive":{},"#,
+                        r#""lease":true,"held":{}}}"#
                     ),
                     config.id, process::id(), child_pid.as_raw(),
                     format_cmd_json(&config.cmd), cols, rows,
-                    created_at, seq, pty_alive,
+                    created_at, seq, pty_alive, client.is_some(),
                 );
                 let mut new_stream = stream;
                 let _ = write_frame(&mut new_stream, CMD_STATE, state.as_bytes());
@@ -443,14 +484,98 @@ fn main() {
                     let _ = write_frame(&mut new_stream, CMD_EXIT, &code);
                 }
 
-                // Replace old client
-                client = Some(new_stream);
-                reader = FrameReader::new();
+                // Do not promote yet. A lease-aware server sends ACQUIRE next;
+                // anything else is legacy and gets promoted below.
+                pending = Some((new_stream, Instant::now()));
+                pending_reader = FrameReader::new();
+            }
+        }
+
+        // ── Pending connection: lease claim ──
+        //
+        // Until this resolves the connection cannot write to the PTY. A
+        // lease-aware server sends ACQUIRE; anything else (or silence past the
+        // deadline) is a legacy server and gets promoted unconditionally, which
+        // is the behaviour every existing server relies on.
+        if pending_fd >= 0 {
+            let mut resolve: Option<bool> = None; // Some(true) = promote, Some(false) = reject
+            let mut hangup = false;
+
+            if fds[3].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
+                if let Some((ref mut c, _)) = pending {
+                    let mut tmp = [0u8; 8192];
+                    match c.read(&mut tmp) {
+                        Ok(0) => hangup = true,
+                        Ok(n) => pending_reader.feed(&tmp[..n]),
+                        Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+                        Err(_) => hangup = true,
+                    }
+                }
+
+                while resolve.is_none() && !hangup {
+                    let Some((cmd, payload)) = pending_reader.next_frame() else { break };
+                    if cmd == CMD_ACQUIRE {
+                        let body = String::from_utf8_lossy(&payload);
+                        let takeover = body.contains("\"takeover\":true");
+                        if client.is_some() && !takeover {
+                            log(config.id, "lease claim denied: controller already held");
+                            if let Some((ref mut c, _)) = pending {
+                                let _ = write_frame(c, CMD_DENIED, b"{\"reason\":\"held\"}");
+                            }
+                            resolve = Some(false);
+                        } else {
+                            lease_generation += 1;
+                            if let Some((ref mut c, _)) = pending {
+                                let msg = format!("{{\"generation\":{}}}", lease_generation);
+                                let _ = write_frame(c, CMD_ACQUIRED, msg.as_bytes());
+                            }
+                            // Tell the outgoing controller it lost the lease so it
+                            // can report that instead of guessing the PTY died.
+                            if let Some(mut old) = client.take() {
+                                log(config.id, "controller evicted by takeover");
+                                let _ = write_frame(&mut old, CMD_EVICTED, b"");
+                            }
+                            resolve = Some(true);
+                        }
+                    } else {
+                        // A legacy server started talking without claiming.
+                        log(config.id, "legacy client (no lease claim), promoting");
+                        pending_reader.push_back(cmd, &payload);
+                        resolve = Some(true);
+                    }
+                }
+            }
+
+            // Silence past the deadline means legacy too.
+            if resolve.is_none() && !hangup {
+                if let Some((_, since)) = pending.as_ref() {
+                    if since.elapsed() >= LEASE_CLAIM_TIMEOUT {
+                        log(config.id, "lease claim timed out, promoting as legacy");
+                        resolve = Some(true);
+                    }
+                }
+            }
+
+            match (hangup, resolve) {
+                (true, _) | (_, Some(false)) => {
+                    pending = None;
+                    pending_reader = FrameReader::new();
+                }
+                (_, Some(true)) => {
+                    if let Some((stream, _)) = pending.take() {
+                        client = Some(stream);
+                        // Carry over anything already buffered from this
+                        // connection so a legacy server's first frame is not lost.
+                        reader = std::mem::replace(&mut pending_reader, FrameReader::new());
+                        log(config.id, "controller acquired");
+                    }
+                }
+                _ => {}
             }
         }
 
         // ── Client: read frames ──
-        if nfds == 3 && fds[2].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
+        if client_fd >= 0 && fds[2].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
             let mut disconnected = false;
             if let Some(ref mut c) = client {
                 let mut tmp = [0u8; 65536];

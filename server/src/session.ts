@@ -52,6 +52,23 @@ const H_CMD_EXIT = 0x08;
 const H_CMD_KILL = 0x09;
 const H_CMD_PING = 0x0a;
 const H_CMD_PONG = 0x0b;
+// Controller lease. Only sent when the holder advertises `lease` in STATE, so
+// an older holder never sees a frame it does not understand.
+const H_CMD_ACQUIRE = 0x0c;
+const H_CMD_ACQUIRED = 0x0d;
+const H_CMD_DENIED = 0x0e;
+const H_CMD_EVICTED = 0x0f;
+
+/** Identifies this server process to holders, so an eviction is attributable. */
+const SERVER_INSTANCE_ID = `srv-${process.pid}-${Date.now().toString(36)}`;
+
+/** Raised when another server already holds the PTY and takeover was not asked for. */
+export class ControllerHeldError extends Error {
+  constructor(readonly sessionId: number) {
+    super(`session ${sessionId}: controller already held by another server`);
+    this.name = 'ControllerHeldError';
+  }
+}
 const ENABLE_SYNC_BLOCK_COALESCING = process.env.TTYM_SYNC_BLOCK_COALESCING !== '0';
 
 function getSyncBlockTimeoutMs(): number {
@@ -166,6 +183,7 @@ export class Session {
   private _dirty = false;
   private _lastDirtyAt = 0;
   private _diedAt = 0;
+  private _evicted = false;
   private readonly syncFilter = new SyncBlockFilter();
   private syncBlocksStarted = 0;
   private syncBlocksCompleted = 0;
@@ -182,6 +200,8 @@ export class Session {
   get dirty(): boolean { return this._dirty; }
   get lastDirtyAt(): number { return this._lastDirtyAt; }
   get diedAt(): number { return this._diedAt; }
+  /** True when this server lost the lease rather than the PTY exiting. */
+  get evicted(): boolean { return this._evicted; }
   markClean(): void { this._dirty = false; }
 
   private constructor(
@@ -246,7 +266,7 @@ export class Session {
   }
 
   /** Recover an existing session from a running holder */
-  static async recover(manifest: HolderManifest, runtimeDir: string): Promise<Session> {
+  static async recover(manifest: HolderManifest, runtimeDir: string, takeover = false): Promise<Session> {
     const sock = await connectSocket(manifest.socket);
 
     const session = new Session(
@@ -256,18 +276,19 @@ export class Session {
       manifest.createdAt,
     );
 
-    await session.connectHolder(sock, true);
+    await session.connectHolder(sock, true, takeover);
 
     return session;
   }
 
   /** Connect to holder socket, receive STATE + DUMP for initial catch-up */
-  connectHolder(sock: Socket, _recovery = false): Promise<void> {
+  connectHolder(sock: Socket, _recovery = false, takeover = false): Promise<void> {
     return new Promise((resolve, reject) => {
       this.sock = sock;
-      this.debug(`connectHolder recovery=${_recovery}`);
+      this.debug(`connectHolder recovery=${_recovery} takeover=${takeover}`);
       let gotState = false;
       let pendingDump = false;
+      let awaitingLease = false;
       const buffered: Array<{ cmd: number; payload: Buffer }> = [];
 
       const timer = setTimeout(() => {
@@ -288,6 +309,18 @@ export class Session {
               this._rows = state.rows ?? this._rows;
               try { this.term.resize(this._cols, this._rows); } catch {}
 
+              // Claim the controller role before touching the PTY. Holders
+              // without the capability skip this entirely, so an older holder
+              // never receives a frame it cannot parse.
+              if (state.lease) {
+                awaitingLease = true;
+                writeFrame(sock, H_CMD_ACQUIRE, Buffer.from(JSON.stringify({
+                  serverId: SERVER_INSTANCE_ID,
+                  takeover,
+                })));
+                return;
+              }
+
               // Always request DUMP to catch any output already in holder's ring
               pendingDump = true;
               writeFrame(sock, H_CMD_DUMP_REQ);
@@ -295,6 +328,27 @@ export class Session {
               clearTimeout(timer);
               reject(e);
             }
+            continue;
+          }
+
+          if (awaitingLease) {
+            if (frame.cmd === H_CMD_ACQUIRED) {
+              awaitingLease = false;
+              this.debug(`lease acquired ${frame.payload.toString()}`);
+              pendingDump = true;
+              writeFrame(sock, H_CMD_DUMP_REQ);
+              continue;
+            }
+            if (frame.cmd === H_CMD_DENIED) {
+              awaitingLease = false;
+              clearTimeout(timer);
+              this.closed = true;
+              this.debug('lease denied: another server holds this session');
+              reject(new ControllerHeldError(this.id));
+              return;
+            }
+            // Output can arrive while the claim is in flight; keep it.
+            buffered.push(frame);
             continue;
           }
 
@@ -374,6 +428,17 @@ export class Session {
         this.closed = true;
         this._diedAt = Date.now();
         for (const cb of this.exitCbs) cb(code);
+        this.exitCbs = [];
+        break;
+      }
+      case H_CMD_EVICTED: {
+        // Another server took the lease. The PTY is fine — this server just no
+        // longer drives it, which is a different thing from the session dying.
+        this.debug('controller lease revoked by another server');
+        this.closed = true;
+        this._evicted = true;
+        this._diedAt = Date.now();
+        for (const cb of this.exitCbs) cb(-2);
         this.exitCbs = [];
         break;
       }
@@ -635,4 +700,8 @@ interface HolderState {
   createdAt: number;
   nextSeq: number;
   alive: boolean;
+  /** Present only on holders that implement the controller lease. */
+  lease?: boolean;
+  /** Whether another server currently holds it. */
+  held?: boolean;
 }

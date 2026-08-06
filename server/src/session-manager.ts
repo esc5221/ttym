@@ -2,7 +2,7 @@ import { readdir, readFile, readlink, unlink, mkdir, writeFile, rename } from 'n
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
-import { Session, SessionInfo, HolderManifest, getRuntimeDir } from './session.js';
+import { Session, SessionInfo, HolderManifest, getRuntimeDir , ControllerHeldError } from './session.js';
 
 export type SessionMeta = Record<string, unknown>;
 
@@ -124,6 +124,13 @@ export class SessionManager {
         setTimeout(() => { if (this.sessions.get(sid) === session) this.sessions.delete(sid); }, 30_000);
       });
     } catch (e) {
+      if (e instanceof ControllerHeldError) {
+        // Another server is driving this session. Its manifest is correct and
+        // must survive — deleting it here is how a losing server used to strand
+        // a live holder.
+        console.log(`[mgr] ${filename} held by another server, leaving it alone`);
+        return;
+      }
       console.error(`[mgr] failed to recover ${filename}:`, e);
       await unlink(manifestPath).catch(() => {});
     }
