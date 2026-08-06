@@ -107,6 +107,44 @@ suite('cli end to end', () => {
     await until(async () => ((await api('/api/sessions')) ?? []).length === 0);
   }, 20_000);
 
+  it('speaks the colon grammar: new, split, send, screen', async () => {
+    // Expand phase: these run beside the old workspace verbs, same server.
+    const created = ttym(['new', 'g1', '--', '/bin/zsh']);
+    expect(created).toContain('default:g1');
+    await until(async () => ((await api('/api/sessions')) ?? []).length === 1);
+
+    const split = ttym(['split', 'default:g1', 'g2', '--', '/bin/zsh']);
+    expect(split).toContain(':g2');
+    await until(async () => ((await api('/api/sessions')) ?? []).length === 2);
+
+    ttym(['send', 'default:g2', '--', 'echo COLON_GRAMMAR\n']);
+    await until(async () => (ttym(['screen', 'default:g2'])).includes('COLON_GRAMMAR'));
+
+    // #id addresses the session directly — the only address an unattached
+    // session would have (ADR-0001).
+    const sessions = (await api('/api/sessions')) ?? [];
+    const byId = ttym(['screen', `#${sessions[1].id}`]);
+    expect(byId).toContain('COLON_GRAMMAR');
+
+    // The split was a real split, not a rebuild: the workspace layout holds
+    // both panes under one row.
+    const workspaces = (await api('/api/workspaces')) ?? [];
+    const ws = workspaces.find((w: { name: string }) => w.name === 'default');
+    expect(ws.layout.type).toBe('split');
+    expect(ws.layout.children.length).toBe(2);
+  }, 30_000);
+
+  it('reports a pending await instead of hanging on a hookless session', () => {
+    const out = ttym(['await', 'default:g1', '--timeout', '1500', '--', 'hello'], { canFail: true });
+    expect(out).toContain('timeout: still running');
+  }, 20_000);
+
+  it('cleans up the grammar suite sessions', async () => {
+    ttym(['workspace', 'remove', 'default/default', 'g1']);
+    ttym(['workspace', 'remove', 'default/default', 'g2']);
+    await until(async () => ((await api('/api/sessions')) ?? []).length === 0);
+  }, 20_000);
+
   it('stops the server', async () => {
     ttym(['stop']);
     await until(async () => (await api('/api/sessions')) === null);

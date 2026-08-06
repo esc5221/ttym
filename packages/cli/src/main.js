@@ -1300,6 +1300,11 @@ async function cmdWorkspace() {
   }
 
   if (action === 'remove' || action === 'detach' || action === 'terminate') {
+    if (action === 'terminate') {
+      // Identical to remove since the beginning (bin/ttym:1265 in the v2 tree);
+      // one name for one behaviour. The alias answers until the old grammar goes.
+      console.error('note: `terminate` is an alias of `remove` and will be dropped with the old grammar');
+    }
     const workspace = await resolveWorkspace(port, args[0]);
     const member = requireMember(workspace, args[1]);
     await fetchDelete(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members/${member.sessionId}`);
@@ -1741,6 +1746,200 @@ async function cmdAgent() {
   process.exit(1);
 }
 
+
+// ───── Colon addresses and the top-level verbs (D2, expand phase) ─────
+//
+// One address grammar for the daily verbs:
+//   ws:name    member "name" in workspace "ws" (workspace resolved by name,
+//              or project/name when names collide across projects)
+//   :name      member "name" in the current workspace ($TTYM_SESSION_ID)
+//   #42        session 42 directly — the only address an unattached session
+//              has, per ADR-0001
+//
+// These sit beside the old `workspace <verb> <ws> <member>` forms, which keep
+// working untouched. Removal of the old grammar is a later, separate step.
+
+async function resolveAddress(port, token) {
+  if (!token) {
+    console.error('address required: ws:name, :name, or #id');
+    process.exit(1);
+  }
+  if (token.startsWith('#')) {
+    const sessionId = parseInt(token.slice(1), 10);
+    if (isNaN(sessionId)) {
+      console.error(`not a session id: ${token}`);
+      process.exit(1);
+    }
+    return { sessionId, label: `#${sessionId}`, workspace: null, member: null };
+  }
+  const colon = token.indexOf(':');
+  if (colon === -1) {
+    console.error(`not an address: ${token} (expected ws:name, :name, or #id)`);
+    process.exit(1);
+  }
+  const wsToken = token.slice(0, colon);
+  const memberToken = token.slice(colon + 1);
+  const workspace = wsToken === ''
+    ? await resolveCurrentWorkspace(port)
+    : await resolveWorkspace(port, wsToken);
+  const member = requireMember(workspace, memberToken);
+  return {
+    sessionId: member.sessionId,
+    label: `${workspace.project}/${workspace.name}:${member.name}`,
+    workspace,
+    member,
+  };
+}
+
+/** The workspace `ttym new` files sessions under when none is named. */
+async function ensureDefaultWorkspace(port) {
+  const workspaces = await listWorkspaces(port);
+  const existing = workspaces.find((ws) => ws.project === 'default' && ws.name === 'default');
+  if (existing) return existing;
+  return await fetchPost(port, '/api/workspaces', {
+    id: randomUUID().slice(0, 8),
+    project: 'default',
+    name: 'default',
+    layout: { type: 'pane', sessionId: 0 },
+    members: [],
+  });
+}
+
+async function cmdNew() {
+  const args = process.argv.slice(3);
+  const name = args[0] && !args[0].startsWith('-') ? args[0] : null;
+  if (!name) {
+    console.error('usage: ttym new <name> [-- <cmd...>]');
+    process.exit(1);
+  }
+  const port = getPort();
+  await ensureCompatibleServer(port);
+  const sep = args.indexOf('--');
+  const cmd = sep !== -1 ? args.slice(sep + 1) : null;
+  const asJson = hasFlag('--json');
+
+  // Membership is a CLI convenience here, not a storage invariant: the session
+  // gets a name by being filed in the default workspace (ADR-0001 Q1).
+  const workspace = await ensureDefaultWorkspace(port);
+  const { workspace: updated, member, session } = await createWorkspaceMember(port, workspace, { name, cmd });
+  const result = {
+    address: `${updated.project === 'default' ? '' : updated.project + '/'}${updated.name}:${member.name}`,
+    sessionId: session.id,
+    workspace: `${updated.project}/${updated.name}`,
+  };
+  if (asJson) return printOutput(result, true);
+  console.log(`${result.address}  #${session.id}`);
+}
+
+async function cmdSplit() {
+  const args = process.argv.slice(3);
+  const targetToken = args[0];
+  const name = args[1] && !args[1].startsWith('-') ? args[1] : null;
+  if (!targetToken || !name) {
+    console.error('usage: ttym split <ws:name|:name> <new-name> [-- <cmd...>]');
+    process.exit(1);
+  }
+  const port = getPort();
+  await ensureCompatibleServer(port);
+  const sep = args.indexOf('--');
+  const cmd = sep !== -1 ? args.slice(sep + 1) : null;
+  const asJson = hasFlag('--json');
+
+  const target = await resolveAddress(port, targetToken);
+  if (!target.workspace) {
+    console.error('split needs a workspace member as its target, not a bare session id');
+    process.exit(1);
+  }
+  const body = { targetSessionId: target.sessionId, name };
+  if (cmd) body.cmd = cmd;
+  const data = await fetchPost(port, `/api/workspaces/${encodeURIComponent(target.workspace.id)}/split`, body);
+  if (!data || data.error || !data.session) {
+    console.error(`split failed: ${data?.error ?? 'no session returned'}`);
+    process.exit(1);
+  }
+  const result = {
+    address: `${target.workspace.project}/${target.workspace.name}:${name}`,
+    sessionId: data.session.id,
+  };
+  if (asJson) return printOutput(result, true);
+  console.log(`${result.address}  #${data.session.id}`);
+}
+
+async function cmdSendAddr() {
+  const args = process.argv.slice(3);
+  const sep = args.indexOf('--');
+  const payload = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
+  const token = args[0];
+  if (!token || !payload) {
+    console.error('usage: ttym send <ws:name|:name|#id> -- "data"');
+    process.exit(1);
+  }
+  const port = getPort();
+  await ensureCompatibleServer(port);
+  const target = await resolveAddress(port, token);
+  const result = await fetchPost(port, `/api/sessions/${target.sessionId}/send`, { data: payload });
+  if (hasFlag('--json')) return printOutput(result, true);
+  console.log(`sent to ${target.label}`);
+}
+
+async function cmdScreenAddr() {
+  const args = process.argv.slice(3);
+  const token = args[0];
+  if (!token) {
+    console.error('usage: ttym screen <ws:name|:name|#id> [--json]');
+    process.exit(1);
+  }
+  const port = getPort();
+  await ensureCompatibleServer(port);
+  const target = await resolveAddress(port, token);
+  const result = await fetchJson(port, `/api/sessions/${target.sessionId}/screen`);
+  if (hasFlag('--json')) return printOutput({ target: target.label, screen: result?.screen ?? '' }, true);
+  process.stdout.write(result?.screen ?? '');
+}
+
+async function cmdAwaitAddr() {
+  const args = process.argv.slice(3);
+  const sep = args.indexOf('--');
+  const prompt = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
+  const token = args[0];
+  if (!token || !prompt) {
+    console.error('usage: ttym await <ws:name|:name|#id> [--timeout ms] -- "prompt"');
+    process.exit(1);
+  }
+  const port = getPort();
+  await ensureCompatibleServer(port);
+  const timeoutMs = parseInt(readOption(args, '--timeout') || '120000', 10);
+  const target = await resolveAddress(port, token);
+
+  const response = await fetchRequest(port, 'POST', `/api/sessions/${target.sessionId}/interactions`, {
+    prompt: prompt.replace(/[\r\n]+$/, ''),
+    timeoutMs,
+    submit: 'cr',
+  }, timeoutMs + 15_000);
+  const interaction = response?.interaction ?? null;
+
+  let output = interaction?.transcript ?? null;
+  if (output === null) {
+    const screen = await fetchJson(port, `/api/sessions/${target.sessionId}/screen`).catch(() => null);
+    output = screen?.screen ?? '';
+  }
+  if (hasFlag('--json')) {
+    return printOutput({
+      target: target.label,
+      interaction: interaction ? { id: interaction.id, status: interaction.status } : null,
+      completed: interaction?.status === 'completed',
+      output,
+    }, true);
+  }
+  if (interaction?.status === 'pending') {
+    console.error(`timeout: still running after ${timeoutMs}ms — resume with id ${interaction.id}`);
+  } else if (interaction?.status === 'failed') {
+    console.error('agent ended the turn without answering');
+  }
+  process.stdout.write(output);
+  if (output && !output.endsWith('\n')) process.stdout.write('\n');
+}
+
 // ───── Agent hook entry point ─────
 
 /**
@@ -1772,6 +1971,11 @@ const cmd = process.argv[2];
 
 switch (cmd) {
   case 'attach':  await cmdAttach(); break;
+  case 'new':     await cmdNew(); break;
+  case 'split':   await cmdSplit(); break;
+  case 'send':    await cmdSendAddr(); break;
+  case 'screen':  await cmdScreenAddr(); break;
+  case 'await':   await cmdAwaitAddr(); break;
   case 'start':   cmdStart(); break;
   case 'stop':    cmdStop(); break;
   case 'restart': cmdRestart(); break;
@@ -1796,6 +2000,11 @@ switch (cmd) {
     console.log('  stop                         Stop server (holders survive)');
     console.log('  restart                      Restart server');
     console.log('  attach <target> [--new]      Attach to session or workspace member (prefix: C-b, C-b ? for keys)');
+  console.log('  new <name> [-- cmd]          Create a session in the default workspace');
+  console.log('  split <addr> <name> [-- cmd] Split beside a member (addr: ws:name | :name)');
+  console.log('  send <addr> -- "data"        Send bytes (addr: ws:name | :name | #id)');
+  console.log('  screen <addr>                Read the screen');
+  console.log('  await <addr> -- "prompt"     Ask an agent and wait for its answer');
     console.log('  status                       Show server & session info');
     console.log('  current                      Show current project/workspace/member context');
     console.log('  project list                 List projects');
