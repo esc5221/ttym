@@ -1,0 +1,479 @@
+<meta charset="utf-8">
+<title>Terminal · Agent orchestration landscape — an architectural comparison</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:12px/1.72 'SF Mono','Menlo','Consolas',monospace;color:#1a1a1a;background:#fff;max-width:1000px;margin:0 auto;padding:56px 32px 120px}
+
+h1{font-size:17px;font-weight:700;letter-spacing:-0.2px;margin-bottom:10px;line-height:1.4}
+h2{font-size:13px;font-weight:700;margin:44px 0 12px;padding-bottom:5px;border-bottom:1px solid #1a1a1a}
+h3{font-size:12px;font-weight:700;margin:26px 0 8px}
+h4{font-size:12px;font-weight:700;margin:18px 0 6px;color:#444}
+p{margin:10px 0}
+
+dl.meta{font-size:11px;color:#555;margin:0 0 32px;padding:14px 0;border-top:1px solid #ddd;border-bottom:1px solid #ddd;line-height:1.9}
+dl.meta dt{display:inline-block;width:96px;color:#888}
+dl.meta dd{display:inline}
+dl.meta dd:after{content:"";display:block}
+
+pre{font:11px/1.6 'SF Mono','Menlo','Consolas',monospace;background:#f7f7f7;padding:12px 16px;margin:12px 0;overflow-x:auto;white-space:pre;color:#1a1a1a;border-left:2px solid #d0d0d0}
+code{font:inherit;font-size:11px;background:#f0f0f0;padding:1px 4px;color:#111}
+pre code{background:none;padding:0;font-size:11px}
+
+.ev{border-left:2px solid #888;background:#fbfbfb}
+.ev .src{display:block;color:#888;font-size:10px;margin-bottom:6px}
+
+.scroll{overflow-x:auto;margin:12px 0 18px}
+table{width:100%;border-collapse:collapse;font-size:11px;margin:0}
+.scroll table{min-width:940px}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid #eee;vertical-align:top}
+th{border-bottom:1px solid #999;font-weight:700;font-size:10.5px;color:#333;white-space:nowrap}
+td code{background:#f5f5f5}
+tr.us td{background:#fffdf3}
+th.us{background:#fffdf3}
+
+ol,ul{margin:10px 0 14px 24px}
+li{margin:5px 0}
+
+.note{font-size:11px;margin:14px 0;padding:10px 14px;background:#fafafa;border:1px solid #ddd}
+.note b{font-weight:700}
+.kill{font-size:11px;margin:14px 0;padding:10px 14px;background:#fdf6f6;border:1px solid #e4c9c9}
+.kill b{font-weight:700}
+.rule{font-size:11px;margin:14px 0;padding:10px 14px;background:#f8f6fc;border:1px solid #d8cfe6}
+.info{font-size:11px;margin:14px 0;padding:10px 14px;background:#f5f8fc;border:1px solid #cfdbe8}
+
+a{color:#2a5db0}
+.small{font-size:10.5px;color:#777}
+hr{border:none;border-top:1px solid #eee;margin:32px 0}
+.toc{font-size:11px;color:#555;margin:0 0 36px;line-height:2}
+.toc a{margin-right:14px;text-decoration:none;white-space:nowrap}
+.toc a:hover{text-decoration:underline}
+.tag{display:inline-block;font-size:9.5px;padding:1px 5px;border:1px solid #ccc;color:#666;margin-right:4px;vertical-align:1px}
+</style>
+
+<h1>Terminal · Agent orchestration landscape — an architectural comparison</h1>
+
+<dl class="meta">
+<dt>author</dt><dd>lullu &lt;esc5221@gmail.com&gt;</dd>
+<dt>date</dt><dd>2026-08-06</dd>
+<dt>method</dt><dd>8개 저장소를 clone 후 소스 직접 확인. 문서만 읽은 항목은 그렇게 표기</dd>
+<dt>subject</dt><dd>ttym이 지금 겪는 문제를 다른 프로젝트는 어느 층에서 어떻게 푸는가</dd>
+<dt>clones</dt><dd><code>.context/</code> — mosh, abduco, conmon, vibetunnel, claude-squad, cmux, paseo, orca</dd>
+</dl>
+
+<div class="toc">
+<a href="#s1">1. 범위와 방법</a>
+<a href="#s2">2. 각 프로젝트의 방향성</a>
+<a href="#s3">3. 축별 비교</a>
+<a href="#s4">4. 문제별 심층 진단</a>
+<a href="#s5">5. ttym의 현 위치</a>
+<a href="#s6">6. building block 관점에서의 재해석</a>
+</div>
+
+<h2 id="s1">1. 범위와 방법</h2>
+
+<p>비교 대상은 두 계보로 나뉜다. 하나는 PTY를 프로세스 경계 밖으로 밀어내는 문제를 20년 넘게 다뤄온 계보(dtach → abduco, tmux, mosh, conmon)이고, 다른 하나는 2026년에 coding agent 여러 개를 동시에 다루려고 등장한 계보(claude-squad, vibetunnel, cmux, paseo, orca)다. ttym은 전자의 구조 위에 후자의 목적을 얹고 있어서, 두 계보를 같은 표에 놓아야 위치가 보인다.</p>
+
+<p>확인은 clone한 소스를 직접 읽어서 했다. 파일:줄 번호가 붙은 주장은 코드에서 확인한 것이고, 문서만 근거인 항목은 <span class="tag">문서</span>로 표시했다. 확인하지 못한 칸은 비워두지 않고 <code>미확인</code>이라고 적었다 — 빈칸은 "해당 없음"으로 오독되기 때문이다.</p>
+
+<div class="note">
+<b>비교의 한계.</b> 저장소 크기가 242MB(orca), 383MB(cmux)에 달해 전수 조사는 하지 않았다. 각 프로젝트에서 <i>PTY 생성 지점 · 세션 지속성 · 스크롤백 저장 · agent 훅</i> 네 갈래만 추적했다. 따라서 이 문서는 "이 축에서 이렇게 다르다"는 주장은 하지만 "A가 B보다 낫다"는 총평은 하지 않는다.
+</div>
+
+<h2 id="s2">2. 각 프로젝트의 방향성</h2>
+
+<h3>2.1 지속성 계보 — PTY를 어디에 둘 것인가</h3>
+
+<p><b>abduco</b> (2014, C, 268KB). dtach의 후계. 하는 일은 하나다 — 프로그램을 PTY에 넣고 그 PTY를 자기 프로세스가 소유한 뒤, 클라이언트가 붙었다 떨어지게 한다. 터미널 에뮬레이션을 하지 않고 스크롤백도 갖지 않는다. 붙어 있는 동안의 바이트를 그대로 흘려보낼 뿐이다. <b>의도적으로 최소</b>다.</p>
+
+<p><b>tmux</b>. 서버 프로세스가 pane마다 grid(셀 배열)를 소유한다. 클라이언트는 그 grid의 뷰일 뿐이다. 그래서 클라이언트가 죽어도 세션이 살고, 여러 클라이언트가 같은 세션을 볼 수 있다. 대신 <b>서버가 죽으면 전부 죽는다</b> — tmux의 설계는 서버가 죽지 않는다는 전제 위에 있다.</p>
+
+<p><b>mosh</b> (MIT, 2012). 문제를 재정의했다. 터미널을 "바이트 스트림을 전달하는 파이프"가 아니라 "동기화해야 할 상태 객체"로 본다. 서버가 터미널 에뮬레이터를 돌려 <code>Framebuffer</code>를 만들고, 클라이언트와 그 객체의 diff만 교환한다. 네트워크가 끊겨도 재연결 시 "최신 화면으로 fast-forward"하면 그만이다.</p>
+
+<pre class="ev"><span class="src">mosh/src/terminal/terminalframebuffer.h:396</span>class Framebuffer
+{
+  // To minimize copying of rows and cells, we use shared_ptr to
+  // share unchanged rows between multiple Framebuffers.
+  ...
+  rows_type rows;          // 뷰포트 행들. scrollback 없음
+}</pre>
+
+<p>결정적 한계도 여기 있다. <code>rows</code>는 뷰포트만이다. mosh에 스크롤백이 없다는 오래된 불만은 버그가 아니라 이 설계의 직접적 귀결이다.</p>
+
+<p><b>conmon</b> (CRI-O). 컨테이너 런타임이 죽어도 컨테이너 프로세스가 살아남도록 PTY와 감시를 별도 프로세스로 분리한다. ttym의 holder와 같은 형태다. 출력은 메모리가 아니라 <b>파일에 쓰고</b> <code>--log-size-max</code>로 제한한다.</p>
+
+<h3>2.2 agent 계보 — 여러 agent를 어떻게 다룰 것인가</h3>
+
+<p><b>claude-squad</b> (Go, 47파일). 가장 얇다. PTY도 지속성도 직접 하지 않고 <b>tmux에 위임</b>한다. <code>tmux new-session -d -s claudesquad_&lt;name&gt; -c &lt;workdir&gt; claude</code>를 실행하고 git worktree를 붙인다. tmux가 이미 푼 문제를 다시 풀지 않겠다는 판단이다.</p>
+
+<p><b>vibetunnel</b> (TS 450 + Swift 325). "브라우저를 터미널로 만든다"가 목적이다. 세션마다 디렉토리를 만들고 <b>asciinema cast 파일</b>에 출력을 append한다.</p>
+
+<pre class="ev"><span class="src">vibetunnel/web/src/server/pty/session-manager.ts:14</span>~/.vibetunnel/control/
+├── .version
+└── [session-id]/
+    ├── session.json    # 메타데이터
+    ├── stdout          # 출력 스트림 (asciinema cast)
+    └── stdin           # 입력 (FIFO 또는 파일)</pre>
+
+<p>파일 기반이라 offset으로 어디서든 이어읽을 수 있고, HQ/remote 구조로 여러 머신의 세션을 한 대시보드에 모은다.</p>
+
+<p><b>cmux</b> (Swift 8113파일). macOS 네이티브 앱. libghostty로 GPU 렌더링하고 사용자의 기존 <code>~/.config/ghostty/config</code>를 읽는다. 저자가 동기를 직접 적었다.</p>
+
+<pre class="ev"><span class="src">cmux/README.md:125</span>I tried a few coding orchestrators but most of them were Electron/Tauri apps
+and the performance bugged me. I also just prefer the terminal since GUI
+orchestrators lock you into their workflow.</pre>
+
+<p><b>paseo</b> (TS 2707파일 + iOS/Android). 상주 데몬(기본 포트 6767)이 있고 데스크톱·웹·모바일·CLI가 거기 붙는다. PTY는 데몬이 아니라 <b>별도 worker 프로세스</b>가 소유한다 — ttym의 holder와 같은 판단이며, 이유까지 코드에 적혀 있다.</p>
+
+<pre class="ev"><span class="src">paseo/packages/server/src/terminal/terminal-worker-process.ts:33</span>// node-pty completes its Windows conpty spawn asynchronously on a separate
+// conout worker thread. When that spawn fails (bad cwd, missing command, etc.)
+// it throws an exception there that cannot be caught at the call site and would
+// otherwise crash this worker process and sever every existing terminal.
+process.on("uncaughtException", (error) => { ... });</pre>
+
+<p><b>orca</b> (TS 10204 + tsx 1593, Electron). ADE를 표방한다. agent마다 git worktree를 주고, 터미널·에디터·GitHub/Linear·브라우저 프리뷰를 한 앱에 통합한다. PTY는 Electron main 프로세스가 node-pty로 만든다. 플러그인 시스템(<code>plugin-capabilities.ts</code>, <code>plugin-consent-gate.ts</code>)과 consent 모델이 있다.</p>
+
+<h2 id="s3">3. 축별 비교</h2>
+
+<h3>3.1 PTY 소유권과 생명주기</h3>
+
+<div class="scroll">
+<table>
+<tr><th>프로젝트</th><th>PTY 소유 프로세스</th><th>UI/서버 종료 시</th><th>근거</th></tr>
+<tr class="us"><td><b>ttym</b></td><td>별도 holder (Rust)</td><td><b>생존</b></td><td><code>session.ts:218</code> <code>detached:true, stdio:'ignore'</code></td></tr>
+<tr><td>abduco</td><td>별도 abduco 프로세스</td><td>생존</td><td>설계 목적 자체</td></tr>
+<tr><td>tmux</td><td>tmux 서버</td><td>클라이언트 종료: 생존<br>서버 종료: 전멸</td><td>—</td></tr>
+<tr><td>conmon</td><td>별도 conmon 프로세스</td><td>생존</td><td>설계 목적 자체</td></tr>
+<tr><td>claude-squad</td><td>tmux (위임)</td><td>생존 (tmux 덕)</td><td><code>session/tmux/tmux.go</code></td></tr>
+<tr><td>paseo</td><td>terminal worker 프로세스</td><td>미확인</td><td><code>terminal-worker-process.ts</code></td></tr>
+<tr><td>vibetunnel</td><td>서버 내 node-pty<br>+ external session (vt-fwd, Rust)</td><td>external은 소켓 IPC로 분리</td><td><code>pty-manager.ts:83</code></td></tr>
+<tr><td>orca</td><td>Electron main</td><td><b>사망</b></td><td><code>src/main/rate-limits/claude-pty.ts:223</code></td></tr>
+<tr><td>cmux</td><td>앱 프로세스 (libghostty)</td><td><b>사망</b> (명시적)</td><td><code>README.md:257</code></td></tr>
+</table>
+</div>
+
+<div class="rule">
+<b>관찰.</b> agent 계보의 신규 프로젝트 중 PTY를 프로세스 밖으로 분리한 것은 paseo와 vibetunnel(external 모드)뿐이다. orca와 cmux는 앱 생명주기에 PTY를 묶었고, claude-squad는 그 문제를 tmux에 넘겼다. <b>분리는 공짜가 아니고, 분리하지 않는 것이 다수파다.</b>
+</div>
+
+<h3>3.2 재시작 후 무엇이 복원되는가 — 층이 다른 두 해법</h3>
+
+<p>이 축이 가장 오해되기 쉽다. "세션 복원"이라는 같은 말이 두 가지를 가리킨다.</p>
+
+<div class="scroll">
+<table>
+<tr><th>구분</th><th>복원 대상</th><th>대표</th><th>얻는 것 / 잃는 것</th></tr>
+<tr class="us"><td><b>프로세스 지속</b></td><td>PTY와 그 안의 프로세스가 <i>계속 살아 있음</i></td><td>ttym, tmux, abduco, conmon</td><td>빌드·vim·REPL·agent 무엇이든 그대로 / 프로세스 경계 관리 비용</td></tr>
+<tr><td><b>세션 재개</b></td><td>프로세스는 죽고, agent의 native session id로 대화만 복구</td><td>cmux, orca</td><td>구현이 훨씬 쌈 / agent 아닌 것은 못 살림</td></tr>
+</table>
+</div>
+
+<p>cmux는 이 구분을 문서에 명시적으로 적었다. 인용할 가치가 있다.</p>
+
+<pre class="ev"><span class="src">cmux/README.md:249</span>Quitting cmux saves the current session. On relaunch, cmux restores app-owned state:
+- Window/workspace/pane layout
+- Working directories
+- Terminal scrollback (best effort)
+- Browser URL and navigation history
+
+cmux does not checkpoint arbitrary live process state. tmux, vim, shells, and
+unsupported terminal apps reopen as normal terminals.
+
+Supported agent sessions can resume when hooks have saved a native session ID.</pre>
+
+<div class="info">
+<b>진단.</b> agent 시대에는 "세션 재개"가 상당 부분 충분하다. Claude Code·Codex가 스스로 <code>--resume &lt;id&gt;</code>를 지원하므로, 대화 맥락은 agent가 책임지고 도구는 id만 기억하면 된다. cmux가 13종 agent의 resume을 지원하면서도 PTY 지속성을 포기한 것은 <b>합리적 트레이드오프</b>이지 태만이 아니다.<br><br>
+반대로 <b>프로세스 지속</b>이 값을 하는 경우는 agent가 아닌 것이 섞일 때다 — 30분짜리 빌드, 붙잡고 있는 REPL, ssh 세션, 로그 tail. ttym 프로덕션의 16개 세션 중 3개가 <code>ssh mini</code>·<code>python tab_monitor.py</code>·<code>caffeinate</code>인 것이 이 차이를 그대로 보여준다.
+</div>
+
+<h3>3.3 스크롤백 — 어디에 얼마나, 그리고 어떻게 자르는가</h3>
+
+<div class="scroll">
+<table>
+<tr><th>프로젝트</th><th>저장 위치</th><th>한도</th><th>표현</th><th>자르는 지점</th></tr>
+<tr class="us"><td><b>ttym</b></td><td>메모리 ring</td><td>1 MB 고정</td><td>raw 바이트</td><td><b>임의 바이트</b> — UTF-8·ANSI 경계 모두 무시</td></tr>
+<tr><td>tmux</td><td>서버 메모리</td><td><code>history-limit</code> (행)</td><td>셀 grid</td><td>행 단위</td></tr>
+<tr><td>mosh</td><td>서버 메모리</td><td>뷰포트만</td><td>셀 (Framebuffer)</td><td>해당 없음 (스크롤백 자체가 없음)</td></tr>
+<tr><td>conmon</td><td>디스크 로그</td><td><code>--log-size-max</code></td><td>raw</td><td>미확인</td></tr>
+<tr><td>orca</td><td>디스크</td><td>저장 5 MB / 재생 512 KB</td><td>raw ANSI</td><td><b>UTF-8 경계</b>까지만 보정</td></tr>
+<tr><td>vibetunnel</td><td>디스크 (asciinema cast)</td><td>prune 기반 (크기 무제한)</td><td>raw ANSI + 타임스탬프</td><td><b>ANSI 의미 경계</b> — 화면 소거 시퀀스 지점</td></tr>
+<tr><td>paseo</td><td>미확인</td><td><code>scrollbackLines</code> 옵션</td><td><code>TerminalCell[]</code></td><td>행 단위</td></tr>
+<tr><td>cmux</td><td>디스크 (best effort)</td><td>미확인</td><td>미확인</td><td>미확인</td></tr>
+</table>
+</div>
+
+<p>세 프로젝트의 자르기 코드를 나란히 놓으면 정밀도의 차이가 드러난다.</p>
+
+<pre class="ev"><span class="src">ttym — holder/src/main.rs:41  (바이트 ring, 경계 개념 없음)</span>fn push(&amp;mut self, data: &amp;[u8]) {
+    let cap = self.buf.len();
+    if data.len() &gt;= cap {
+        let off = data.len() - cap;
+        self.buf.copy_from_slice(&amp;data[off..]);   // 임의 바이트에서 절단
+        ...</pre>
+
+<pre class="ev"><span class="src">orca — src/main/terminal-scrollback-snapshots.ts:67  (UTF-8 연속 바이트 회피)</span>function trailingUtf8Bytes(value: string, maxBytes: number): Buffer {
+  const bytes = Buffer.from(value, 'utf-8')
+  if (bytes.length &lt;= maxBytes) return bytes
+  let start = bytes.length - maxBytes
+  while (start &lt; bytes.length &amp;&amp; (bytes[start] &amp; 0xc0) === 0x80) start++   // 연속 바이트 스킵
+  return bytes.subarray(start)
+}</pre>
+
+<pre class="ev"><span class="src">vibetunnel — web/src/server/utils/pruning-detector.ts:22  (ANSI 의미 경계)</span>export const PRUNE_SEQUENCES = [
+  '\x1b[3J',        // Clear scrollback buffer
+  '\x1bc',          // RIS - Full terminal reset
+  '\x1b[2J',        // Clear screen
+  '\x1b[H\x1b[J',   // Home cursor + clear
+  '\x1b[?1049h',    // Enter alternate screen
+  '\x1b[?1049l',    // Exit alternate screen
+  ...
+] as const;
+// "Pruning helps prevent session files from growing indefinitely by identifying
+//  points where old terminal content can be safely discarded."</pre>
+
+<div class="kill">
+<b>ttym의 실제 결함.</b> vibetunnel은 <i>이전 내용을 버려도 화면 재구성이 정확한 지점</i>에서만 자른다. orca는 그 정도는 아니지만 최소한 UTF-8 문자를 반토막 내지 않는다. ttym의 ring은 둘 다 하지 않는다 — ring이 넘치면 멀티바이트 문자 중간, ANSI 이스케이프 시퀀스 중간 어디서든 잘린다.<br><br>
+그 잘린 앞머리는 서버 교체 시 <code>DUMP_RESP</code>로 그대로 xterm에 재생된다(<code>session.ts:305-311</code>). 깨진 시퀀스가 파서에 들어가면 이후 렌더가 오염된다. <b>ring이 넘치지 않는 동안은 드러나지 않는 결함</b>이고, 측정된 agent 세션의 행당 913바이트를 3000행에 곱하면 2.7MB로 ring 1MB를 넘긴다.
+</div>
+
+<h3>3.4 상태 표현 — raw 바이트인가 셀 그리드인가</h3>
+
+<p>ttym RFD 1의 §7.2는 transcript를 원시 바이트 구간으로 자르면 안 되는 이유를 이렇게 적었다. "에이전트 TUI는 같은 행을 반복해서 다시 그리므로 바이트 구간에는 중간 프레임이 모두 포함된다." 이번에 실측한 숫자가 그 주장을 정량화한다.</p>
+
+<pre>측정 (holder에 직접 붙어 raw 바이트 캡처 → 동일 설정 headless xterm에 재생)
+
+                        raw bytes    렌더된 행    행당 bytes
+Claude Code 긴 응답 1회    94,065        103          913
+Codex 짧은 응답 1회        43,319         39        1,111
+Claude 부팅 화면만          2,774          7          396</pre>
+
+<p>같은 3000행이 raw로는 2.7MB, 렌더된 상태로는 571KB다(프로덕션 snapshot 실측). <b>4.7배가 전부 redraw 파편이다.</b> 이 사실은 두 군데에 동시에 영향을 준다 — transcript를 무엇으로 자를 것인가(RFD B), 그리고 교체 시 무엇을 보존할 것인가(ring).</p>
+
+<p>paseo는 이 문제를 프로토콜 층에서 이미 해결해 두었다.</p>
+
+<pre class="ev"><span class="src">paseo/packages/server/src/terminal/terminal.ts:40</span>export interface TerminalStateSnapshot {
+  state: TerminalState;      // TerminalCell[] — 셀 그리드, raw 바이트 아님
+  revision: number;
+  // Input-mode replay preamble at snapshot time. Populated by the terminal
+  // worker so the daemon main loop doesn't have to re-derive it from output.
+  replayPreamble?: string;
+}
+
+export interface TerminalStateSnapshotOptions {
+  scrollbackLines?: number;
+  // Include per-row soft-wrap flags so the client can reflow restored
+  // content on resize. Gated on a client capability.
+  includeWrapFlags?: boolean;
+}</pre>
+
+<pre class="ev"><span class="src">paseo/packages/server/src/terminal/terminal-capture.ts</span>export interface CaptureTerminalLinesOptions {
+  start?: number;
+  end?: number;
+  stripAnsi?: boolean;
+}</pre>
+
+<div class="info">
+<b>진단.</b> <code>captureTerminalLines(start, end)</code>는 RFD 1 §5.3이 제안한 mark 기반 구간 추출과 같은 것이다. <code>revision</code> + <code>replayPreamble</code>은 "snapshot을 깔고 그 이후 delta만 재생"이라는, ttym이 지금 검토 중인 방식과 같다. <b>ttym이 설계하려는 것은 독자 발명이 아니라 이미 출하된 패턴이다</b> — 이는 설계의 타당성을 높이는 근거이면서, 동시에 차별점이 여기에 있지 않다는 뜻이기도 하다.<br><br>
+<code>includeWrapFlags</code>는 ttym이 고려하지 않은 축이다. 복원된 내용을 resize할 때 soft-wrap을 다시 흘리려면 행마다 wrap 플래그가 필요하다. 없으면 창 크기를 바꾼 순간 복원된 스크롤백이 깨진다.
+</div>
+
+<h3>3.5 agent 완료 감지</h3>
+
+<div class="scroll">
+<table>
+<tr><th>프로젝트</th><th>감지 방식</th><th>대응 agent</th><th>실패·대기 상태 처리</th></tr>
+<tr class="us"><td><b>ttym</b></td><td>Claude Stop hook 1개 → <code>meta.stopSeq</code> → CLI 1초 폴링</td><td>Claude, Codex(hooks flag)</td><td><b>없음</b> — 실패 종료·권한 대기 시 timeout까지 대기</td></tr>
+<tr><td>paseo</td><td>훅 이벤트 5종, provider registry</td><td>claude / codex / opencode</td><td><code>StopFailure</code>·<code>SessionEnd</code>→idle, <code>Notification</code>의 <code>idle_prompt</code> 감지</td></tr>
+<tr><td>orca</td><td><code>agent-hook-server</code> + envelope publication</td><td>30+ <span class="tag">문서</span></td><td>미확인</td></tr>
+<tr><td>cmux</td><td><code>cmux hooks setup</code>, native session id 저장</td><td>13+ <span class="tag">문서</span></td><td>미확인</td></tr>
+<tr><td>claude-squad</td><td>미확인 (tmux 화면 기반 추정)</td><td>Claude 중심</td><td>미확인</td></tr>
+</table>
+</div>
+
+<pre class="ev"><span class="src">paseo/packages/server/src/terminal/agent-hooks/claude/claude.ts:6</span>  Stop: "idle",
+  StopFailure: "idle",
+  SessionEnd: "idle",
+  ...
+  events: [
+    { event: "UserPromptSubmit" },
+    { event: "Stop" },
+    { event: "StopFailure" },
+    { event: "SessionEnd" },
+    { event: "Notification" },
+  ],
+  ...
+  return payload.matcher === "idle_prompt" || payload.reason === "idle_prompt";</pre>
+
+<div class="kill">
+<b>ttym의 실제 결함 둘.</b><br>
+(1) <code>Stop</code>만 구독하므로 agent가 <b>실패로 끝나면 완료 신호가 오지 않는다.</b> <code>ttym workspace await</code>은 timeout까지 blocking한다. paseo는 <code>StopFailure</code>·<code>SessionEnd</code>를 같은 idle로 접어 이 구멍을 막았다.<br>
+(2) <code>UserPromptSubmit</code>을 쓰지 않으므로 <b>제출 시점을 서버가 추정</b>한다. RFD 1 §5.3의 mark는 "제출 시점의 <code>baseY+cursorY</code>"인데, 실제 제출은 서버가 바이트를 보낸 시각이 아니라 TUI가 입력을 확정한 시각이다. 훅으로 잡으면 추정이 사라진다.
+</div>
+
+<h3>3.6 확장점과 층위</h3>
+
+<div class="scroll">
+<table>
+<tr><th>프로젝트</th><th>제3자가 확장하는 방법</th><th>클라이언트</th><th>층위</th></tr>
+<tr class="us"><td><b>ttym</b></td><td>HTTP API + WS. 플러그인 개념 없음</td><td>웹, CLI attach, native(Tauri), demo</td><td>서버 + 클라이언트 동봉</td></tr>
+<tr><td>tmux</td><td>명령·훅·format 문자열. 거대한 플러그인 생태계</td><td>터미널 클라이언트만</td><td><b>범용 building block</b></td></tr>
+<tr><td>abduco</td><td>없음 (파이프로 조합)</td><td>터미널</td><td>유닉스 원시 도구</td></tr>
+<tr><td>claude-squad</td><td>tmux 위에 얹힘</td><td>TUI 하나</td><td>tmux 소비자</td></tr>
+<tr><td>vibetunnel</td><td>HTTP/WS, HQ-remote 연합</td><td>웹, macOS, iOS</td><td>서버 + 앱</td></tr>
+<tr><td>paseo</td><td>agent-hook provider registry, skills, service proxy</td><td>웹, iOS, Android, 데스크톱, CLI</td><td><b>데몬 + 프로토콜 + 다중 클라이언트</b></td></tr>
+<tr><td>orca</td><td>plugin capabilities + consent gate, CLI</td><td>Electron, 모바일 relay</td><td>통합 앱(ADE)</td></tr>
+<tr><td>cmux</td><td>hooks, Ghostty config 상속, CLI</td><td>macOS 단일</td><td>네이티브 앱</td></tr>
+</table>
+</div>
+
+<p>층위 칸이 이 표의 핵심이다. tmux는 <b>다른 것이 그 위에 지어지는 물건</b>이고(claude-squad가 실제로 그렇게 했다), orca·cmux는 <b>완성된 제품</b>이며, paseo는 그 사이에서 프로토콜 패키지(<code>@getpaseo/protocol</code>)를 분리해 다중 클라이언트를 지탱한다.</p>
+
+<h2 id="s4">4. 문제별 심층 진단</h2>
+
+<h3>4.1 "PTY를 분리한다"의 진짜 비용</h3>
+
+<p>ttym·paseo·conmon·abduco가 모두 PTY를 별도 프로세스로 분리했다. 이 결정은 서버 재시작을 견디게 해주지만, 분리 자체가 새 문제를 만든다. 이번 조사에서 ttym이 겪은 세 가지가 전부 <b>분리의 대가</b>다.</p>
+
+<ol>
+<li><b>소켓 경로가 유일한 도달 수단이 된다.</b> 같은 id로 새 holder가 뜨면 <code>main.rs:221</code>의 <code>remove_file</code>이 기존 소켓을 지운다. listener fd는 살아 있는데 경로가 없어 아무도 붙을 수 없다. 프로덕션에서 실제로 3건 발생해 있었다.</li>
+<li><b>복구가 네트워크 연산이 된다.</b> handshake에 timeout이 필요하고(10초), 순차로 돌리면 그 timeout이 세션 수만큼 누적된다.</li>
+<li><b>버퍼가 프로세스 경계를 넘어야 한다.</b> 그래서 ring이 생기고, ring 크기가 곧 복원 가능한 범위의 상한이 된다.</li>
+</ol>
+
+<div class="info">
+<b>대조.</b> orca·cmux는 PTY를 앱에 두었으므로 이 세 문제가 아예 없다. 대신 앱을 끄면 빌드가 죽는다. <b>어느 쪽이 옳은지는 무엇을 세션에 담느냐에 달렸다</b> — agent만 담으면 분리의 대가가 순손실이고, agent 아닌 것이 섞이면 분리가 값을 한다.
+</div>
+
+<h3>4.2 버퍼를 두 벌 갖는다는 것</h3>
+
+<p>ttym에는 지금 같은 내용의 버퍼가 두 개 있다.</p>
+
+<pre>holder ring       raw 바이트, 메모리 1MB, 913 B/행     서버 교체 시 사용
+서버 snapshot      렌더된 ANSI, 디스크 571KB, 194 B/행   재부팅 시에만 사용</pre>
+
+<p>둘은 각각 다른 사고를 대비해 만들어졌다. ring은 "서버가 죽어도 최근 출력을 잃지 않기 위해", snapshot은 "머신이 재부팅돼도 화면을 복원하기 위해". 그런데 <code>boot()</code>의 순서(<code>session-manager.ts:72-76</code>)가 <code>recover()</code>를 먼저 돌리고, holder로 복구된 세션은 snapshot 경로에서 건너뛴다. <b>교체 시 snapshot은 디스크에 있는 채로 쓰이지 않는다.</b></p>
+
+<p>같은 3000행을 ring은 2.7MB로 담아야 하고 snapshot은 571KB로 담는다. 4.7배 효율의 자산을 놀리면서 그보다 나쁜 쪽의 크기를 걱정하고 있는 구조다.</p>
+
+<div class="rule">
+<b>세 갈래 해법과 각각의 실물 선례.</b><br>
+<b>(a) ring을 키운다</b> — conmon의 <code>--log-size-max</code> 계열. <code>--ring-size</code> 인자는 holder에 이미 있고(<code>main.rs:158</code>) 서버가 넘기지 않을 뿐이다. 가장 싸지만 크기 근거가 없다.<br>
+<b>(b) snapshot을 seed로 쓰고 ring은 delta만</b> — paseo의 <code>revision</code>+<code>replayPreamble</code>과 동형. 재료가 이미 다 있다. <code>DUMP_REQ</code>에 <code>since_seq</code>를 더하고 snapshot에 seq를 기록하면 된다.<br>
+<b>(c) 디스크 append + 의미 경계 prune</b> — vibetunnel의 cast 파일. 스크롤백이 사실상 무제한이 되고 asciinema 재생·공유가 덤으로 따라온다. 대신 I/O와 파일 수명 관리가 생긴다.
+</div>
+
+<h3>4.3 "응답만 돌려준다"는 것의 난이도</h3>
+
+<p>RFD 1의 B는 mark 기반 구간 추출로 이 문제를 푼다. 이번 측정으로 두 가지가 확정됐다.</p>
+
+<p><b>첫째, alternate screen은 걸림돌이 아니다.</b> Claude Code를 기준선으로 캡처했더니 RFD가 기록한 관측(<code>?1049h</code> 미출현, <code>?2004h</code>·<code>?25l</code> 출현)과 정확히 일치했고, 같은 도구로 Codex를 부팅 시점과 실제 응답 중에 두 번 관측했으나 <code>?1049h</code>·<code>?1047h</code>·<code>?47h</code> 모두 나타나지 않았다. RFD §9의 미해결 항목 하나가 닫힌다.</p>
+
+<p><b>둘째, 스크롤백 고갈도 걸림돌이 아니다.</b> 긴 응답 1회가 103행으로 3000행의 3.4%다. RFD 6.1이 우려한 "응답 하나가 스크롤백을 밀어낸다"는 29회 대화를 해야 도달한다.</p>
+
+<p>남는 진짜 난제는 <b>"응답"의 경계를 무엇으로 정의하느냐</b>이며, 이건 측정으로 풀리지 않는다. paseo가 <code>UserPromptSubmit</code>을 구독하는 것은 이 경계의 시작점을 추정 대신 사실로 만드는 선택이다. 끝점은 <code>Stop</code>/<code>StopFailure</code>/<code>SessionEnd</code>로 나뉘어 있다. ttym이 <code>Stop</code> 하나만 보는 한, 시작도 끝도 추정이다.</p>
+
+<h3>4.4 layout을 무엇으로 표현하는가</h3>
+
+<p>RFD 1의 A는 layout 트리가 멤버 추가 한 번에 평탄화되는 문제를 다룬다. 이 축은 비교 대상에서 정보가 가장 적었다 — orca·cmux·paseo 모두 pane 트리를 다루지만 자료구조를 소스에서 확인하지 못했다. 다만 orca의 <code>persistence.ts</code>가 6777줄이고 그 안에 <code>ptyIdsByLeafId</code>라는 이름이 보이는 것으로 보아, <b>leaf ↔ pty를 별도 맵으로 유지</b>하고 layout 트리 자체는 보존하는 방향으로 읽힌다.</p>
+
+<pre class="ev"><span class="src">orca/src/main/persistence.ts:6777</span>// Why: first tab spawn — persist a minimal layout so a SIGKILL before the
+// renderer snapshot can't lose ptyIdsByLeafId.</pre>
+
+<p>이 주석이 시사하는 바가 있다. orca는 <b>렌더러 스냅샷이 오기 전에 SIGKILL을 맞는 창</b>을 알고 있고, 그 창에서 잃는 것이 무엇인지(leaf→pty 매핑) 정확히 지목한다. ttym이 이번에 shutdown 저장 순서를 뒤집은 것(<code>2a3e695</code>)과 같은 종류의 방어다.</p>
+
+<h2 id="s5">5. ttym의 현 위치</h2>
+
+<div class="scroll">
+<table>
+<tr><th>축</th><th>ttym의 상태</th><th>동급 이상</th><th>뒤처짐</th></tr>
+<tr><td>PTY 지속성</td><td>holder 분리, 서버 교체 실증 완료</td><td>tmux, abduco, conmon, paseo</td><td>—</td></tr>
+<tr><td>다중 클라이언트</td><td>웹 + CLI + native + demo</td><td>paseo, vibetunnel</td><td>—</td></tr>
+<tr><td>상태 표현</td><td>raw 바이트 ring</td><td>—</td><td>paseo(셀), mosh(셀), tmux(셀)</td></tr>
+<tr><td>버퍼 자르기</td><td>임의 바이트 절단</td><td>—</td><td>vibetunnel(ANSI 경계), orca(UTF-8 경계)</td></tr>
+<tr><td>스크롤백 수명</td><td>메모리 1MB 고정, 디스크 GC 없음</td><td>—</td><td>orca(GC), vibetunnel(prune), conmon(로테이션)</td></tr>
+<tr><td>agent 훅</td><td>Stop 1종</td><td>—</td><td>paseo(5종+registry), orca·cmux(다수 agent)</td></tr>
+<tr><td>확장점</td><td>HTTP/WS만, 플러그인 없음</td><td>—</td><td>tmux, orca, paseo</td></tr>
+<tr><td>resize 시 reflow</td><td>미고려</td><td>—</td><td>paseo(<code>includeWrapFlags</code>)</td></tr>
+</table>
+</div>
+
+<p>정리하면 ttym은 <b>지속성 계보의 어려운 부분을 이미 통과했고, agent 계보의 표면 성숙도에서 뒤처져 있다.</b> holder를 분리해 무중단 교체를 실제로 해낸 프로젝트는 이 목록에서 tmux 계보와 paseo뿐이며, 반대로 훅 1종·플러그인 없음·버퍼 절단 정밀도는 신규 프로젝트들보다 낮다.</p>
+
+<h2 id="s6">6. building block 관점에서의 재해석</h2>
+
+<p class="small">이 절은 "tmux처럼 범용적이고 pluggable·customizable한 building block을 만들고, 웹·네이티브 클라이언트가 그 위의 가장 좋은 소비자가 된다"는 방향을 전제로 앞의 분석을 다시 읽은 것이다. 앞 절들은 이 전제 없이 작성했다.</p>
+
+<h3>6.1 이 방향에서 각 프로젝트가 놓이는 자리</h3>
+
+<pre>building block                    소비자를 겸함                  완성품
+──────────────────────────────────────────────────────────────────────────
+abduco    최소 detach              tmux    자체 클라이언트만      orca   ADE
+conmon    컨테이너 부품            paseo   데몬+프로토콜+앱       cmux   macOS 앱
+                                  vibetunnel  서버+웹+앱
+                                  ttym    ?</pre>
+
+<p>tmux가 building block으로 기능하는 이유는 클라이언트가 우수해서가 아니다. <b>클라이언트가 아니라 명령·훅·format 문자열이라는 조작 표면이 안정적이기 때문</b>이다. claude-squad는 tmux의 UI를 쓰지 않는다 — <code>tmux new-session -d</code>를 호출하고 결과를 자기 TUI로 보여준다. 즉 tmux는 <b>headless로 쓸 수 있어서</b> building block이 됐다.</p>
+
+<p>이 기준을 ttym에 적용하면 위치가 분명해진다. ttym은 이미 HTTP API와 WS 프로토콜로 headless 조작이 가능하고, CLI가 그것의 첫 소비자다. 구조는 이미 building block에 가깝다. <b>부족한 것은 조작 표면의 안정성과 확장 지점이다.</b></p>
+
+<h3>6.2 이 방향에서 다시 보이는 것들</h3>
+
+<h4>(1) holder를 "그 위에서 구축 가능하게" 한다는 목표는 지금 구조와 충돌하지 않는다</h4>
+
+<p>holder는 이미 독립 실행 파일이고, 프로토콜은 5바이트 헤더 + cmd + payload로 단순하며, 문서화만 하면 제3자가 다른 holder를 구현할 수 있다. conmon이 정확히 그 자리에 있는 물건이다. 다만 지금 프로토콜에는 두 가지가 빠져 있다 — <b>버전 협상</b>과 <b>capability 교환</b>. 서버가 v3인데 holder가 v2인 상황(Phase 5에서 실제로 발생한다)을 프로토콜이 알 방법이 없다.</p>
+
+<div class="rule">
+<b>이 방향에서 우선순위가 올라가는 것.</b> <code>H_CMD_STATE</code>에 <code>protocolVersion</code>과 <code>capabilities[]</code>를 추가하는 것. 지금은 Phase 5의 교차 검증 항목이지만, holder를 교체 가능한 부품으로 만들려면 <b>기반 요건</b>이 된다. paseo가 <code>includeWrapFlags</code>를 "client capability에 gate된다"고 적은 것이 같은 문제의식이다.
+</div>
+
+<h4>(2) 셀 그리드 vs raw 바이트 선택의 무게가 달라진다</h4>
+
+<p>4.2에서 제시한 세 갈래는 building block 관점에서 우열이 바뀐다.</p>
+
+<div class="scroll">
+<table>
+<tr><th>안</th><th>제품 관점</th><th>building block 관점</th></tr>
+<tr><td>(a) ring 확대</td><td>가장 쌈. 당장 해결</td><td>임시방편. 소비자가 크기를 알아야 함 = 누출된 추상</td></tr>
+<tr><td>(b) snapshot seed + delta</td><td>재료 있음. 중간 비용</td><td><b>적합</b> — "상태 + revision"은 소비자가 이해하기 쉬운 계약</td></tr>
+<tr><td>(c) 디스크 cast + prune</td><td>I/O 비용, 수명 관리 추가</td><td><b>적합</b> — 파일이 곧 인터페이스. 제3자가 asciinema로 바로 소비 가능</td></tr>
+</table>
+</div>
+
+<p>(c)의 부수효과가 이 방향에서 특히 크다. 세션 출력이 표준 포맷 파일로 남으면 <b>ttym을 거치지 않고도</b> 재생·분석·공유가 되고, 그것 자체가 "그 위에 뭔가를 지을 수 있다"는 뜻이 된다. vibetunnel이 asciinema를 고른 것은 저장 방식의 선택이 아니라 생태계 선택이다.</p>
+
+<h4>(3) agent 훅은 registry로 만들어야 building block이 된다</h4>
+
+<p>지금 ttym의 Stop hook은 스크립트 한 개(<code>scripts/ttym-claude-stop-hook.sh</code>)와 <code>meta.stopSeq</code> 규약으로 되어 있다. agent를 하나 더 지원하려면 코드를 고쳐야 한다. paseo는 같은 것을 provider registry로 만들었다.</p>
+
+<pre class="ev"><span class="src">paseo/packages/server/src/terminal/agent-hooks/provider-registry.ts:23</span>  [claudeAgentHookProvider.id]: claudeAgentHookProvider,
+  [codexAgentHookProvider.id]: codexAgentHookProvider,
+  [opencodeAgentHookProvider.id]: opencodeAgentHookProvider,</pre>
+
+<p>provider가 <code>{ id, events[], statusMap, settingsPatcher }</code>를 내놓으면 코어는 그것을 설치·제거·해석만 한다. 이것이 "pluggable"의 구체적 형태다. 그리고 이 구조를 갖추면 3.5에서 지적한 결함(<code>StopFailure</code> 누락)이 <b>개별 버그가 아니라 provider 정의의 누락</b>으로 강등된다 — 고치기 훨씬 쉬워진다.</p>
+
+<h4>(4) 클라이언트 3개가 동시에 깨지는 문제(RFD 6.4)의 성격이 바뀐다</h4>
+
+<p>RFD 1은 D 단계에서 <code>client/</code>·<code>native/</code>·<code>demo/</code>가 전부 동작하지 않는 구간을 감수한다고 적었다. 사용자가 하나이고 클라이언트가 전부 같은 저장소에 있다는 근거였다.</p>
+
+<p>그러나 building block을 지향하면 이 전제가 바로 무너진다. <b>제3자 소비자가 생기는 순간 "같은 커밋에서 함께 바뀐다"가 성립하지 않는다.</b> paseo가 프로토콜을 별도 패키지(<code>@getpaseo/protocol</code>)로 뽑고 capability gating을 쓰는 이유가 이것이다.</p>
+
+<div class="info">
+<b>귀결.</b> 이 방향을 택한다면 RFD 7.7("호환 계층을 두지 않는 이유")을 재검토해야 한다. 그 절의 논거는 "외부 소비자는 알려진 것이 없다"였고, RFD 자신도 "외부 소비자가 확인되면 이 결정을 재검토해야 한다"고 단서를 달아 두었다. building block을 만들겠다는 것은 <b>외부 소비자를 만들겠다는 선언</b>이므로 그 단서의 조건이 충족된다.
+</div>
+
+<h3>6.3 이 방향에서 ttym이 실제로 앞서 있는 것</h3>
+
+<p>공정하게 적을 필요가 있다. 조사한 신규 프로젝트 중 <b>서버를 죽였다 살려도 세션이 살아 있는 것</b>을 실증한 것은 ttym뿐이다(paseo는 구조상 가능해 보이나 확인하지 못했다). orca·cmux는 명시적으로 포기했고, claude-squad는 tmux에 위임했다.</p>
+
+<p>building block의 가치가 "그 위에 지어진 것이 오래 산다"는 데 있다면, <b>기반이 재시작을 견딘다는 성질은 그 자체로 차별점</b>이다. tmux는 이 성질을 "서버가 죽지 않는다"는 전제로 얻었고, ttym은 "서버가 죽어도 된다"는 구조로 얻었다. 후자가 더 강한 보장이다 — 기반을 업그레이드하면서 그 위의 것을 죽이지 않을 수 있다는 뜻이기 때문이다.</p>
+
+<div class="note">
+<b>남은 확인.</b> 이 문서는 8개 저장소의 네 갈래만 추적했다. 특히 다음은 확인하지 못했고, 결론을 뒤집을 수 있다.<br>
+· paseo 데몬이 앱 종료 후 상주하는지, 그리고 worker 프로세스가 데몬 재시작을 견디는지<br>
+· cmux·orca의 layout 자료구조가 실제로 트리를 보존하는지<br>
+· vibetunnel <code>vt-fwd</code>(Rust)가 ttym holder와 같은 수준의 분리인지<br>
+· claude-squad가 agent 완료를 어떻게 감지하는지
+</div>
+
+<hr>
+
+<p class="small">근거로 인용한 파일:줄 번호는 각 저장소의 <code>.context/</code> shallow clone(2026-08-06 기준) 시점이다. ttym 측정치는 holder에 직접 접속해 <code>DATA_OUT</code> 프레임을 캡처한 뒤 동일 설정(<code>cols 100, rows 30, scrollback 3000</code>)의 <code>@xterm/headless</code>에 재생해 얻었다.</p>
