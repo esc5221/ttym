@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createServer } from './server.js';
+import { rotateLogIfNeeded, LOG_ROTATE_INTERVAL_MS } from './log-rotate.js';
 import { getHomeDir } from './session.js';
 
 const PORT = parseInt(process.env.PORT || '7690', 10);
@@ -20,6 +21,16 @@ if (isMain()) {
   createServer(PORT).then((server) => {
     writeFileSync(pidFile, String(process.pid));
     console.log(`ttym server listening on port ${PORT} (pid ${process.pid})`);
+
+    // The log grew unbounded — 130MB over one 41-day run. Check at boot and
+    // every few hours; copy-truncate keeps every existing append fd valid.
+    const logPath = resolve(homeDir, 'ttym.log');
+    const rotate = () => rotateLogIfNeeded(logPath)
+      .then((did) => { if (did) console.log('[log] rotated ttym.log'); })
+      .catch(() => {});
+    rotate();
+    const rotateTimer = setInterval(rotate, LOG_ROTATE_INTERVAL_MS);
+    rotateTimer.unref();
 
     let shuttingDown = false;
     const shutdown = async () => {
