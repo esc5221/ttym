@@ -27,11 +27,14 @@ if (isMain()) {
       shuttingDown = true;
       try { unlinkSync(pidFile); } catch {}
 
-      // Persist all sessions before closing (workspace restore on reboot)
+      // Persist all sessions before closing (workspace restore on reboot).
+      // 16 sessions with full scrollback measured at ~1.2s, but a shutdown
+      // during a reboot competes with everything else for I/O, and that is
+      // where the old 5s budget ran out and left sessions unreachable.
       const deadline = setTimeout(() => {
         console.error('[shutdown] persist deadline exceeded, force exit');
         process.exit(1);
-      }, 5000);
+      }, 15000);
 
       try {
         await server.close();

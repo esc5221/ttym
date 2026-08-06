@@ -889,8 +889,13 @@ export async function createServer(port: number): Promise<TtymServer> {
     close: async () => {
       fileBridge?.stop?.();
       agentBus?.close?.();
+      // Save the workspace layouts first. They are a few KB, while
+      // manager.shutdown() serializes every session's scrollback and can take
+      // seconds. Running the heavy step first means a shutdown that hits the
+      // deadline in index.ts loses the layouts — which is exactly how sessions
+      // came back unreachable after a reboot before.
+      await workspaceStore.save();
       await manager.shutdown(); // persist + don't kill holders
-      await workspaceStore.save(); // persist workspace layouts
       await new Promise<void>((resolve, reject) => {
         wss.close((error) => {
           if (error) reject(error);
