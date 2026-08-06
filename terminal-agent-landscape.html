@@ -232,7 +232,21 @@ Supported agent sessions can resume when hooks have saved a native session ID.</
 
 <div class="kill">
 <b>ttym의 실제 결함.</b> vibetunnel은 <i>이전 내용을 버려도 화면 재구성이 정확한 지점</i>에서만 자른다. orca는 그 정도는 아니지만 최소한 UTF-8 문자를 반토막 내지 않는다. ttym의 ring은 둘 다 하지 않는다 — ring이 넘치면 멀티바이트 문자 중간, ANSI 이스케이프 시퀀스 중간 어디서든 잘린다.<br><br>
-그 잘린 앞머리는 서버 교체 시 <code>DUMP_RESP</code>로 그대로 xterm에 재생된다(<code>session.ts:305-311</code>). 깨진 시퀀스가 파서에 들어가면 이후 렌더가 오염된다. <b>ring이 넘치지 않는 동안은 드러나지 않는 결함</b>이고, 측정된 agent 세션의 행당 913바이트를 3000행에 곱하면 2.7MB로 ring 1MB를 넘긴다.
+그 잘린 앞머리는 서버 교체 시 <code>DUMP_RESP</code>로 그대로 xterm에 재생된다(<code>session.ts:305-311</code>). 깨진 시퀀스가 파서에 들어가면 이후 렌더가 오염될 수 있다. <b>ring이 넘치지 않는 동안은 드러나지 않는 결함</b>이며, 행당 913바이트를 3000행에 곱하면 2.7MB로 ring 1MB를 넘긴다.
+</div>
+
+<div class="info">
+<b>다만 바이트 손실과 행 손실은 같은 수가 아니다.</b> ring을 64KB로 줄여 프로덕션의 ring 대 스크롤백 비율을 재현하고, 실제 Claude Code 세션으로 교체를 측정했다.
+
+<pre>교체 전 (live 스트림)   108,464 B   baseY 39
+교체 후 (holder DUMP)    65,536 B   baseY 34
+
+바이트 손실  39.6%
+행 손실      12.8%     &larr; 1/3 수준
+사라진 내용  부팅 배너뿐. 대화 본문은 25%/50%/75%/끝 지점 전부 생존</pre>
+
+바이트의 대부분이 redraw 파편이라 최종 셀 상태에 기여하지 않기 때문이다. <b>바이트 기준 용량 계산은 실제 손실을 과대평가한다.</b> 재현: <code>scripts/measure/swap-loss.mjs</code> + <code>compare-buffers.mjs</code>.<br><br>
+<span class="small">한계: 69행 규모 세션에서의 측정이다. 3000행 규모에서 같은 비율이 유지되는지는 확인되지 않았다 — 작은 세션에서는 부팅 배너가 앞부분의 큰 몫을 차지하므로 손실이 낮게 나올 여지가 있다.</span>
 </div>
 
 <h3>3.4 상태 표현 — raw 바이트인가 셀 그리드인가</h3>
@@ -354,6 +368,8 @@ export interface TerminalStateSnapshotOptions {
 
 <p>같은 3000행을 ring은 2.7MB로 담아야 하고 snapshot은 571KB로 담는다. 4.7배 효율의 자산을 놀리면서 그보다 나쁜 쪽의 크기를 걱정하고 있는 구조다.</p>
 
+<p>다만 3.3의 실측이 이 걱정의 크기를 깎는다. ring이 넘쳐 바이트를 39.6% 잃어도 렌더된 행은 12.8%만 줄었고, 사라진 것은 부팅 배너였다. <b>ring 확대는 교체를 막는 문제가 아니라 구조의 비효율로 다뤄야 한다.</b></p>
+
 <div class="rule">
 <b>세 갈래 해법과 각각의 실물 선례.</b><br>
 <b>(a) ring을 키운다</b> — conmon의 <code>--log-size-max</code> 계열. <code>--ring-size</code> 인자는 holder에 이미 있고(<code>main.rs:158</code>) 서버가 넘기지 않을 뿐이다. 가장 싸지만 크기 근거가 없다.<br>
@@ -389,7 +405,7 @@ export interface TerminalStateSnapshotOptions {
 <tr><td>다중 클라이언트</td><td>웹 + CLI + native + demo</td><td>paseo, vibetunnel</td><td>—</td></tr>
 <tr><td>상태 표현</td><td>raw 바이트 ring</td><td>—</td><td>paseo(셀), mosh(셀), tmux(셀)</td></tr>
 <tr><td>버퍼 자르기</td><td>임의 바이트 절단</td><td>—</td><td>vibetunnel(ANSI 경계), orca(UTF-8 경계)</td></tr>
-<tr><td>스크롤백 수명</td><td>메모리 1MB 고정, 디스크 GC 없음</td><td>—</td><td>orca(GC), vibetunnel(prune), conmon(로테이션)</td></tr>
+<tr><td>스크롤백 수명</td><td>메모리 1MB 고정, 디스크 GC 없음<br><span class="small">교체 손실은 실측상 행 기준 12.8%</span></td><td>—</td><td>orca(GC), vibetunnel(prune), conmon(로테이션)</td></tr>
 <tr><td>agent 훅</td><td>Stop 1종</td><td>—</td><td>paseo(5종+registry), orca·cmux(다수 agent)</td></tr>
 <tr><td>확장점</td><td>HTTP/WS만, 플러그인 없음</td><td>—</td><td>tmux, orca, paseo</td></tr>
 <tr><td>resize 시 reflow</td><td>미고려</td><td>—</td><td>paseo(<code>includeWrapFlags</code>)</td></tr>
@@ -432,7 +448,7 @@ conmon    컨테이너 부품            paseo   데몬+프로토콜+앱       c
 <div class="scroll">
 <table>
 <tr><th>안</th><th>제품 관점</th><th>building block 관점</th></tr>
-<tr><td>(a) ring 확대</td><td>가장 쌈. 당장 해결</td><td>임시방편. 소비자가 크기를 알아야 함 = 누출된 추상</td></tr>
+<tr><td>(a) ring 확대</td><td>가장 쌈. 실측상 시급하진 않음</td><td>임시방편. 소비자가 크기를 알아야 함 = 누출된 추상</td></tr>
 <tr><td>(b) snapshot seed + delta</td><td>재료 있음. 중간 비용</td><td><b>적합</b> — "상태 + revision"은 소비자가 이해하기 쉬운 계약</td></tr>
 <tr><td>(c) 디스크 cast + prune</td><td>I/O 비용, 수명 관리 추가</td><td><b>적합</b> — 파일이 곧 인터페이스. 제3자가 asciinema로 바로 소비 가능</td></tr>
 </table>
