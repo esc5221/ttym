@@ -1,123 +1,49 @@
-import type { SessionInfo } from '@ttym/client';
-import {
-  layoutToSessionIds,
-  sessionIdsToLayout,
-  type LayoutNode,
-} from '@ttym/shared';
+/**
+ * Desktop-side adapter over @ttym/api.
+ *
+ * The shared client takes a base URL; this app thinks in terms of the loopback
+ * port its daemon is listening on. Translating that is all this file does now —
+ * the requests themselves live in the package, shared with the web app.
+ */
+import * as api from '@ttym/api';
+import { layoutToSessionIds, layoutFromSessionIds, type LayoutNode } from '@ttym/shared';
 
-export interface WorkspaceInfo {
-  id: string;
-  project: string;
-  name: string;
-  layout: LayoutNode;
-  members: WorkspaceMemberInfo[];
-  createdAt: number;
-  updatedAt: number;
-}
+export type {
+  SessionInfo, SessionMeta, WorkspaceInfo, WorkspaceMemberInfo, Interaction,
+} from '@ttym/api';
+export { ApiError } from '@ttym/api';
 
-export interface WorkspaceMemberInfo {
-  sessionId: number;
-  name: string;
-  role?: string;
-  tags?: string[];
-}
+const base = (port: number) => `http://127.0.0.1:${port}`;
 
-export interface SessionMeta {
-  claudeSessionId?: string | null;
-  claudeLastSessionId?: string | null;
-  claudeActive?: boolean | null;
-  codexSessionId?: string | null;
-  codexLastSessionId?: string | null;
-  codexActive?: boolean | null;
-  [key: string]: unknown;
-}
+export const listSessions = (port: number) => api.listSessions(base(port));
+export const listWorkspaces = (port: number, project?: string) => api.listWorkspaces(base(port), project);
+export const getSessionScreen = (port: number, sessionId: number) => api.getSessionScreen(base(port), sessionId);
+export const getSessionMeta = (port: number, sessionId: number) => api.getSessionMeta(base(port), sessionId);
 
-async function asJson<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`);
-  }
-  return res.json() as Promise<T>;
-}
+export const createWorkspace = (port: number, name: string, sessionIds: number[] = []) =>
+  api.createWorkspace(base(port), { name, sessionIds });
 
-export async function listSessions(port: number): Promise<SessionInfo[]> {
-  return asJson(await fetch(`http://127.0.0.1:${port}/api/sessions`));
-}
-
-export async function listWorkspaces(port: number, project?: string): Promise<WorkspaceInfo[]> {
-  const url = new URL(`http://127.0.0.1:${port}/api/workspaces`);
-  if (project) url.searchParams.set('project', project);
-  return asJson(await fetch(url));
-}
-
-export async function getSessionScreen(port: number, sessionId: number): Promise<string> {
-  const data = await asJson<{ screen: string }>(await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/screen`));
-  return data.screen;
-}
-
-export async function getSessionMeta(port: number, sessionId: number): Promise<SessionMeta> {
-  return asJson(await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/meta`));
-}
-
-export { layoutToSessionIds, sessionIdsToLayout };
-
-export async function createWorkspace(port: number, name: string, sessionIds: number[] = []): Promise<WorkspaceInfo> {
-  const body = {
-    id: crypto.randomUUID().slice(0, 8),
-    project: 'default',
-    name,
-    layout: sessionIdsToLayout(sessionIds),
-  };
-
-  return asJson(await fetch(`http://127.0.0.1:${port}/api/workspaces`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  }));
-}
-
-export async function updateWorkspace(
+export const updateWorkspace = (
   port: number,
   id: string,
-  patch: { name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[] },
-): Promise<WorkspaceInfo> {
-  return asJson(await fetch(`http://127.0.0.1:${port}/api/workspaces/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  }));
-}
+  patch: { name?: string; layout?: LayoutNode; members?: api.WorkspaceMemberInfo[] },
+) => api.updateWorkspace(base(port), id, patch);
 
-export async function deleteWorkspace(port: number, id: string): Promise<void> {
-  const res = await fetch(`http://127.0.0.1:${port}/api/workspaces/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-}
+export const deleteWorkspace = (port: number, id: string) => api.deleteWorkspace(base(port), id);
 
-export async function splitWorkspace(
+export const splitWorkspace = (
   port: number,
   id: string,
-  options: {
-    targetSessionId?: number;
-    cwd?: string;
-    cols?: number;
-    rows?: number;
-    name?: string;
-    role?: string;
-    cmd?: string[];
-  } = {},
-): Promise<{ workspace: WorkspaceInfo; session: SessionInfo }> {
-  return asJson(await fetch(`http://127.0.0.1:${port}/api/workspaces/${encodeURIComponent(id)}/split`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(options),
-  }));
-}
+  options: Parameters<typeof api.splitWorkspace>[2] = {},
+) => api.splitWorkspace(base(port), id, options);
 
+// Re-exported for callers that build layouts locally.
+export { layoutToSessionIds };
+export const sessionIdsToLayout = layoutFromSessionIds;
+
+/** Leftmost real pane in a layout, or null when it holds only the placeholder. */
 export function firstSessionId(node: LayoutNode): number | null {
-  if (node.type === 'pane') {
-    return node.sessionId > 0 ? node.sessionId : null;
-  }
+  if (node.type === 'pane') return node.sessionId > 0 ? node.sessionId : null;
   for (const child of node.children) {
     const id = firstSessionId(child);
     if (id !== null) return id;

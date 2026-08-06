@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TerminalMux, Terminal } from '@ttym/client';
+import * as api from '@ttym/api';
 import type { SessionInfo } from '@ttym/client';
 import '@xterm/xterm/css/xterm.css';
 import {
@@ -175,34 +176,22 @@ function movePanel(panels: PanelState[], fromIndex: number, toIndex: number): Pa
 }
 
 async function fetchSessionMeta(sessionId: number): Promise<SessionMeta> {
-  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/meta`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return api.getSessionMeta(API_BASE, sessionId);
 }
 
 async function fetchSessionScreen(sessionId: number): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/screen`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  return typeof data.screen === 'string' ? data.screen : '';
+  return api.getSessionScreen(API_BASE, sessionId);
 }
 
 async function fetchWorkspaces(): Promise<Workspace[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/workspaces`);
-    if (!res.ok) return [];
-    return await res.json();
+    return await api.listWorkspaces(API_BASE) as Workspace[];
   } catch { return []; }
 }
 
 async function apiCreateWorkspace(ws: { id: string; name: string; layout: LayoutNode }): Promise<Workspace | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/workspaces`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(ws),
-    });
-    if (!res.ok) return null;
-    return await res.json();
+    return await api.createWorkspace(API_BASE, { id: ws.id, name: ws.name, layout: ws.layout }) as Workspace;
   } catch { return null; }
 }
 
@@ -365,22 +354,19 @@ function sessionWorkspaceMembership(workspaces: Workspace[]): Map<number, { work
 
 async function apiUpdateWorkspace(id: string, patch: { name?: string; layout?: LayoutNode }): Promise<void> {
   try {
-    await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(id)}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
-    });
+    await api.updateWorkspace(API_BASE, id, patch);
   } catch {}
 }
 
 async function apiDeleteWorkspace(id: string): Promise<void> {
   try {
-    await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await api.deleteWorkspace(API_BASE, id);
   } catch {}
 }
 
 async function apiRemoveMember(wsId: string, sessionId: number): Promise<void> {
   try {
-    await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(wsId)}/members/${sessionId}`, { method: 'DELETE' });
+    await api.removeWorkspaceMember(API_BASE, wsId, sessionId);
   } catch {}
 }
 
@@ -390,13 +376,7 @@ async function apiAddMember(
   name: string,
 ): Promise<Workspace | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(wsId)}/members`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, name }),
-    });
-    if (!res.ok) return null;
-    return await res.json();
+    return await api.addWorkspaceMember(API_BASE, wsId, { sessionId, name }) as Workspace;
   } catch { return null; }
 }
 
@@ -405,14 +385,8 @@ async function apiSplitWorkspace(
   options: { targetSessionId?: number; cwd?: string; cols?: number; rows?: number; name?: string; role?: string; cmd?: string[] } = {},
 ): Promise<Workspace | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(id)}/split`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(options),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.workspace ?? null;
+    const data = await api.splitWorkspace(API_BASE, id, options);
+    return (data?.workspace as Workspace) ?? null;
   } catch { return null; }
 }
 
@@ -857,9 +831,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
 
   const refreshWorkspaceMeta = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}`);
-      if (!res.ok) return;
-      const ws: Workspace = await res.json();
+      const ws = await api.getWorkspace(API_BASE, workspaceId) as Workspace;
       setWsName(ws.name);
       setWsProject(ws.project || 'default');
       const names = memberNameBySession(ws.members);
@@ -885,8 +857,8 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-    fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}`)
-      .then((res) => res.ok ? res.json() : null)
+    api.getWorkspace(API_BASE, workspaceId)
+      .catch(() => null)
       .then(async (ws: Workspace | null) => {
         if (!ws) return;
         setWsName(ws.name);
@@ -923,9 +895,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
       if (hasPendingLocalPane) return;
 
       try {
-        const res = await fetch(`${API_BASE}/api/workspaces/${encodeURIComponent(workspaceId)}`);
-        if (!res.ok) return;
-        const ws: Workspace = await res.json();
+        const ws = await api.getWorkspace(API_BASE, workspaceId) as Workspace;
         if (cancelled) return;
 
         const names = memberNameBySession(ws.members);

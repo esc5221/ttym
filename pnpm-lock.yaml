@@ -24,6 +24,9 @@ importers:
 
   client:
     dependencies:
+      '@ttym/api':
+        specifier: workspace:*
+        version: link:../packages/api
       '@ttym/protocol':
         specifier: workspace:*
         version: link:../packages/protocol
@@ -52,6 +55,9 @@ importers:
 
   demo:
     dependencies:
+      '@ttym/api':
+        specifier: workspace:*
+        version: link:../packages/api
       '@ttym/client':
         specifier: workspace:*
         version: link:../client
@@ -89,6 +95,9 @@ importers:
       '@tauri-apps/api':
         specifier: ^2.2.0
         version: 2.10.1
+      '@ttym/api':
+        specifier: workspace:*
+        version: link:../packages/api
       '@ttym/client':
         specifier: workspace:*
         version: link:../client
@@ -123,6 +132,12 @@ importers:
       vite:
         specifier: ^5.0.0
         version: 5.4.21(@types/node@25.4.0)
+
+  packages/api:
+    dependencies:
+      '@ttym/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/protocol: {}
 

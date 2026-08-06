@@ -9,7 +9,8 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@ttym/protocol": "workspace:*",
-    "@ttym/shared": "workspace:*"
+    "@ttym/shared": "workspace:*",
+    "@ttym/api": "workspace:*"
   },
   "peerDependencies": {
     "react": ">=18"
