@@ -5,13 +5,21 @@
 ## 구조
 
 ```
-bin/ttym           CLI (Node ESM, 직접 실행)
-server/src/        서버 (TypeScript → dist/ttym-server.js)
-client/            웹 클라이언트 (@ttym/client)
-native/            네이티브 앱 (@ttym/native)
-demo/              데모 앱 (@ttym/demo)
-scripts/           hook 스크립트들
+packages/cli/      CLI (@ttym/cli → esbuild 번들 dist/ttym. bin/ttym은 얇은 런처)
+packages/server/   서버 (@ttym/server → dist/ttym-server.js)
+packages/web/      브라우저 앱 (@ttym/web — 구 demo)
+packages/desktop/  Tauri 앱 (@ttym/desktop — 구 native)
+packages/ui/       터미널 컴포넌트 + mux (@ttym/ui — 구 client)
+packages/protocol/ wire 포맷 (@ttym/protocol) — 서버·클라 공용 단일 구현
+packages/api/      HTTP 클라이언트 (@ttym/api)
+packages/shared/   도메인 규칙 — layout 트리 연산 (@ttym/shared)
+holder/            Rust PTY holder (세션당 1개, detached, 서버 생존과 무관)
+scripts/           빌드·hook·fixture 캡처 스크립트
+docs/              architecture.md · adr-0001-membership.md (docs/local/은 비추적 산출물)
 ```
+
+새 CLI 문법(콜론 주소, 구 문법과 공존): `ttym new <name>` · `ttym split <ws:name> <name>` ·
+`ttym send|await|screen <ws:name|:name|#id>`. 자세한 것은 docs/architecture.md.
 
 서버 기본 포트: 7690. PID/로그: `~/.ttym/`
 
