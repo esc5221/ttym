@@ -83,7 +83,7 @@ A·B 이후. **시작부터 완료까지 클라이언트 3개가 전부 동작�
 - [ ] `native/` 정렬 (Tauri — 빌드 체인 별도)
 - [ ] `demo/` 정렬 + WS에서 CREATE/LIST/DESTROY 제거
 
-## Phase 4 — 교체 리허설 (dev) · 2/5
+## Phase 4 — 교체 리허설 (dev) · 4/5
 
 - [x] 기본 무중단 교체 실증 — holder·세션 id·자식 pid·화면 내용 전부 보존 (zsh 세션)
 - [x] **agent 세션 교체 손실 실측** — 바이트 39.6% 손실 → 행 12.8% 손실
@@ -92,9 +92,14 @@ A·B 이후. **시작부터 완료까지 클라이언트 3개가 전부 동작�
       - 유실된 내용은 부팅 배너뿐. 대화 내용 25%/50%/75%/끝 전부 생존
       - 이유: 바이트의 대부분이 redraw 파편이라 최종 셀 상태에 기여하지 않음
       - ⚠ 한계: 69행 규모 테스트. 3000행 규모에서 같은 비율인지는 미확인
-- [ ] v2 holder ↔ v3 서버 교차 검증 (프로덕션의 살아있는 holder는 구 바이너리)
+- [x] **v2 holder ↔ v3 서버 교차 검증** — 4방향 전부 통과
+      - v3 서버 ← v2 holder(4/18 프로덕션 빌드) recover ✔, 화면 보존 ✔
+      - v2 서버 ← v2 holder ✔ / v2 서버 ← v3 holder ✔ (롤백 방향)
+      - 세션 id·자식 pid·화면 내용 전부 보존. 프로토콜 호환 확인
+      - v2 서버는 `TTYM_HOME`을 모르므로 검증 시 `HOME` 자체를 격리해야 함
+- [x] **롤백 리허설 (v3 → v2)** — 위 검증에 포함. v2 서버가 두 세대 holder를 모두 recover
 - [ ] `workspaces.json` v2→v3 변환을 실데이터로 검증
-- [ ] 롤백 리허설 (v3 → v2 되돌리기)
+      ⚠ Phase 2-A 의존 — 변환기가 아직 없어 지금은 검증 불가
 
 ## Phase 5 — 프로덕션 교체 · 0/5
 
@@ -112,6 +117,10 @@ A·B 이후. **시작부터 완료까지 클라이언트 3개가 전부 동작�
       Phase 4 실측상 1MB로 충분해 보임 — 행 손실이 바이트 손실의 1/3
       대규모(3000행) 세션에서의 재확인은 남음
 - [ ] `TTYM_RUNTIME_DIR`이 긴 경로면 holder가 panic (unix socket SUN_LEN ~104B 초과)
+- [ ] holder ring이 ANSI 시퀀스·UTF-8 경계를 무시하고 자름
+      vibetunnel은 화면소거 시퀀스 지점에서만, orca는 UTF-8 경계까지 보정
+- [ ] agent 훅을 provider registry로 (paseo 방식) — 지금은 Claude Stop 하나에 고정
+- [ ] `StopFailure`/`SessionEnd` 미구독 → agent가 실패로 끝나면 await이 timeout까지 대기
 - [ ] flaky test 1건 규명 (`b2f615d9`에서 73/73 중 1건 실패 후 재실행 통과)
 - [ ] `ttym restart` ESRCH 에러 (`b45f036e`에서 미해결)
 - [ ] agent-bus 활성화 여부 결정 (현재 `null`, SQLite 파일만 존재)
