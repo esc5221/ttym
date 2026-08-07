@@ -254,6 +254,20 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
   }, [mux]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    return mux.onWorkspace((event) => {
+      setWorkspaces((prev) => {
+        if (event.deletedId) return prev.filter((w) => w.id !== event.deletedId);
+        const next = event.workspace as unknown as Workspace | undefined;
+        if (!next) return prev;
+        const at = prev.findIndex((w) => w.id === next.id);
+        if (at === -1) return [...prev, next];
+        const copy = prev.slice(); copy[at] = next; return copy;
+      });
+    });
+  }, [mux]);
+
   const membership = sessionWorkspaceMembership(workspaces);
 
   useEffect(() => {
@@ -642,9 +656,15 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
     setDeadSessions(new Set());
     setZoomedSid(null);
     void refresh();
-    const interval = window.setInterval(() => { void refresh(); }, 2000);
-    return () => window.clearInterval(interval);
-  }, [workspaceId, refresh]);
+    // 정상 경로는 서버 push. 폴링은 이벤트를 놓친 경우의 안전망일 뿐이다.
+    const unsubscribe = mux.onWorkspace((event) => {
+      if (barrier.current.isLocked()) return;
+      if (event.deletedId === workspaceId) { navigate({ page: 'dashboard' }); return; }
+      if (event.workspace?.id === workspaceId) void applyWorkspace(event.workspace as unknown as Workspace);
+    });
+    const fallback = window.setInterval(() => { void refresh(); }, 30_000);
+    return () => { unsubscribe(); window.clearInterval(fallback); };
+  }, [workspaceId, refresh, applyWorkspace, mux]);
 
   const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
 

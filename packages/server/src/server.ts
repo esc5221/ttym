@@ -776,6 +776,18 @@ export async function createServer(port: number): Promise<TtymServer> {
   });
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
+  // Workspace changes push to every connected client — full tree +
+  // generation. Clients stop polling; a missed event costs nothing because
+  // the next one carries the entire state again.
+  const unsubscribeWorkspaceChanges = workspaceStore.onChange((event) => {
+    const frame = encode(0, CMD.WORKSPACE, jsonPayload(event));
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        try { client.send(frame); } catch {}
+      }
+    }
+  });
+
   wss.on('connection', (ws: WebSocket) => {
     const viewerId = randomUUID();
     const clientSessions = new Set<number>();
@@ -1188,6 +1200,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     wss,
     httpServer,
     close: async () => {
+      unsubscribeWorkspaceChanges();
       if (gcTimer) clearInterval(gcTimer);
       fileBridge?.stop?.();
       agentBus?.close?.();

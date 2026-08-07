@@ -183,6 +183,40 @@ describe('createServer', () => {
     expect([CMD.DATA, CMD.SNAPSHOT]).toContain(resumed.cmd);
   }, 30_000);
 
+  it('pushes workspace changes to every WS client — full tree, with a generation', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/workspaces`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'push-ws', project: 'e2e', name: 'push', layout: { type: 'pane', sessionId: 0 }, members: [] }),
+    });
+    expect(res.status).toBe(201);
+
+    const createdEvt = await ws1.next((f) => f.cmd === CMD.WORKSPACE);
+    const created = JSON.parse(Buffer.from(createdEvt.payload).toString());
+    expect(created.workspace.id).toBe('push-ws');
+    expect(typeof created.generation).toBe('number');
+
+    await fetch(`http://127.0.0.1:${port}/api/workspaces/push-ws`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'renamed' }),
+    });
+    const updatedEvt = await ws1.next((f) => f.cmd === CMD.WORKSPACE);
+    const updated = JSON.parse(Buffer.from(updatedEvt.payload).toString());
+    expect(updated.workspace.name).toBe('renamed');
+    expect(updated.workspace.layout).toBeDefined();
+    expect(updated.generation).toBeGreaterThan(created.generation);
+
+    await fetch(`http://127.0.0.1:${port}/api/workspaces/push-ws`, { method: 'DELETE' });
+    const deletedEvt = await ws1.next((f) => f.cmd === CMD.WORKSPACE
+      && JSON.parse(Buffer.from(f.payload).toString()).deletedId === 'push-ws');
+    expect(JSON.parse(Buffer.from(deletedEvt.payload).toString()).deletedId).toBe('push-ws');
+  });
+
   it('stamps snapshots with a watermark, and resumeView from it replays delta — not another snapshot', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);

@@ -37,6 +37,8 @@ export const CMD = {
   ACK: 0x0b,
   PAUSE_VIEW: 0x0c,
   RESUME_VIEW: 0x0d,
+  /** Server → client: a workspace changed — full tree + generation, never a diff. */
+  WORKSPACE: 0x0e,
 } as const;
 
 export type CmdValue = (typeof CMD)[keyof typeof CMD];

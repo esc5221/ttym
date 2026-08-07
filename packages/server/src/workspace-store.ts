@@ -65,6 +65,13 @@ interface LegacyStoreFile {
 
 // ───── WorkspaceStore ─────
 
+
+export interface WorkspaceChangeEvent {
+  generation: number;
+  workspace?: WorkspaceInfo;
+  deletedId?: string;
+}
+
 export class WorkspaceStore {
   private workspaces = new Map<string, WorkspaceInfo>();
   /** Runtime only: never written to workspaces.json, so the format is unchanged. */
@@ -128,6 +135,24 @@ export class WorkspaceStore {
     }
   }
 
+  private changeListeners = new Set<(event: WorkspaceChangeEvent) => void>();
+  private changeGeneration = 0;
+
+  /** Every mutation announces the whole workspace — full tree, never a diff.
+   *  A diff protocol desynchronizes forever after one missed frame; the tree
+   *  is small enough to resend whole with a generation to order by. */
+  onChange(listener: (event: WorkspaceChangeEvent) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
+  }
+
+  private emitChange(change: { workspace?: WorkspaceInfo; deletedId?: string }): void {
+    const event: WorkspaceChangeEvent = { generation: ++this.changeGeneration, ...change };
+    for (const listener of this.changeListeners) {
+      try { listener(event); } catch {}
+    }
+  }
+
   private scheduleSave(): void {
     if (!this.dirty) {
       this.dirty = true;
@@ -178,6 +203,7 @@ export class WorkspaceStore {
     });
     this.workspaces.set(id, ws);
     this.scheduleSave();
+    this.emitChange({ workspace: ws });
     return ws;
   }
 
@@ -199,6 +225,7 @@ export class WorkspaceStore {
     this.reconcileWorkspace(ws);
     ws.updatedAt = Date.now();
     this.scheduleSave();
+    this.emitChange({ workspace: ws });
     return ws;
   }
 
@@ -235,6 +262,7 @@ export class WorkspaceStore {
     this.reconcileWorkspace(ws);
     ws.updatedAt = now;
     this.scheduleSave();
+    this.emitChange({ workspace: ws });
     return ws;
   }
 
@@ -268,6 +296,7 @@ export class WorkspaceStore {
     this.reconcileWorkspace(ws);
     ws.updatedAt = now;
     this.scheduleSave();
+    this.emitChange({ workspace: ws });
     return ws;
   }
 
@@ -279,6 +308,7 @@ export class WorkspaceStore {
     this.reconcileWorkspace(ws);
     ws.updatedAt = Date.now();
     this.scheduleSave();
+    this.emitChange({ workspace: ws });
     return ws;
   }
 
@@ -293,12 +323,16 @@ export class WorkspaceStore {
     this.reconcileWorkspace(ws);
     ws.updatedAt = Date.now();
     this.scheduleSave();
+    this.emitChange({ workspace: ws });
     return ws;
   }
 
   delete(id: string): boolean {
     const deleted = this.workspaces.delete(id);
-    if (deleted) this.scheduleSave();
+    if (deleted) {
+      this.scheduleSave();
+      this.emitChange({ deletedId: id });
+    }
     return deleted;
   }
 

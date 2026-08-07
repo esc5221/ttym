@@ -29,6 +29,13 @@ export interface SessionInfo {
   detachedAt: number | null;
 }
 
+export interface WorkspaceChangeEvent {
+  generation: number;
+  /** Full workspace state — the server never sends diffs. */
+  workspace?: { id: string; [key: string]: unknown };
+  deletedId?: string;
+}
+
 interface PendingCreate {
   resolve: (id: number) => void;
   reject: (error: Error) => void;
@@ -62,6 +69,7 @@ export class TerminalMux {
   private readonly encoder = new TextEncoder();
   private readonly decoder = new TextDecoder();
   private _lastSeqs = new Map<number, number>(); // sessionId → 최신 수신 seq
+  private workspaceListeners = new Set<(event: WorkspaceChangeEvent) => void>();
 
   constructor(url: string) {
     this.url = url;
@@ -218,6 +226,17 @@ export class TerminalMux {
         break;
       }
 
+      case CMD.WORKSPACE: {
+        let event: WorkspaceChangeEvent | null = null;
+        try { event = JSON.parse(this.decoder.decode(payload)); } catch {}
+        if (event && typeof event.generation === 'number') {
+          for (const listener of this.workspaceListeners) {
+            try { listener(event); } catch {}
+          }
+        }
+        break;
+      }
+
       case CMD.DESTROY: {
         this.sessions.get(sessionId)?.onExit?.();
         this.sessions.delete(sessionId);
@@ -310,6 +329,12 @@ export class TerminalMux {
   }
 
   // ───── hidden 탭 ─────
+
+  /** Subscribe to workspace change pushes. Returns the unsubscribe. */
+  onWorkspace(listener: (event: WorkspaceChangeEvent) => void): () => void {
+    this.workspaceListeners.add(listener);
+    return () => this.workspaceListeners.delete(listener);
+  }
 
   /** Acknowledge parsed output through `seq`. Drives server-side backpressure. */
   ack(sessionId: number, seq: number) {
