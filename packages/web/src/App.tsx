@@ -231,7 +231,9 @@ function navigate(route: Route) {
 
 // ───── 대시보드 ─────
 
-function DashboardPage({ mux, agentStates }: { mux: TerminalMux; agentStates: Record<number, AgentState> }) {
+type DashPanel = { kind: 'hover' } | { kind: 'live'; sid: number } | { kind: 'ws'; wsId: string };
+
+function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMux; agentStates: Record<number, AgentState>; localEchoEnabled: boolean }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
@@ -239,6 +241,8 @@ function DashboardPage({ mux, agentStates }: { mux: TerminalMux; agentStates: Re
   const [hoveredSessionId, setHoveredSessionId] = useState<number | null>(null);
   const [hoveredScreen, setHoveredScreen] = useState<string>('hover a session to preview');
   const [compactLayout, setCompactLayout] = useState(() => window.innerWidth < 1080);
+  // 우측 패널: hover 미리보기 ↔ live 터미널(행 클릭) ↔ workspace 분할 미니뷰(제목 클릭)
+  const [panel, setPanel] = useState<DashPanel>({ kind: 'hover' });
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -295,7 +299,7 @@ function DashboardPage({ mux, agentStates }: { mux: TerminalMux; agentStates: Re
   }, [sessions, hoveredSessionId]);
 
   useEffect(() => {
-    if (hoveredSessionId === null) return;
+    if (hoveredSessionId === null || panel.kind !== 'hover') return;
     let cancelled = false;
     const tick = async () => {
       try {
@@ -308,7 +312,15 @@ function DashboardPage({ mux, agentStates }: { mux: TerminalMux; agentStates: Re
     void tick();
     const timer = window.setInterval(() => { void tick(); }, 5000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [hoveredSessionId]);
+  }, [hoveredSessionId, panel.kind]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPanel({ kind: 'hover' });
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // 죽은 세션은 membership만 걷어낸다 — 트리 정리는 서버 몫.
   useEffect(() => {
@@ -351,7 +363,7 @@ function DashboardPage({ mux, agentStates }: { mux: TerminalMux; agentStates: Re
     return (
       <div
         key={sid}
-        onClick={() => navigate({ page: 'session', id: sid })}
+        onClick={() => setPanel({ kind: 'live', sid })}
         onMouseEnter={() => setHoveredSessionId(sid)}
         style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px',
@@ -402,7 +414,8 @@ function DashboardPage({ mux, agentStates }: { mux: TerminalMux; agentStates: Re
           return (
             <div key={ws.id} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 6, marginBottom: 10, background: 'var(--bg0)' }}>
               <div
-                onClick={() => navigate({ page: 'workspace', id: ws.id })}
+                onClick={() => setPanel({ kind: 'ws', wsId: ws.id })}
+                title="클릭: 분할 미리보기 · 탭: 전체 열기"
                 style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', fontSize: 12, fontWeight: 700, color: 'var(--text-soft)', cursor: 'pointer' }}
               >
                 {workspaceDisplayLabel(ws)}
@@ -431,23 +444,87 @@ function DashboardPage({ mux, agentStates }: { mux: TerminalMux; agentStates: Re
 
       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: 'var(--bg0)' }}>
         <div style={{ height: 34, display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg1)', fontSize: 11.5, color: 'var(--text-dim)', flexShrink: 0 }}>
-          <span style={{ color: 'var(--text-soft)' }}>preview</span>
-          <span>{hoveredSessionId !== null ? `#${hoveredSessionId}` : 'no session'}</span>
-          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
-            {hoveredSessionId !== null ? (
-              <>
-                <button onClick={() => navigate({ page: 'session', id: hoveredSessionId })} style={{ ...miniLinkBtnStyle, color: 'var(--accent)' }}>open</button>
-                <button onClick={() => navigate({ page: 'viewer', id: hoveredSessionId })} style={miniLinkBtnStyle}>readonly</button>
-                <button onClick={() => void copySessionUrl(hoveredSessionId)} style={miniLinkBtnStyle}>copy</button>
-              </>
-            ) : null}
-          </span>
+          {panel.kind === 'live' ? (
+            <>
+              <span style={{ color: 'var(--accent)', fontWeight: 700 }}>live</span>
+              <span>#{panel.sid}</span>
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+                <button onClick={() => navigate({ page: 'session', id: panel.sid })} style={{ ...miniLinkBtnStyle, color: 'var(--accent)' }}>open</button>
+                <button onClick={() => void copySessionUrl(panel.sid)} style={miniLinkBtnStyle}>copy</button>
+                <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="미리보기로 (esc)">×</button>
+              </span>
+            </>
+          ) : panel.kind === 'ws' ? (
+            <>
+              <span style={{ color: 'var(--text-soft)', fontWeight: 700 }}>workspace</span>
+              <span>{(() => { const w = workspaces.find((x) => x.id === panel.wsId); return w ? workspaceDisplayLabel(w) : panel.wsId; })()}</span>
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+                <button onClick={() => navigate({ page: 'workspace', id: panel.wsId })} style={{ ...miniLinkBtnStyle, color: 'var(--accent)' }}>open</button>
+                <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="미리보기로 (esc)">×</button>
+              </span>
+            </>
+          ) : (
+            <>
+              <span style={{ color: 'var(--text-soft)' }}>preview</span>
+              <span>{hoveredSessionId !== null ? `#${hoveredSessionId}` : 'no session'}</span>
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+                {hoveredSessionId !== null ? (
+                  <>
+                    <button onClick={() => setPanel({ kind: 'live', sid: hoveredSessionId })} style={{ ...miniLinkBtnStyle, color: 'var(--accent)' }}>live</button>
+                    <button onClick={() => navigate({ page: 'session', id: hoveredSessionId })} style={miniLinkBtnStyle}>open</button>
+                    <button onClick={() => void copySessionUrl(hoveredSessionId)} style={miniLinkBtnStyle}>copy</button>
+                  </>
+                ) : null}
+              </span>
+            </>
+          )}
         </div>
-        <div
-          className="preview-scroll"
-          style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '12px 14px', color: 'var(--term-fg)', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}
-          dangerouslySetInnerHTML={{ __html: ansiToHtml(hoveredScreen) }}
-        />
+        {panel.kind === 'live' ? (
+          // 행 클릭 = 그 자리에서 바로 쓰는 터미널. 단일 대형 뷰라 GPU 허용.
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <Terminal mux={mux} attachId={panel.sid} localEcho={localEchoEnabled} onExit={() => setPanel({ kind: 'hover' })} />
+          </div>
+        ) : panel.kind === 'ws' ? (
+          (() => {
+            const target = workspaces.find((x) => x.id === panel.wsId);
+            if (!target) return <div style={{ color: 'var(--text-dim)', padding: 20, fontSize: 12 }}>workspace가 사라졌다</div>;
+            const names = memberNameBySession(target.members);
+            return (
+              <div style={{ flex: 1, minHeight: 0 }}>
+                <LayoutView
+                  layout={target.layout}
+                  splitterColor="var(--line)"
+                  splitterActiveColor="var(--accent)"
+                  renderPane={(sid) => sid <= 0 ? (
+                    <div key="empty" style={{ ...emptyPaneStyle, fontSize: 11 }}>empty</div>
+                  ) : (
+                    <div key={sid} style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
+                      <div
+                        onClick={() => setPanel({ kind: 'live', sid })}
+                        title="클릭: live로 전환"
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, height: 22, padding: '0 8px', background: 'var(--bg2)', borderBottom: '1px solid var(--line)', fontSize: 10, cursor: 'pointer', flexShrink: 0 }}
+                      >
+                        <span style={{ color: agentStates[sid]?.kind ? AGENT_COLORS[agentStates[sid]!.kind!] : 'var(--text-soft)', fontWeight: 700 }}>
+                          {names.get(sid) || `#${sid}`}
+                        </span>
+                        <span style={{ color: 'var(--text-dim)' }}>#{sid}</span>
+                      </div>
+                      <div style={{ flex: 1, minHeight: 0, pointerEvents: 'none' }}>
+                        <Terminal mux={mux} attachId={sid} mode="readonly" fontSize={10} enableWebgl={false} />
+                      </div>
+                    </div>
+                  )}
+                />
+              </div>
+            );
+          })()
+        ) : (
+          <div
+            className="preview-scroll"
+            style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '12px 14px', color: 'var(--term-fg)', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}
+            dangerouslySetInnerHTML={{ __html: ansiToHtml(hoveredScreen) }}
+          />
+        )}
       </div>
     </div>
   );
@@ -1339,7 +1416,7 @@ function App() {
       page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} />;
       break;
     default:
-      page = <DashboardPage mux={mux} agentStates={agentStates} />;
+      page = <DashboardPage mux={mux} agentStates={agentStates} localEchoEnabled={localEchoEnabled} />;
       break;
   }
 
