@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes } from '@ttym/ui';
 import { ansiToHtml } from '@ttym/vt';
 import * as api from '@ttym/api';
@@ -505,7 +506,7 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState> }) {
+function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, actionsSlot }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null }) {
   const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
@@ -516,8 +517,6 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [standaloneSessions, setStandaloneSessions] = useState<Array<{ id: number; cwd?: string }>>([]);
   const [attachLoading, setAttachLoading] = useState(false);
-  const [editingName, setEditingName] = useState(false);
-  const [draftName, setDraftName] = useState('');
   const [dragSid, setDragSid] = useState<number | null>(null);
   const [bells, setBells] = useState<Set<number>>(new Set());
   const [lastAgentIds, setLastAgentIds] = useState<Record<number, { claude?: string; codex?: string }>>({});
@@ -740,17 +739,6 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
     return () => window.removeEventListener('keydown', handler);
   }, [attachOpen]);
 
-  // ── 이름 편집 ──
-
-  const beginEditName = useCallback(() => { setDraftName(ws?.name ?? ''); setEditingName(true); }, [ws?.name]);
-  const commitEditName = useCallback(async () => {
-    const next = draftName.trim();
-    setEditingName(false);
-    if (!next || next === ws?.name) return;
-    setWs((prev) => prev ? { ...prev, name: next } : prev);
-    await apiUpdateWorkspace(workspaceId, { name: next });
-  }, [draftName, ws?.name, workspaceId]);
-
   // ── 키바인딩: ⌘\ 우분할 · ⌘⇧\ 하분할 · ⌘←→ 포커스 순환 ──
 
   useEffect(() => {
@@ -869,64 +857,49 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
     );
   }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, bells, mux, localEchoEnabled, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent]);
 
+  // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
+  const stripActions = (
+    <>
+      <button onClick={() => void doSplit('right')} style={stripBtnStyle} title="split right of focused · ⌘\\">+ split</button>
+      <span style={{ position: 'relative', display: 'inline-block' }}>
+        <button onClick={() => setLayoutMenuOpen((v) => !v)} style={stripBtnStyle}>layout ▾</button>
+        {layoutMenuOpen ? (
+          <div style={attachDropdownStyle}>
+            <div style={attachDropdownTitleStyle}>preset — 멤버는 그대로, 배치만 바뀐다</div>
+            {(['auto', 'even-h', 'even-v', 'main-v', 'tiled'] as const).map((preset) => (
+              <button key={preset} onClick={() => void applyPreset(preset)} style={attachDropdownItemStyle}>
+                {preset}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </span>
+      <span style={{ position: 'relative', display: 'inline-block' }}>
+        <button onClick={toggleAttach} style={stripBtnStyle}>+ attach</button>
+        {attachOpen ? (
+          <div style={attachDropdownStyle}>
+            <div style={attachDropdownTitleStyle}>detached sessions</div>
+            {attachLoading ? (
+              <div style={attachDropdownEmptyStyle}>loading…</div>
+            ) : standaloneSessions.length === 0 ? (
+              <div style={attachDropdownEmptyStyle}>no detached sessions</div>
+            ) : (
+              standaloneSessions.map((s) => (
+                <button key={s.id} onClick={() => void attachSession(s.id)} style={attachDropdownItemStyle} title={s.cwd ?? ''}>
+                  <span style={{ color: 'var(--text)' }}>#{s.id}</span>
+                  {s.cwd ? <span style={{ color: 'var(--text-soft)', marginLeft: 8, fontSize: 10 }}>{s.cwd}</span> : null}
+                </button>
+              ))
+            )}
+          </div>
+        ) : null}
+      </span>
+    </>
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={toolbarStyle}>
-        {ws && ws.project !== 'default' ? <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>{ws.project}/</span> : null}
-        {editingName ? (
-          <input
-            autoFocus
-            value={draftName}
-            onChange={(event) => setDraftName(event.target.value)}
-            onBlur={() => { void commitEditName(); }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') { event.preventDefault(); void commitEditName(); }
-              else if (event.key === 'Escape') { event.preventDefault(); setEditingName(false); }
-            }}
-            style={workspaceNameInputStyle}
-          />
-        ) : (
-          <span onClick={beginEditName} style={workspaceNameStyle} title="click to rename">{ws?.name ?? workspaceId}</span>
-        )}
-        <button onClick={() => void doSplit('right')} style={btnStyle}>+ split</button>
-        <span style={{ position: 'relative', display: 'inline-block' }}>
-          <button onClick={() => setLayoutMenuOpen((v) => !v)} style={btnStyle}>layout ▾</button>
-          {layoutMenuOpen ? (
-            <div style={attachDropdownStyle}>
-              <div style={attachDropdownTitleStyle}>preset — 멤버는 그대로, 배치만 바뀐다</div>
-              {(['auto', 'even-h', 'even-v', 'main-v', 'tiled'] as const).map((preset) => (
-                <button key={preset} onClick={() => void applyPreset(preset)} style={attachDropdownItemStyle}>
-                  {preset}
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </span>
-        <span style={{ position: 'relative', display: 'inline-block' }}>
-          <button onClick={toggleAttach} style={btnStyle}>+ attach</button>
-          {attachOpen ? (
-            <div style={attachDropdownStyle}>
-              <div style={attachDropdownTitleStyle}>detached sessions</div>
-              {attachLoading ? (
-                <div style={attachDropdownEmptyStyle}>loading…</div>
-              ) : standaloneSessions.length === 0 ? (
-                <div style={attachDropdownEmptyStyle}>no detached sessions</div>
-              ) : (
-                standaloneSessions.map((s) => (
-                  <button key={s.id} onClick={() => void attachSession(s.id)} style={attachDropdownItemStyle} title={s.cwd ?? ''}>
-                    <span style={{ color: 'var(--text)' }}>#{s.id}</span>
-                    {s.cwd ? <span style={{ color: 'var(--text-soft)', marginLeft: 8, fontSize: 10 }}>{s.cwd}</span> : null}
-                  </button>
-                ))
-              )}
-            </div>
-          ) : null}
-        </span>
-        <span style={{ color: 'var(--text-dim)', fontSize: 11, marginLeft: 'auto' }}>
-          {'\u2318\\ split \u2003 \u2318\u21e7\\ down \u2003 drag divider resize \u2003 dbl-click zoom'}
-        </span>
-      </div>
-
+      {actionsSlot ? createPortal(stripActions, actionsSlot) : null}
       <div style={{ flex: 1, minHeight: 0, background: 'var(--bg0)' }}>
         {ws ? (
           <LayoutView
@@ -1246,6 +1219,17 @@ function App() {
   const [localEchoEnabled, setLocalEchoEnabled] = useState(readLocalEchoEnabled);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
+  const [stripSlot, setStripSlot] = useState<HTMLSpanElement | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+
+  const commitRename = useCallback(async () => {
+    const id = renamingId;
+    const name = renameDraft.trim();
+    setRenamingId(null);
+    if (!id || !name) return;
+    try { await api.updateWorkspace(API_BASE, id, { name }); } catch {}
+  }, [renamingId, renameDraft]);
 
   useEffect(() => {
     const wsUrl = `${isSecure ? 'wss' : 'ws'}://${TTYM_HOST}/ws`;
@@ -1352,7 +1336,7 @@ function App() {
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} />;
       break;
     default:
       page = <DashboardPage mux={mux} agentStates={agentStates} />;
@@ -1380,7 +1364,8 @@ function App() {
               key={ws.id}
               onClick={() => navigate({ page: 'workspace', id: ws.id })}
               style={{ ...tabStyle, ...(active ? tabActiveStyle : null) }}
-              title={`${workspaceDisplayLabel(ws)} · ⌘${i + 2}`}
+              title={`${workspaceDisplayLabel(ws)} · ⌘${i + 2} · 더블클릭: 이름 변경`}
+              onDoubleClick={() => { setRenamingId(ws.id); setRenameDraft(ws.name); }}
             >
               {dotColor ? (
                 <span
@@ -1388,15 +1373,31 @@ function App() {
                   style={{ width: 5, height: 5, borderRadius: '50%', background: dotColor, opacity: running ? 1 : 0.4, flexShrink: 0 }}
                 />
               ) : null}
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
-                {workspaceDisplayLabel(ws)}
-              </span>
+              {renamingId === ws.id ? (
+                <input
+                  autoFocus
+                  value={renameDraft}
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onBlur={() => { void commitRename(); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); void commitRename(); }
+                    else if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); }
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ background: 'var(--bg0)', color: 'var(--text)', border: '1px solid var(--line-strong)', borderRadius: 4, padding: '1px 5px', fontFamily: 'monospace', fontSize: 12, width: 110, outline: 'none' }}
+                />
+              ) : (
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                  {workspaceDisplayLabel(ws)}
+                </span>
+              )}
               <span style={{ color: 'var(--text-dim)' }}>{ids.length}</span>
             </button>
           );
         })}
         <button onClick={() => void createWorkspaceTab()} style={tabAddStyle} title="new workspace">+</button>
         <span style={{ marginLeft: 'auto' }} />
+        <span ref={setStripSlot} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} />
         <SettingsOverlay
           localEchoEnabled={localEchoEnabled}
           onLocalEchoChange={handleLocalEchoChange}
@@ -1449,6 +1450,17 @@ const tabAddStyle: React.CSSProperties = {
   padding: '0 9px',
 };
 
+/* 탭 스트립 우측의 workspace 액션 — 탭과 같은 조용한 문법. */
+const stripBtnStyle: React.CSSProperties = {
+  ...tabStyle,
+  height: 26,
+  padding: '0 10px',
+  fontSize: 11,
+  color: 'var(--text-soft)',
+  border: '1px solid var(--line)',
+  borderRadius: 6,
+};
+
 // ───── 스타일 ─────
 
 const toolbarStyle: React.CSSProperties = {
@@ -1495,10 +1507,11 @@ const closeBtnStyle: React.CSSProperties = {
   borderRadius: 3,
 };
 
+/* pane 헤더의 상시 노출 버튼 — 파랑은 포커스·상태 몫, 이 버튼들은 조용해야 한다. */
 const miniLinkBtnStyle: React.CSSProperties = {
-  background: 'var(--accent-bg)',
-  color: 'var(--accent)',
-  border: '1px solid #314253',
+  background: 'transparent',
+  color: 'var(--text-dim)',
+  border: '1px solid transparent',
   padding: '1px 5px',
   cursor: 'pointer',
   fontFamily: 'monospace',
@@ -1544,7 +1557,7 @@ const workspaceNameInputStyle: React.CSSProperties = {
 const attachDropdownStyle: React.CSSProperties = {
   position: 'absolute',
   top: 'calc(100% + 6px)',
-  left: 0,
+  right: 0,
   minWidth: 240,
   maxHeight: 320,
   overflowY: 'auto',
