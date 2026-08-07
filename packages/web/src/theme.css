@@ -3,49 +3,51 @@
  * 원칙: 터미널 배경 = 앱 배경(한 계열), 보더는 선으로, 상태는 위젯이 아니라 속성.
  * 다크가 기본, 라이트는 같은 토큰의 오버라이드 한 겹.
  */
+/* 색 배합은 종전 웹의 회색+블루(#1e1e1e·#007acc) 유지 — 사용자 확정.
+ * 네이비 시안 팔레트는 기각. 토큰 구조만 남긴다. */
 :root {
-  --bg0: #0a0e14;          /* 최심부: 터미널 = 앱 배경 */
-  --bg1: #10151d;          /* 표면: 카드·리스트 */
-  --bg2: #161d27;          /* 상승 표면: 툴바·pane 헤더 */
-  --bg3: #1d2633;          /* hover·active */
-  --line: rgba(148, 170, 200, 0.14);
-  --line-strong: rgba(148, 170, 200, 0.28);
-  --text: #e6edf5;
-  --text-soft: #aab8c9;
-  --text-dim: #6d7c8f;
-  --accent: #6ea8ff;
-  --accent-dim: #2c4a75;
-  --accent-bg: rgba(110, 168, 255, 0.1);
-  --ok: #57d99a;
-  --warn: #f0b23e;
-  --err: #f26d6d;
+  --bg0: #1e1e1e;          /* 최심부: 터미널 = 앱 배경 */
+  --bg1: #252525;          /* 표면: 카드·리스트 행 */
+  --bg2: #2d2d2d;          /* 상승 표면: 툴바·버튼·pane 헤더 */
+  --bg3: #34383e;          /* hover·active */
+  --line: #333333;
+  --line-strong: #444444;
+  --text: #dddddd;
+  --text-soft: #aaaaaa;
+  --text-dim: #777777;
+  --accent: #007acc;
+  --accent-dim: #0d3a58;
+  --accent-bg: #0d3a58;
+  --ok: #0dbc79;
+  --warn: #f0b040;
+  --err: #f14c4c;
   --agent-claude: #e8955c;
   --agent-codex: #7ec8e8;
-  --term-bg: #0a0e14;
-  --term-fg: #c8d3e0;
-  --cwd: #5d80a8;
+  --term-bg: #1e1e1e;
+  --term-fg: #d4d4d4;
+  --cwd: #6b90b1;
 }
 
 :root[data-theme='light'] {
-  --bg0: #f6f8fb;
+  --bg0: #f5f5f5;
   --bg1: #ffffff;
-  --bg2: #eceff5;
-  --bg3: #e0e6ef;
-  --line: rgba(28, 50, 80, 0.13);
-  --line-strong: rgba(28, 50, 80, 0.24);
-  --text: #1c2733;
-  --text-soft: #43546a;
-  --text-dim: #8494a7;
-  --accent: #2f6fe0;
-  --accent-dim: #cdddf8;
-  --accent-bg: rgba(47, 111, 224, 0.08);
-  --ok: #178a55;
-  --warn: #a86f0e;
-  --err: #cf4040;
+  --bg2: #ececec;
+  --bg3: #e0e0e0;
+  --line: #d9d9d9;
+  --line-strong: #c4c4c4;
+  --text: #24292f;
+  --text-soft: #4b5563;
+  --text-dim: #8b949e;
+  --accent: #0969da;
+  --accent-dim: #cfe4fb;
+  --accent-bg: #ddeeff;
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --err: #cf222e;
   --agent-claude: #c26522;
   --agent-codex: #1f7fae;
-  --term-bg: #f6f8fb;
-  --term-fg: #33445a;
+  --term-bg: #f5f5f5;
+  --term-fg: #333b45;
   --cwd: #3e6a99;
 }
 
