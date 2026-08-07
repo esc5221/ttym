@@ -233,7 +233,7 @@ function navigate(route: Route) {
 
 type DashPanel = { kind: 'hover' } | { kind: 'live'; sid: number } | { kind: 'ws'; wsId: string };
 
-function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMux; agentStates: Record<number, AgentState>; localEchoEnabled: boolean }) {
+function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mux: TerminalMux; agentStates: Record<number, AgentState>; localEchoEnabled: boolean; actionsSlot: HTMLElement | null }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
@@ -371,13 +371,24 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
     }
   }, [mux]);
 
+  const terminateSession = useCallback(async (sid: number, wsId?: string) => {
+    mux.destroySession(sid);
+    if (wsId) await apiRemoveMember(wsId, sid);
+    await refresh();
+  }, [mux, refresh]);
+
+  const deleteWorkspaceCascade = useCallback(async (ws: Workspace) => {
+    for (const sid of layoutToSessionIds(ws.layout).filter((id) => id > 0)) mux.destroySession(sid);
+    await apiDeleteWorkspace(ws.id);
+    await refresh();
+  }, [mux, refresh]);
+
   const aliveIds = new Set(sessions.map((s) => s.id));
   const assigned = new Set(workspaces.flatMap((w) => layoutToSessionIds(w.layout).filter((id) => id > 0)));
   const standalone = sessions.filter((s) => !assigned.has(s.id));
-  const runningAgents = Object.values(agentStates).filter((a) => a.active).length;
   const infoBySession = new Map(sessions.map((s) => [s.id, s] as const));
 
-  const sessionRow = (sid: number, name?: string) => {
+  const sessionRow = (sid: number, name?: string, wsId?: string) => {
     const info = infoBySession.get(sid);
     const agent = agentStates[sid];
     const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
@@ -396,7 +407,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
           style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
                    background: color ?? 'transparent', opacity: agent?.active ? 1 : 0.4 }}
         />
-        <span style={{ color: 'var(--text-dim)', fontSize: 11, width: 42, flexShrink: 0 }}>#{sid}</span>
+        <span style={{ color: 'var(--text-dim)', fontSize: 11, minWidth: 24, flexShrink: 0 }}>#{sid}</span>
         <span style={{ color: color ?? 'var(--text)', fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
           {name ?? '—'}
         </span>
@@ -404,6 +415,11 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
           {(sessionCwds[sid] ? `${formatCwd(sessionCwds[sid])} · ` : '') + (info ? info.cmd.join(' ') : '')}
         </span>
         <span style={{ color: 'var(--text-dim)', fontSize: 10.5, flexShrink: 0 }}>pid {info?.pid ?? '—'}</span>
+        <button
+          onClick={(e) => { e.stopPropagation(); void terminateSession(sid, wsId); }}
+          style={{ ...closeBtnStyle, marginLeft: 0, flexShrink: 0 }}
+          title="세션 종료"
+        >×</button>
       </div>
     );
   };
@@ -468,17 +484,11 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
             pointerEvents: 'none',
           }}
         />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 4px 12px', color: 'var(--text-dim)', fontSize: 11 }}>
-          <span>{sessions.length} session{sessions.length !== 1 ? 's' : ''}</span>
-          <span>·</span>
-          <span>{workspaces.length} workspace{workspaces.length !== 1 ? 's' : ''}</span>
-          <span>·</span>
-          <span style={{ color: runningAgents > 0 ? 'var(--agent-claude)' : undefined }}>
-            {runningAgents} agent{runningAgents !== 1 ? 's' : ''} running
-          </span>
-          <button onClick={createSession} style={{ ...actionBtnStyle, marginLeft: 'auto', padding: '2px 9px', fontSize: 11 }}>+ session</button>
-          <button onClick={refresh} style={{ ...actionBtnStyle, background: 'transparent', padding: '2px 9px', fontSize: 11 }}>↻</button>
-        </div>
+        {actionsSlot ? createPortal(
+          <>
+            <button onClick={createSession} style={stripBtnStyle}>+ session</button>
+            <button onClick={refresh} style={stripBtnStyle} title="refresh">↻</button>
+          </>, actionsSlot) : null}
 
         {loading && workspaces.length === 0 ? (
           <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: 8 }}>loading…</div>
@@ -497,15 +507,21 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
                 style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', fontSize: 12, fontWeight: 700, color: 'var(--text-soft)', cursor: 'pointer' }}
               >
                 {workspaceDisplayLabel(ws)}
-                <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 11 }}>{ids.length} member{ids.length !== 1 ? 's' : ''}</span>
-                {running > 0 ? (
-                  <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <span className="agent-dot-run" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--agent-claude)' }} />
-                    <span style={{ color: 'var(--text-dim)', fontSize: 10.5 }}>{running}</span>
-                  </span>
-                ) : null}
+                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  {running > 0 ? (
+                    <>
+                      <span className="agent-dot-run" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--agent-claude)' }} />
+                      <span style={{ color: 'var(--text-dim)', fontSize: 10.5 }}>{running}</span>
+                    </>
+                  ) : null}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); void deleteWorkspaceCascade(ws); }}
+                    style={closeBtnStyle}
+                    title="workspace 삭제 (세션 종료)"
+                  >×</button>
+                </span>
               </div>
-              {ids.map((sid) => sessionRow(sid, names.get(sid)))}
+              {ids.map((sid) => sessionRow(sid, names.get(sid), ws.id))}
             </div>
           );
         })}
@@ -1466,7 +1482,7 @@ function App() {
       page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} />;
       break;
     default:
-      page = <DashboardPage mux={mux} agentStates={agentStates} localEchoEnabled={localEchoEnabled} />;
+      page = <DashboardPage mux={mux} agentStates={agentStates} localEchoEnabled={localEchoEnabled} actionsSlot={stripSlot} />;
       break;
   }
 
