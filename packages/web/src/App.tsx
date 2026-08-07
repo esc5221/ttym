@@ -392,6 +392,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
     const info = infoBySession.get(sid);
     const agent = agentStates[sid];
     const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
+    const selected = panel.kind === 'live' && panel.sid === sid;
     return (
       <div
         key={sid}
@@ -401,6 +402,8 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
         style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px',
           borderRadius: 8, cursor: 'pointer', minWidth: 0,
+          borderLeft: selected ? '2px solid var(--accent)' : '2px solid transparent',
+          background: selected ? 'var(--hl)' : undefined,
         }}
       >
         <span
@@ -501,7 +504,10 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
           const names = memberNameBySession(ws.members);
           const running = ids.filter((id) => agentStates[id]?.active).length;
           return (
-            <div key={ws.id} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 6, marginBottom: 10, background: 'var(--bg0)' }}>
+            <div key={ws.id} style={{
+              border: '1px solid var(--line)', borderRadius: 10, padding: 6, marginBottom: 10, background: 'var(--bg0)',
+              borderLeft: panel.kind === 'ws' && panel.wsId === ws.id ? '2px solid var(--accent)' : '1px solid var(--line)',
+            }}>
               <div
                 className="reveal-parent"
                 onClick={() => setPanel({ kind: 'ws', wsId: ws.id })}
@@ -544,10 +550,10 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
         <div style={{ height: 34, display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg1)', fontSize: 11.5, color: 'var(--text-dim)', flexShrink: 0 }}>
           {panel.kind === 'live' ? (
             <>
-              <span style={{ color: 'var(--accent)', fontWeight: 700 }}>live</span>
+              <span style={{ color: 'var(--text-soft)', fontWeight: 700 }}>live</span>
               <span>#{panel.sid}</span>
               <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
-                <button onClick={() => navigate({ page: 'session', id: panel.sid })} style={{ ...miniLinkBtnStyle, color: 'var(--accent)' }}>open</button>
+                <button onClick={() => navigate({ page: 'session', id: panel.sid })} style={miniLinkBtnStyle}>open</button>
                 <button onClick={() => void copySessionUrl(panel.sid)} style={miniLinkBtnStyle}>copy</button>
                 <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="미리보기로 (esc)">×</button>
               </span>
@@ -557,7 +563,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
               <span style={{ color: 'var(--text-soft)', fontWeight: 700 }}>workspace</span>
               <span>{(() => { const w = workspaces.find((x) => x.id === panel.wsId); return w ? workspaceDisplayLabel(w) : panel.wsId; })()}</span>
               <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
-                <button onClick={() => navigate({ page: 'workspace', id: panel.wsId })} style={{ ...miniLinkBtnStyle, color: 'var(--accent)' }}>open</button>
+                <button onClick={() => navigate({ page: 'workspace', id: panel.wsId })} style={miniLinkBtnStyle}>open</button>
                 <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="미리보기로 (esc)">×</button>
               </span>
             </>
@@ -570,7 +576,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
               <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
                 {hoveredSessionId !== null ? (
                   <>
-                    <button onClick={() => setPanel({ kind: 'live', sid: hoveredSessionId })} style={{ ...miniLinkBtnStyle, color: 'var(--accent)' }}>live</button>
+                    <button onClick={() => setPanel({ kind: 'live', sid: hoveredSessionId })} style={miniLinkBtnStyle}>live</button>
                     <button onClick={() => navigate({ page: 'session', id: hoveredSessionId })} style={miniLinkBtnStyle}>open</button>
                     <button onClick={() => void copySessionUrl(hoveredSessionId)} style={miniLinkBtnStyle}>copy</button>
                   </>
@@ -940,8 +946,10 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
           style={{
             display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 8px',
             background: isFocused ? 'var(--bg0)' : 'var(--bg2)',
-            borderTop: dead ? '2px solid #a55' : isFocused ? '2px solid #007acc' : '2px solid transparent',
-            borderBottom: '1px solid #333', flexShrink: 0, userSelect: 'none',
+            // 통일 문법: 엣지는 "현재". pane은 좌측 세로바 — 탭바의 가로선들과
+            // 평행 충돌하던 상단 라인을 버린다. dead는 같은 자리 err.
+            borderLeft: dead ? '2px solid var(--err)' : isFocused ? '2px solid var(--accent)' : '2px solid transparent',
+            borderBottom: '1px solid var(--line)', flexShrink: 0, userSelect: 'none',
           }}
           draggable
           onDragStart={() => setDragSid(sid)}
@@ -1589,7 +1597,9 @@ const tabStyle: React.CSSProperties = {
 const tabActiveStyle: React.CSSProperties = {
   background: 'var(--bg0)',
   color: 'var(--text)',
-  border: '1px solid var(--line)',
+  // 엣지는 "현재": 탭은 하단 언더라인. 보더 박스는 pane·리스트와 결이 달랐다.
+  boxShadow: 'inset 0 -2px 0 var(--accent)',
+  borderRadius: '7px 7px 0 0',
 };
 
 const tabAddStyle: React.CSSProperties = {
