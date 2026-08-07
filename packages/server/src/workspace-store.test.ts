@@ -150,26 +150,19 @@ describe('WorkspaceStore', () => {
     });
 
     expect(updated?.members.map((member) => member.name)).toEqual(['lead', 'worker', 'logs']);
-    // splitRight now splits the target pane in place instead of rebuilding the
-    // tree as a flat, evenly divided row. Pane 41's slot keeps its 0.5 share
-    // and is subdivided; pane 42 does not move.
+    // Splitting along the row's own axis joins it as a sibling with an equal
+    // share — a 50/50 row split again reads as thirds, not 50/25/25.
     expect(updated?.layout).toEqual({
       type: 'split',
       axis: 'row',
-      sizes: [0.5, 0.5],
+      sizes: [1 / 3, 1 / 3, 1 / 3],
       children: [
-        {
-          type: 'split',
-          axis: 'row',
-          sizes: [0.5, 0.5],
-          children: [
-            { type: 'pane', sessionId: 41 },
-            { type: 'pane', sessionId: 43 },
-          ],
-        },
+        { type: 'pane', sessionId: 41 },
+        { type: 'pane', sessionId: 43 },
         { type: 'pane', sessionId: 42 },
       ],
     });
+  });
   });
 
 
@@ -187,10 +180,11 @@ describe('WorkspaceStore', () => {
     });
 
     const up = store.splitRight(created.id, 41, { sessionId: 43, name: 'above', tags: [] }, 'up')!;
-    const col = (up.layout as any).children[0];
+    // col[41,42] + up on 41 → same-axis sibling before the target: col[43,41,42].
+    const col = up.layout as any;
     expect(col.axis).toBe('col');
-    expect(col.children[0].sessionId).toBe(43);
-    expect(col.children[1].sessionId).toBe(41);
+    expect(col.children.map((c: any) => c.sessionId)).toEqual([43, 41, 42]);
+    expect(col.sizes.every((v: number) => Math.abs(v - 1 / 3) < 1e-9)).toBe(true);
   });
   it('preserves nesting and sizes when a member is added', () => {
     const dir = runtimeDir();

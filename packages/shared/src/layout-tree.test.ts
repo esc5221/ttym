@@ -87,8 +87,18 @@ describe('layout tree — split places beside a target', () => {
     expect(JSON.stringify(root.children[1])).toBe(JSON.stringify((nested() as any).children[1]));
   });
 
-  it('honours the requested ratio', () => {
-    const root = splitPane(nested(), 1, 9, 'row', 0.25) as any;
+  it('joins the same axis as an equalized sibling — thirds, not 50/25/25', () => {
+    const root = splitPane(nested(), 1, 9, 'row') as any;
+    // row[1, col[2,3]] + row-split on 1 → row[1, 9, col[2,3]], every sibling
+    // scaled by 2/3 so relative ratios survive and the newcomer gets 1/3.
+    expect(root.children.map((c: any) => c.type === 'pane' ? c.sessionId : 'col')).toEqual([1, 9, 'col']);
+    expect(near(root.sizes[1], 1 / 3)).toBe(true);
+    expect(near(root.sizes[0] / root.sizes[2], 0.7 / 0.3)).toBe(true);
+  });
+
+  it('honours the requested ratio on a cross-axis split', () => {
+    const root = splitPane(nested(), 1, 9, 'col', 0.25) as any;
+    expect(root.children[0].axis).toBe('col');
     expect(near(root.children[0].sizes[1], 0.25)).toBe(true);
   });
 

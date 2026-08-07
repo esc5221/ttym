@@ -111,6 +111,26 @@ export function splitPane(
         : split(axis, [node, fresh], [1 - bounded, bounded]);
     }
     if (!layoutHasSession(node, targetSessionId)) return node; // sibling: untouched
+
+    // Splitting along this split's own axis joins the row instead of nesting:
+    // a 50/50 row split again reads as thirds, not 50/25/25. Every sibling
+    // gives up a proportional share, so hand-dragged ratios keep their
+    // relations. Nesting is reserved for the cross axis, where it means it.
+    const targetIndex = node.axis === axis
+      ? node.children.findIndex((child) => isPane(child) && child.sessionId === targetSessionId)
+      : -1;
+    if (targetIndex !== -1) {
+      const count = node.children.length;
+      const share = 1 / (count + 1);
+      const scaled = alignSizes(node.sizes, count).map((size) => size * (1 - share));
+      const at = before ? targetIndex : targetIndex + 1;
+      const children = node.children.slice();
+      children.splice(at, 0, { type: 'pane', sessionId });
+      const sizes = scaled.slice();
+      sizes.splice(at, 0, share);
+      return { ...node, children, sizes: normalize(sizes) };
+    }
+
     return { ...node, children: node.children.map(rewrite), sizes: alignSizes(node.sizes, node.children.length) };
   };
 
