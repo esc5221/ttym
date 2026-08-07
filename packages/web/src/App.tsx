@@ -449,7 +449,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
         ref={listRef}
         onMouseLeave={() => setHl((prev) => ({ ...prev, visible: false }))}
         onScroll={() => setHl((prev) => (prev.visible ? { ...prev, visible: false } : prev))}
-        style={{ borderRight: compactLayout ? 'none' : '1px solid var(--line)', background: 'var(--bg1)', padding: 14, overflowY: 'auto', minHeight: 0, position: 'relative', isolation: 'isolate' }}
+        style={{ borderRight: compactLayout ? 'none' : '1px solid var(--line)', background: 'var(--bg1)', padding: 14, overflowY: 'auto', minHeight: 0, position: 'relative' }}
       >
         <div
           className="morph-hl"
@@ -460,10 +460,11 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
             width: hl.width,
             height: hl.height,
             borderRadius: hl.variant === 'ws' ? 10 : 8,
-            background: hl.variant === 'ws' ? 'var(--accent-bg)' : 'var(--bg3)',
+            // 콘텐츠 위에 얹는 베일 — 카드가 불투명해도 항상 보인다.
+            background: 'var(--hl)',
             border: hl.variant === 'ws' ? '1px solid var(--accent-dim)' : '1px solid transparent',
-            opacity: hl.visible ? (hl.variant === 'ws' ? 0.6 : 1) : 0,
-            zIndex: -1,
+            opacity: hl.visible ? 1 : 0,
+            zIndex: 1,
             pointerEvents: 'none',
           }}
         />
