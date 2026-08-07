@@ -1676,7 +1676,7 @@ function PreviewCard({ mux, sessionId, label, sublabel, status }: {
         </span>
       </div>
       <div style={{ height: 220, pointerEvents: 'none' }}>
-        <Terminal mux={mux} attachId={sessionId} mode="readonly" fontSize={9} />
+        <Terminal mux={mux} attachId={sessionId} mode="readonly" fontSize={9} enableWebgl={false} />
       </div>
     </div>
   );

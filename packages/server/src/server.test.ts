@@ -142,6 +142,47 @@ describe('createServer', () => {
     expect(snapshot.payload.toString()).toContain('hello');
   });
 
+  it('pauses an acking viewer that stops digesting, resumes on ack', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    // READY first, then after a beat the shell emits ~400KB on its own —
+    // input through the PTY would die at canonical mode's 4KB line limit.
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', "printf 'READY\\n'; sleep 0.5; dd if=/dev/zero bs=1024 count=400 2>/dev/null | tr '\\0' 'x'; stty -echo; exec cat"],
+      cols: 80, rows: 24,
+    }))));
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    const first = await ws1.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid);
+
+    // One ack inside the quiet window opts this viewer into ack accounting.
+    const firstSeq = first.seq ?? 1;
+    ws1.send(encode(sid, CMD.ACK, Buffer.from(JSON.stringify({ seq: firstSeq }))));
+
+    // Collect until the stream stalls: with a 256KB unacked ceiling the
+    // server must stop fanning out well before the full 384KB arrives.
+    let received = 0;
+    let lastSeq = firstSeq;
+    for (;;) {
+      try {
+        const frame = await ws1.next((f) => f.cmd === CMD.DATA && f.sessionId === sid, 700);
+        received += frame.payload.length;
+        if (frame.seq !== undefined) lastSeq = frame.seq;
+      } catch { break; }
+    }
+    expect(received).toBeGreaterThan(0);
+    expect(received).toBeLessThan(400 * 1024);
+
+    // Digest everything: the server resumes and replays the gap (delta from
+    // the ring, or one watermarked snapshot).
+    ws1.send(encode(sid, CMD.ACK, Buffer.from(JSON.stringify({ seq: lastSeq }))));
+    const resumed = await ws1.next(
+      (f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid, 10_000);
+    expect([CMD.DATA, CMD.SNAPSHOT]).toContain(resumed.cmd);
+  }, 30_000);
+
   it('stamps snapshots with a watermark, and resumeView from it replays delta — not another snapshot', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);

@@ -17,6 +17,11 @@ const BATCH_MS = 4;
 const MAX_BATCH_BYTES = 64 * 1024;
 const IMMEDIATE_THRESHOLD = 512; // bytes — flush immediately for interactive typing
 const WS_HIGH_WATER = 1 << 20;
+// Ack-based viewer backpressure (vscode terminal model): measure what the
+// client has *parsed*, not what the network delivered. Wide hysteresis keeps
+// the stream from stuttering at the boundary.
+const ACK_HIGH_WATER = 256 * 1024;
+const ACK_LOW_WATER = 16 * 1024;
 const WS_LOW_WATER = 1 << 18;
 
 const DEBUG = true;
@@ -121,6 +126,12 @@ interface SessionBatcher {
   pausedForBackpressure: boolean;
   drainTimer: NodeJS.Timeout | null;
   pausedView: boolean;
+  /** Client has acked at least once — enables ack accounting; without it we
+   *  fall back to bufferedAmount so a non-acking consumer is never frozen. */
+  acking: boolean;
+  sentEntries: Array<{ seq: number; bytes: number }>;
+  unackedBytes: number;
+  lastSentSeq: number;
 }
 
 // ───── ACK 추적 (viewer별) ─────
@@ -779,6 +790,10 @@ export async function createServer(port: number): Promise<TtymServer> {
           pausedForBackpressure: false,
           drainTimer: null,
           pausedView: false,
+          acking: false,
+          sentEntries: [],
+          unackedBytes: 0,
+          lastSentSeq: 0,
         };
         batchers.set(sessionId, batcher);
       }
@@ -800,9 +815,17 @@ export async function createServer(port: number): Promise<TtymServer> {
       batcher.pending = [];
       batcher.pendingBytes = 0;
       safeSend(ws, encodeData(sessionId, seq, payload));
+      batcher.sentEntries.push({ seq, bytes: payload.length });
+      batcher.unackedBytes += payload.length;
+      batcher.lastSentSeq = seq;
 
       // backpressure: 이 viewer(ws)만 대상, PTY는 멈추지 않음
-      if (!batcher.pausedForBackpressure && ws.bufferedAmount > WS_HIGH_WATER) {
+      if (batcher.acking) {
+        if (!batcher.pausedForBackpressure && batcher.unackedBytes > ACK_HIGH_WATER) {
+          batcher.pausedForBackpressure = true;
+          manager.get(sessionId)?.pauseViewer(viewerId);
+        }
+      } else if (!batcher.pausedForBackpressure && ws.bufferedAmount > WS_HIGH_WATER) {
         batcher.pausedForBackpressure = true;
         // PTY pause 대신 viewer를 pause — 느린 viewer는 drop 후 snapshot 복구
         const session = manager.get(sessionId);
@@ -822,9 +845,49 @@ export async function createServer(port: number): Promise<TtymServer> {
               session.resumeViewer(viewerId);
               // snapshot 전송으로 빠진 구간 복구
               safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+              noteSnapshotSent(batcher, session.lastSeq);
             }
           }
         }, 25);
+      }
+    }
+
+    /** A snapshot supersedes everything in flight — reset ack accounting. */
+    function noteSnapshotSent(batcher: SessionBatcher, watermark: number) {
+      batcher.sentEntries = [];
+      batcher.unackedBytes = 0;
+      batcher.lastSentSeq = watermark;
+    }
+
+    /** Ack through `seq`: shrink the unacked window; resume a paused viewer
+     *  once the client has digested down to the low-water mark. */
+    function handleViewerAck(sessionId: number, seq: number) {
+      const batcher = batchers.get(sessionId);
+      if (!batcher) return;
+      batcher.acking = true;
+      while (batcher.sentEntries.length > 0 && batcher.sentEntries[0]!.seq <= seq) {
+        batcher.unackedBytes -= batcher.sentEntries.shift()!.bytes;
+      }
+      if (batcher.unackedBytes < 0) batcher.unackedBytes = 0;
+
+      if (batcher.pausedForBackpressure && batcher.unackedBytes <= ACK_LOW_WATER) {
+        batcher.pausedForBackpressure = false;
+        const session = manager.get(sessionId);
+        if (!session || session.isDead) return;
+        session.resumeViewer(viewerId);
+        // Catch up on what was dropped while paused: delta if the ring still
+        // has it, one atomic snapshot otherwise.
+        if (!session.shouldForceSnapshotReplay() && session.ring.canReplaySince(batcher.lastSentSeq)) {
+          for (const chunk of session.ring.since(batcher.lastSentSeq)) {
+            safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));
+            batcher.sentEntries.push({ seq: chunk.seq, bytes: chunk.data.length });
+            batcher.unackedBytes += chunk.data.length;
+            batcher.lastSentSeq = chunk.seq;
+          }
+        } else {
+          safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+          noteSnapshotSent(batcher, session.lastSeq);
+        }
       }
     }
 
@@ -969,12 +1032,16 @@ export async function createServer(port: number): Promise<TtymServer> {
           safeSend(ws, encode(sessionId, CMD.ATTACH, jsonPayload({ ok: true, ...session.info() })));
 
           if (!session.shouldForceSnapshotReplay() && fromSeq > 0 && session.ring.canReplaySince(fromSeq)) {
-            const chunks = session.ring.since(fromSeq);
-            for (const chunk of chunks) {
+            const batcher = getBatcher(sessionId);
+            for (const chunk of session.ring.since(fromSeq)) {
               safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));
+              batcher.sentEntries.push({ seq: chunk.seq, bytes: chunk.data.length });
+              batcher.unackedBytes += chunk.data.length;
+              batcher.lastSentSeq = chunk.seq;
             }
           } else {
             safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+            noteSnapshotSent(getBatcher(sessionId), session.lastSeq);
           }
 
           wireSession(sessionId, mode);
@@ -997,6 +1064,7 @@ export async function createServer(port: number): Promise<TtymServer> {
           const session = manager.get(sessionId);
           if (session && !session.isDead) {
             safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+            noteSnapshotSent(getBatcher(sessionId), session.lastSeq);
           }
           break;
         }
@@ -1005,6 +1073,7 @@ export async function createServer(port: number): Promise<TtymServer> {
           const ackMeta = parseJson<{ seq: number }>(payload);
           if (ackMeta?.seq) {
             updateViewerAck(viewerId, sessionId, ackMeta.seq);
+            handleViewerAck(sessionId, ackMeta.seq);
             minAckTrim(manager, sessionId);
           }
           break;
@@ -1030,12 +1099,15 @@ export async function createServer(port: number): Promise<TtymServer> {
 
             const fromSeq = meta?.fromSeq ?? 0;
             if (!session.shouldForceSnapshotReplay() && fromSeq > 0 && session.ring.canReplaySince(fromSeq)) {
-              const chunks = session.ring.since(fromSeq);
-              for (const chunk of chunks) {
+              for (const chunk of session.ring.since(fromSeq)) {
                 safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));
+                batcher.sentEntries.push({ seq: chunk.seq, bytes: chunk.data.length });
+                batcher.unackedBytes += chunk.data.length;
+                batcher.lastSentSeq = chunk.seq;
               }
             } else {
               safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+              noteSnapshotSent(batcher, session.lastSeq);
             }
 
             session.resumeViewer(viewerId);

@@ -102,8 +102,11 @@ describe('TerminalMux', () => {
 
     socket.emitMessage(encodeData(9, 4, new TextEncoder().encode('hello')));
 
+    // The mux no longer ACKs on receipt — the consumer acks after parsing.
     expect(onData).toHaveBeenCalledTimes(1);
+    expect(onData.mock.calls[0][1]).toBe(4);
 
+    mux.ack(9, 4);
     const ack = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
     expect(ack?.cmd).toBe(CMD.ACK);
     expect(JSON.parse(new TextDecoder().decode(ack!.payload))).toEqual({ seq: 4 });

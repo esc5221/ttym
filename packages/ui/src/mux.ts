@@ -1,6 +1,6 @@
 import { CMD, encode, decode } from './protocol';
 
-type DataCallback = (data: Uint8Array) => void;
+type DataCallback = (data: Uint8Array, seq?: number) => void;
 type ExitCallback = () => void;
 type SnapshotCallback = (data: string) => void;
 
@@ -148,11 +148,10 @@ export class TerminalMux {
 
     switch (cmd) {
       case CMD.DATA:
-        if (decoded.seq !== undefined) {
-          this._lastSeqs.set(sessionId, decoded.seq);
-          this.sendRaw(encode(sessionId, CMD.ACK, this.encoder.encode(JSON.stringify({ seq: decoded.seq }))));
-        }
-        this.sessions.get(sessionId)?.onData(payload);
+        // The ACK is the consumer's job, sent after xterm has parsed the
+        // bytes — server backpressure then tracks digestion, not delivery.
+        if (decoded.seq !== undefined) this._lastSeqs.set(sessionId, decoded.seq);
+        this.sessions.get(sessionId)?.onData(payload, decoded.seq);
         break;
 
       case CMD.SNAPSHOT: {
@@ -311,6 +310,11 @@ export class TerminalMux {
   }
 
   // ───── hidden 탭 ─────
+
+  /** Acknowledge parsed output through `seq`. Drives server-side backpressure. */
+  ack(sessionId: number, seq: number) {
+    this.sendRaw(encode(sessionId, CMD.ACK, this.encoder.encode(JSON.stringify({ seq }))));
+  }
 
   pauseView(sessionId: number) {
     this.sendRaw(encode(sessionId, CMD.PAUSE_VIEW));
