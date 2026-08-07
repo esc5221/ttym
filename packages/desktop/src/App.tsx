@@ -448,9 +448,12 @@ export function App() {
       const sessionIds = tab.panels
         .map((panel) => panel.sessionId)
         .filter((id): id is number => id !== undefined);
+      // 이름·멤버만 동기화한다. layout은 서버가 소유한 트리라서 여기서
+      // 평탄화해 되쓰면 CLI가 만든 중첩·비율이 부서진다 — LayoutView 포트
+      // 전까지 desktop은 레이아웃을 읽기만 한다.
+      void sessionIds.length; // keep the derivation until the tree port
       void updateWorkspace(port, tab.workspaceId, {
         name: tab.name,
-        layout: sessionIdsToLayout(sessionIds),
         members: tab.members,
       }).catch(() => {});
     }
