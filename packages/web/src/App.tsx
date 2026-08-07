@@ -230,7 +230,7 @@ function navigate(route: Route) {
 
 // ───── 대시보드 ─────
 
-function DashboardPage({ mux }: { mux: TerminalMux }) {
+function DashboardPage({ mux, agentStates }: { mux: TerminalMux; agentStates: Record<number, AgentState> }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
@@ -274,8 +274,6 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
     });
   }, [mux]);
 
-  const membership = sessionWorkspaceMembership(workspaces);
-
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1080px)');
     const sync = () => setCompactLayout(media.matches);
@@ -298,7 +296,6 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
   useEffect(() => {
     if (hoveredSessionId === null) return;
     let cancelled = false;
-
     const tick = async () => {
       try {
         const screen = await fetchSessionScreen(hoveredSessionId);
@@ -307,17 +304,12 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
         if (!cancelled) setHoveredScreen('preview unavailable');
       }
     };
-
     void tick();
     const timer = window.setInterval(() => { void tick(); }, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [hoveredSessionId]);
 
-  // 죽은 세션은 membership만 걷어낸다 — 레이아웃 트리 정리는 서버 몫이라
-  // 클라이언트가 트리를 평탄화할 일이 없다.
+  // 죽은 세션은 membership만 걷어낸다 — 트리 정리는 서버 몫.
   useEffect(() => {
     if (loading || sessions.length === 0) return;
     const aliveIds = new Set(sessions.map((s) => s.id));
@@ -336,10 +328,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
 
   const createSession = useCallback(async () => {
     try {
-      const id = await mux.createSession({ cols: 80, rows: 24 }, {
-        onData: () => {},
-        onExit: () => {},
-      });
+      const id = await mux.createSession({ cols: 80, rows: 24 }, { onData: () => {}, onExit: () => {} });
       mux.detachSession(id);
       navigate({ page: 'session', id });
     } catch (e) {
@@ -347,217 +336,117 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
     }
   }, [mux]);
 
-  const createWorkspace = useCallback(async () => {
-    const id = uuid().slice(0, 8);
-    const name = `workspace ${workspaces.length + 1}`;
-    const layout: LayoutNode = { type: 'pane', sessionId: 0 }; // placeholder
-    const ws = await apiCreateWorkspace({ id, name, layout });
-    if (ws) {
-      setWorkspaces((prev) => [...prev, ws]);
-      navigate({ page: 'workspace', id });
-    }
-  }, [workspaces]);
+  const aliveIds = new Set(sessions.map((s) => s.id));
+  const assigned = new Set(workspaces.flatMap((w) => layoutToSessionIds(w.layout).filter((id) => id > 0)));
+  const standalone = sessions.filter((s) => !assigned.has(s.id));
+  const runningAgents = Object.values(agentStates).filter((a) => a.active).length;
+  const infoBySession = new Map(sessions.map((s) => [s.id, s] as const));
 
-  const deleteWorkspace = useCallback(async (wsId: string) => {
-    const workspace = workspaces.find((w) => w.id === wsId);
-    if (!workspace) return;
-    for (const sessionId of layoutToSessionIds(workspace.layout).filter((id) => id > 0)) {
-      mux.destroySession(sessionId);
-    }
-    await apiDeleteWorkspace(wsId);
-    setWorkspaces((prev) => prev.filter((w) => w.id !== wsId));
-  }, [mux, workspaces]);
+  const sessionRow = (sid: number, name?: string) => {
+    const info = infoBySession.get(sid);
+    const agent = agentStates[sid];
+    const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
+    const hovered = hoveredSessionId === sid;
+    return (
+      <div
+        key={sid}
+        onClick={() => navigate({ page: 'session', id: sid })}
+        onMouseEnter={() => setHoveredSessionId(sid)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px',
+          borderRadius: 8, cursor: 'pointer', minWidth: 0,
+          background: hovered ? 'var(--bg3)' : 'transparent',
+        }}
+      >
+        <span
+          className={agent?.active ? 'agent-dot-run' : undefined}
+          style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+                   background: color ?? 'transparent', opacity: agent?.active ? 1 : 0.4 }}
+        />
+        <span style={{ color: 'var(--text-dim)', fontSize: 11, width: 42, flexShrink: 0 }}>#{sid}</span>
+        <span style={{ color: color ?? 'var(--text)', fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
+          {name ?? '—'}
+        </span>
+        <span style={{ color: 'var(--text-dim)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+          {(sessionCwds[sid] ? `${formatCwd(sessionCwds[sid])} · ` : '') + (info ? info.cmd.join(' ') : '')}
+        </span>
+        <span style={{ color: 'var(--text-dim)', fontSize: 10.5, flexShrink: 0 }}>pid {info?.pid ?? '—'}</span>
+      </div>
+    );
+  };
 
   return (
-    <div style={{ padding: 32, fontFamily: 'monospace', color: 'var(--text)', width: '100%', maxWidth: 1400, margin: '0 auto' }}>
-      <div style={{ marginBottom: 24 }}>
-        <button
-          onClick={() => navigate({ page: 'overview' })}
-          style={{ ...actionBtnStyle, background: 'var(--accent-bg)', color: 'var(--accent)', border: '1px solid #007acc' }}
-        >
-          overview — live preview
-        </button>
-      </div>
-
-      <div style={{ marginBottom: 32 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-          <h2 style={{ fontSize: 13, margin: 0, color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: 1 }}>
-            workspaces
-          </h2>
-          <button onClick={createWorkspace} style={actionBtnStyle}>+ new</button>
+    <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: compactLayout ? 'minmax(0, 1fr)' : 'minmax(360px, 460px) minmax(0, 1fr)', fontFamily: 'monospace' }}>
+      <div style={{ borderRight: compactLayout ? 'none' : '1px solid var(--line)', background: 'var(--bg1)', padding: 14, overflowY: 'auto', minHeight: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 4px 12px', color: 'var(--text-dim)', fontSize: 11 }}>
+          <span>{sessions.length} session{sessions.length !== 1 ? 's' : ''}</span>
+          <span>·</span>
+          <span>{workspaces.length} workspace{workspaces.length !== 1 ? 's' : ''}</span>
+          <span>·</span>
+          <span style={{ color: runningAgents > 0 ? 'var(--agent-claude)' : undefined }}>
+            {runningAgents} agent{runningAgents !== 1 ? 's' : ''} running
+          </span>
+          <button onClick={createSession} style={{ ...actionBtnStyle, marginLeft: 'auto', padding: '2px 9px', fontSize: 11 }}>+ session</button>
+          <button onClick={refresh} style={{ ...actionBtnStyle, background: 'transparent', padding: '2px 9px', fontSize: 11 }}>↻</button>
         </div>
-        {workspaces.length === 0 ? (
-          <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: '8px 0' }}>
-            no workspaces.{' '}
-            <span onClick={createWorkspace} style={{ color: 'var(--accent)', cursor: 'pointer' }}>create one</span>
-            {' '}to group terminals.
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {workspaces.map((ws) => (
+
+        {loading && workspaces.length === 0 ? (
+          <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: 8 }}>loading…</div>
+        ) : null}
+
+        {workspaces.map((ws) => {
+          const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0 && aliveIds.has(id));
+          const names = memberNameBySession(ws.members);
+          const running = ids.filter((id) => agentStates[id]?.active).length;
+          return (
+            <div key={ws.id} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 6, marginBottom: 10, background: 'var(--bg0)' }}>
               <div
-                key={ws.id}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: 'var(--bg1)', cursor: 'pointer', minWidth: 0 }}
                 onClick={() => navigate({ page: 'workspace', id: ws.id })}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', fontSize: 12, fontWeight: 700, color: 'var(--text-soft)', cursor: 'pointer' }}
               >
-                <span style={{ color: 'var(--text)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {workspaceDisplayLabel(ws)}
-                </span>
-                <span style={{ color: 'var(--text-dim)', fontSize: 11, flexShrink: 0 }}>
-                  {layoutToSessionIds(ws.layout).filter((id) => id > 0).length} session{layoutToSessionIds(ws.layout).filter((id) => id > 0).length !== 1 ? 's' : ''}
-                </span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); deleteWorkspace(ws.id); }}
-                  style={{ ...closeBtnStyle, color: 'var(--text-dim)', fontSize: 12 }}
-                  title="Terminate workspace"
-                >
-                  ×
-                </button>
+                {workspaceDisplayLabel(ws)}
+                <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 11 }}>{ids.length} member{ids.length !== 1 ? 's' : ''}</span>
+                {running > 0 ? (
+                  <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <span className="agent-dot-run" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--agent-claude)' }} />
+                    <span style={{ color: 'var(--text-dim)', fontSize: 10.5 }}>{running}</span>
+                  </span>
+                ) : null}
               </div>
-            ))}
-          </div>
-        )}
+              {ids.map((sid) => sessionRow(sid, names.get(sid)))}
+            </div>
+          );
+        })}
+
+        {standalone.length > 0 ? (
+          <>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-dim)', margin: '14px 4px 8px' }}>
+              standalone
+            </div>
+            {standalone.map((s) => sessionRow(s.id))}
+          </>
+        ) : null}
       </div>
 
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-          <h2 style={{ fontSize: 13, margin: 0, color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: 1 }}>
-            sessions
-          </h2>
-          <button onClick={createSession} style={actionBtnStyle}>+ new</button>
-          <button onClick={refresh} style={{ ...actionBtnStyle, background: 'transparent' }}>refresh</button>
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: 'var(--bg0)' }}>
+        <div style={{ height: 34, display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg1)', fontSize: 11.5, color: 'var(--text-dim)', flexShrink: 0 }}>
+          <span style={{ color: 'var(--text-soft)' }}>preview</span>
+          <span>{hoveredSessionId !== null ? `#${hoveredSessionId}` : 'no session'}</span>
+          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
+            {hoveredSessionId !== null ? (
+              <>
+                <button onClick={() => navigate({ page: 'session', id: hoveredSessionId })} style={{ ...miniLinkBtnStyle, color: 'var(--accent)' }}>open</button>
+                <button onClick={() => navigate({ page: 'viewer', id: hoveredSessionId })} style={miniLinkBtnStyle}>readonly</button>
+                <button onClick={() => void copySessionUrl(hoveredSessionId)} style={miniLinkBtnStyle}>copy</button>
+              </>
+            ) : null}
+          </span>
         </div>
-        {loading ? (
-          <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>loading...</div>
-        ) : sessions.length === 0 ? (
-          <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: '8px 0' }}>
-            no active sessions.{' '}
-            <span onClick={createSession} style={{ color: 'var(--accent)', cursor: 'pointer' }}>create one</span>
-          </div>
-        ) : (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: compactLayout ? 'minmax(0, 1fr)' : 'minmax(320px, 420px) minmax(0, 1fr)',
-            gap: 16,
-            alignItems: 'start',
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-              {sessions.map((s) => (
-                (() => {
-                  const info = membership.get(s.id);
-                  const title = info?.memberName ? info.memberName : `#${s.id}`;
-                  const meta = info ? workspaceDisplayLabel(info.workspace) : 'standalone';
-                  const hovered = hoveredSessionId === s.id;
-                  return (
-                    <div
-                      key={s.id}
-                      onClick={() => navigate({ page: 'session', id: s.id })}
-                      onMouseEnter={() => setHoveredSessionId(s.id)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 12,
-                        padding: '8px 12px',
-                        background: hovered ? 'var(--bg3)' : 'var(--bg1)',
-                        cursor: 'pointer',
-                        borderLeft: `3px solid ${s.status === 'attached' ? 'var(--accent)' : 'var(--text-dim)'}`,
-                        minWidth: 0,
-                      }}
-                    >
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: 72, flexShrink: 0 }}>
-                        <span style={{ color: 'var(--text)', fontWeight: 600, width: 36 }}>#{s.id}</span>
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            await copySessionUrl(s.id);
-                          }}
-                          style={miniLinkBtnStyle}
-                          title={`Copy ${getSessionUrl(s.id)}`}
-                        >
-                          copy
-                        </button>
-                      </span>
-                      <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-                        <span style={{ color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-                        <span style={{ color: 'var(--text-dim)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {meta} · {(sessionCwds[s.id] ? `${formatCwd(sessionCwds[s.id])} · ` : '')}{s.cmd.join(' ')}
-                        </span>
-                      </span>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0, marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                        <span style={{
-                          fontSize: 11, padding: '1px 6px', borderRadius: 3,
-                          background: s.status === 'attached' ? 'var(--accent-bg)' : 'var(--line)',
-                          color: s.status === 'attached' ? 'var(--accent)' : 'var(--text-soft)',
-                          flexShrink: 0,
-                        }}>
-                          {s.status}
-                        </span>
-                        <span style={{ color: 'var(--text-dim)', fontSize: 11, flexShrink: 0, width: 74, textAlign: 'right' }}>pid {s.pid}</span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); navigate({ page: 'viewer', id: s.id }); }}
-                          style={{ ...actionBtnStyle, padding: '1px 6px', fontSize: 10, background: 'var(--bg2)', flexShrink: 0 }}
-                          title="View readonly"
-                        >
-                          view
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); mux.destroySession(s.id); refresh(); }}
-                          style={{ ...closeBtnStyle, color: 'var(--text-dim)', fontSize: 12, flexShrink: 0, marginLeft: 0 }}
-                          title="Kill session"
-                        >
-                          ×
-                        </button>
-                      </span>
-                    </div>
-                  );
-                })()
-              ))}
-            </div>
-            <div
-              style={{
-                position: compactLayout ? 'relative' : 'sticky',
-                top: compactLayout ? 0 : 24,
-                background: 'var(--bg1)',
-                border: '1px solid #2d3440',
-                borderRadius: 4,
-                overflow: 'hidden',
-                minHeight: 320,
-                minWidth: 0,
-              }}
-            >
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '6px 10px',
-                background: 'var(--bg2)',
-                borderBottom: '1px solid #2d3440',
-                fontSize: 11,
-              }}>
-                <span style={{ color: 'var(--text-soft)' }}>preview</span>
-                <span style={{ color: 'var(--text-dim)', marginLeft: 'auto' }}>
-                  {hoveredSessionId !== null ? `#${hoveredSessionId}` : 'no session'}
-                </span>
-              </div>
-              <div
-                className="preview-scroll"
-                style={{
-                  minHeight: 280,
-                  height: compactLayout ? 320 : 'min(58vh, 620px)',
-                  overflow: 'auto',
-                  padding: '12px 14px',
-                  background: 'var(--bg0)',
-                  color: 'var(--term-fg)',
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  lineHeight: 1.45,
-                  whiteSpace: 'pre-wrap',
-                }}
-                dangerouslySetInnerHTML={{ __html: ansiToHtml(hoveredScreen) }}
-              />
-            </div>
-          </div>
-        )}
+        <div
+          className="preview-scroll"
+          style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '12px 14px', color: 'var(--term-fg)', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}
+          dangerouslySetInnerHTML={{ __html: ansiToHtml(hoveredScreen) }}
+        />
       </div>
     </div>
   );
@@ -630,9 +519,11 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [dragSid, setDragSid] = useState<number | null>(null);
+  const [bells, setBells] = useState<Set<number>>(new Set());
   const [lastAgentIds, setLastAgentIds] = useState<Record<number, { claude?: string; codex?: string }>>({});
   const [turns, setTurns] = useState<AgentTurn[]>([]);
   const [awaitBusy, setAwaitBusy] = useState(false);
+  const [awaitSeconds, setAwaitSeconds] = useState(0);
   const [awaitInput, setAwaitInput] = useState('');
   const barrier = useRef(new MutationBarrier());
   const wsRef = useRef<Workspace | null>(null);
@@ -692,6 +583,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
     if (!prompt || sid === null || awaitBusy) return;
     setAwaitInput('');
     setAwaitBusy(true);
+    setAwaitSeconds(0);
     setTurns((prev) => [...prev, { sid, prompt, transcript: null, status: 'pending' }]);
     try {
       const { interaction } = await api.submitInteraction(API_BASE, sid, { prompt, timeoutMs: 120_000 });
@@ -702,6 +594,12 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
         ? { ...t, status: 'failed' } : t));
     } finally { setAwaitBusy(false); }
   }, [awaitInput, focusedSid, awaitBusy]);
+
+  useEffect(() => {
+    if (!awaitBusy) return;
+    const timer = window.setInterval(() => setAwaitSeconds((v) => v + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [awaitBusy]);
 
   const restoreAgent = useCallback((sid: number) => {
     const last = lastAgentIds[sid];
@@ -899,7 +797,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
     return (
       <div
         key={sid}
-        onMouseDown={() => setFocusedSid(sid)}
+        onMouseDown={() => { setFocusedSid(sid); setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; }); }}
         style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: 'var(--bg0)' }}
       >
         <div
@@ -934,6 +832,9 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
             </span>
           ) : null}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0 }}>
+            {bells.has(sid) ? (
+              <span title="bell" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)', boxShadow: '0 0 6px var(--warn)', flexShrink: 0 }} />
+            ) : null}
             {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'monospace' }}>zoom</span> : null}
             {canRestore ? (
               <button onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="이전 에이전트 세션 복원">restore</button>
@@ -952,6 +853,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
               attachId={sid}
               localEcho={localEchoEnabled}
               onExit={() => setDeadSessions((prev) => new Set(prev).add(sid))}
+              onBell={() => setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid)))}
             />
           ) : (
             <div style={emptyPaneStyle}>
@@ -965,7 +867,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, mux, localEchoEnabled, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, bells, mux, localEchoEnabled, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -1032,6 +934,8 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
             renderPane={renderPane}
             onResize={commitResize}
             zoomedSessionId={zoomedSid}
+            splitterColor="var(--line)"
+            splitterActiveColor="var(--accent)"
           />
         ) : (
           <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'monospace' }}>loading…</div>
@@ -1047,7 +951,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mu
               {awaitBusy ? (
                 <>
                   <span className="agent-dot-run" style={{ width: 5, height: 5, borderRadius: '50%', background: AGENT_COLORS[agentStates[focusedSid]!.kind!] }} />
-                  <span style={{ color: 'var(--text-dim)', fontSize: 10.5 }}>turn 진행중</span>
+                  <span style={{ color: 'var(--text-dim)', fontSize: 10.5 }}>turn 진행중 · {awaitSeconds}s</span>
                 </>
               ) : null}
             </span>
@@ -1451,7 +1355,7 @@ function App() {
       page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} />;
       break;
     default:
-      page = <DashboardPage mux={mux} />;
+      page = <DashboardPage mux={mux} agentStates={agentStates} />;
       break;
   }
 

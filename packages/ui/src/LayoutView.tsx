@@ -170,10 +170,20 @@ function Splitter({ horizontal, px, color, activeColor, onPointerDown }: {
         width: horizontal ? px : '100%',
         height: horizontal ? '100%' : px,
         cursor: horizontal ? 'col-resize' : 'row-resize',
-        background: hot ? activeColor : color,
-        transition: 'background 0.1s',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         zIndex: 5,
       }}
-    />
+    >
+      <div
+        style={{
+          width: horizontal ? 3 : 34,
+          height: horizontal ? 34 : 3,
+          borderRadius: 2,
+          background: hot ? activeColor : color,
+        }}
+      />
+    </div>
   );
 }
