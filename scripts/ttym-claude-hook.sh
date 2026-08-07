@@ -1,38 +1,27 @@
 #!/bin/sh
 # ttym-claude-hook.sh — Claude Code SessionStart hook
-# Maps Claude Code session to the ttym session it's running inside.
+# Maps a Claude Code session to the ttym session it runs inside.
 #
-# Install (add to ~/.claude/settings.json):
+# Speaks HTTP to the owning server via TTYM_PORT (stamped into every session
+# env) — no dependency on whichever `ttym` CLI is on PATH, and no way for a
+# CLI/server version skew to fail the hook. Always exits 0.
 #
-#   {
-#     "hooks": {
-#       "SessionStart": [
-#         {
-#           "hooks": [
-#             {
-#               "type": "command",
-#               "command": "/path/to/ttym-claude-hook.sh"
-#             }
-#           ]
-#         }
-#       ]
-#     }
-#   }
-#
-# Or inline:
-#
-#   "command": "[ -n \"$TTYM_SESSION_ID\" ] && jq -r .session_id | xargs -I{} ttym meta $TTYM_SESSION_ID --claude-session {}"
-#
-# How it works:
-#   1. Holder sets TTYM_SESSION_ID in child shell environment
-#   2. Claude Code fires SessionStart hook, piping { session_id, cwd, ... } to stdin
-#   3. This script extracts session_id and source and stores them as ttym session meta
+# Flow:
+#   1. holder sets TTYM_SESSION_ID (+ TTYM_PORT) in the session env
+#   2. Claude Code fires SessionStart, piping { session_id, source, ... }
+#   3. this script records them as server-owned runtime meta
 
 [ -z "$TTYM_SESSION_ID" ] && exit 0
 
+BASE="http://127.0.0.1:${TTYM_PORT:-7690}"
+
 HOOK_PAYLOAD=$(cat)
-CLAUDE_SESSION=$(printf '%s' "$HOOK_PAYLOAD" | jq -r .session_id 2>/dev/null)
+CLAUDE_SESSION=$(printf '%s' "$HOOK_PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null)
 [ -z "$CLAUDE_SESSION" ] && exit 0
 CLAUDE_SOURCE=$(printf '%s' "$HOOK_PAYLOAD" | jq -r '.source // "startup"' 2>/dev/null)
 
-ttym meta "$TTYM_SESSION_ID" --claude-source "$CLAUDE_SOURCE" --claude-session "$CLAUDE_SESSION" >/dev/null 2>&1
+curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \
+  -H 'content-type: application/json' \
+  -d "{\"claudeSessionId\":\"$CLAUDE_SESSION\",\"claudeActive\":true,\"claudeSource\":\"$CLAUDE_SOURCE\"}" >/dev/null
+
+exit 0

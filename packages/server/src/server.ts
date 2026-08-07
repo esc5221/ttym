@@ -1193,6 +1193,9 @@ export async function createServer(port: number): Promise<TtymServer> {
   httpServer.requestTimeout = 10000;
 
   await new Promise<void>((resolve) => httpServer.listen(port, resolve));
+  // Hooks address the server that owns their session — not a hardcoded 7690.
+  const boundPort = (httpServer.address() as { port: number } | null)?.port ?? port;
+  manager.setExtraSessionEnv({ TTYM_PORT: String(boundPort) });
 
   return {
     manager,

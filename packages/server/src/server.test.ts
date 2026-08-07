@@ -183,6 +183,39 @@ describe('createServer', () => {
     expect([CMD.DATA, CMD.SNAPSHOT]).toContain(resumed.cmd);
   }, 30_000);
 
+  it('spawns sessions with parent-agent markers scrubbed and TTYM_PORT stamped', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    // The failure mode: a server started inside a Claude Bash tool fossilizes
+    // these and every pane inherits them — transcripts silently stop saving.
+    process.env.CLAUDECODE = '1';
+    process.env.CLAUDE_CODE_CHILD_SESSION = '1';
+    process.env.CLAUDE_JOB_DIR = '/tmp/jobs/fossil';
+    try {
+      const ws1 = await openClient(port);
+      clients.push(ws1);
+      ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+        cmd: ['/bin/sh', '-lc',
+          'echo "MARK=${CLAUDECODE:-none}/${CLAUDE_CODE_CHILD_SESSION:-none}/${CLAUDE_JOB_DIR:-none} PORT=$TTYM_PORT"; stty -echo; exec cat'],
+        cols: 100, rows: 24,
+      }))));
+      const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+      const sid = created.sessionId;
+
+      let text = '';
+      for (;;) {
+        const frame = await ws1.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid, 10_000);
+        text += Buffer.from(frame.payload).toString();
+        if (text.includes('PORT=')) break;
+      }
+      expect(text).toContain('MARK=none/none/none');
+      expect(text).toContain(`PORT=${port}`);
+    } finally {
+      delete process.env.CLAUDECODE;
+      delete process.env.CLAUDE_CODE_CHILD_SESSION;
+      delete process.env.CLAUDE_JOB_DIR;
+    }
+  });
+
   it('pushes workspace changes to every WS client — full tree, with a generation', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);

@@ -1,18 +1,30 @@
 #!/bin/sh
-# ttym-codex-stop-hook.sh — Codex CLI Stop hook
-# Clears the active Codex mapping and signals completion for await.
+# ttym-codex-stop-hook.sh — Codex turn-end hook (codex_hooks v0.114+)
+#
+# Same contract as the Claude stop hook: HTTP to the owning server via
+# TTYM_PORT, no CLI dependency, always exit 0, stderr left visible.
 
 [ -z "$TTYM_SESSION_ID" ] && exit 0
 
+BASE="http://127.0.0.1:${TTYM_PORT:-7690}"
+
 HOOK_PAYLOAD=$(cat)
-CODEX_SESSION=$(printf '%s' "$HOOK_PAYLOAD" | jq -r .session_id 2>/dev/null)
+CODEX_SESSION=$(printf '%s' "$HOOK_PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null)
 
-if [ -n "$CODEX_SESSION" ] && [ "$CODEX_SESSION" != "null" ]; then
-  ttym meta "$TTYM_SESSION_ID" --clear-codex-session "$CODEX_SESSION" >/dev/null 2>&1
+if [ -n "$CODEX_SESSION" ]; then
+  AGENT_PATCH="{\"codexActive\":false,\"codexSessionId\":null,\"codexLastSessionId\":\"$CODEX_SESSION\"}"
 else
-  ttym meta "$TTYM_SESSION_ID" --clear-codex-session >/dev/null 2>&1
+  AGENT_PATCH='{"codexActive":false,"codexSessionId":null}'
 fi
+curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \
+  -H 'content-type: application/json' -d "$AGENT_PATCH" >/dev/null
 
-# Signal completion: copy current request seq to stopSeq so callers can detect response end
-CURRENT_SEQ=$(ttym meta "$TTYM_SESSION_ID" 2>/dev/null | jq -r '.seq // "0"')
-ttym meta "$TTYM_SESSION_ID" --set stopSeq="$CURRENT_SEQ" --set stopAt="$(date +%s)" >/dev/null 2>&1
+curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/stop" \
+  -H 'content-type: application/json' -d '{"event":"Stop"}' >/dev/null
+
+CURRENT_SEQ=$(curl -s -m 5 "$BASE/api/sessions/$TTYM_SESSION_ID/meta" | jq -r '.seq // 0' 2>/dev/null)
+curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \
+  -H 'content-type: application/json' \
+  -d "{\"stopSeq\":${CURRENT_SEQ:-0},\"stopAt\":$(date +%s)}" >/dev/null
+
+exit 0

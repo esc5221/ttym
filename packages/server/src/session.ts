@@ -85,8 +85,35 @@ function getSyncBlockTimeoutMs(): number {
   return Number.parseInt(process.env.TTYM_SYNC_BLOCK_TIMEOUT_MS ?? '1000', 10) || 1000;
 }
 
+/**
+ * Runtime markers a parent agent stamps on its own child processes. A ttym
+ * server started from inside a Claude Code Bash tool inherits them, survives
+ * as a daemon, and hands the fossilized set to every session it ever spawns.
+ * Three observed casualties from one leak: CLAUDE_CODE_CHILD_SESSION turned
+ * transcript saving off for a claude running in a pane; CLAUDE_JOB_DIR made
+ * that claude write its /rename into another session's transcript; and the
+ * stale identity chain confused hooks. The first five are the exact set
+ * Claude Code scrubs for its own detached spawns; the rest are leaks we
+ * measured on a live holder. TTYM_* is deliberately not scrubbed — that is
+ * our own contract, re-stamped per session below.
+ */
+const PARENT_AGENT_MARKERS = [
+  'CLAUDECODE',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_BRIDGE_SESSION_ID',
+  'CLAUDE_BG_AUTH_SNAPSHOT_PATH',
+  'CLAUDE_PID',
+  'CLAUDE_JOB_DIR',
+  'CLAUDE_CODE_EXECPATH',
+  'CLAUDE_CODE_MESSAGING_SOCKET',
+  'AI_AGENT',
+  'TRACEPARENT',
+];
+
 export function buildSessionEnv(extraEnv?: Record<string, string>): Record<string, string> {
   const env = { ...process.env, ...(extraEnv ?? {}) } as Record<string, string>;
+  for (const key of PARENT_AGENT_MARKERS) delete env[key];
   // ttym sessions should behave like real terminals, not inherit global no-color mode.
   delete env.NO_COLOR;
   // Codex parent sessions can export GIT_PAGER=cat, which disables interactive

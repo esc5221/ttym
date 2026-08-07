@@ -242,3 +242,34 @@ describe('Session transcript marking', () => {
     expect(session.transcriptSince(mark)).toBeNull();
   }, 60_000);
 });
+
+describe('buildSessionEnv — parent agent markers', () => {
+  it('scrubs the fossilized Claude markers and keeps user config', () => {
+    const saved = { ...process.env };
+    try {
+      process.env.CLAUDECODE = '1';
+      process.env.CLAUDE_CODE_CHILD_SESSION = '1';
+      process.env.CLAUDE_CODE_SESSION_ID = 'dead-beef';
+      process.env.CLAUDE_JOB_DIR = '/tmp/jobs/dead';
+      process.env.CLAUDE_PID = '999999';
+      process.env.CLAUDE_CODE_MESSAGING_SOCKET = '/tmp/sock';
+      process.env.AI_AGENT = 'claude-code_agent';
+      process.env.TRACEPARENT = '00-abc';
+      process.env.CLAUDE_CONFIG_DIR = '/Users/x/.claude-alt'; // 사용자 의도 설정은 보존
+
+      const env = buildSessionEnv({ TTYM_SESSION_ID: '7', TTYM_PORT: '7691' });
+      for (const key of [
+        'CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID',
+        'CLAUDE_JOB_DIR', 'CLAUDE_PID', 'CLAUDE_CODE_MESSAGING_SOCKET',
+        'AI_AGENT', 'TRACEPARENT',
+      ]) {
+        expect(env[key], key).toBeUndefined();
+      }
+      expect(env.CLAUDE_CONFIG_DIR).toBe('/Users/x/.claude-alt');
+      expect(env.TTYM_SESSION_ID).toBe('7');
+      expect(env.TTYM_PORT).toBe('7691');
+    } finally {
+      process.env = saved;
+    }
+  });
+});

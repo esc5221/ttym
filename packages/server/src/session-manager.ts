@@ -354,11 +354,18 @@ export class SessionManager {
 
   // ───── Session CRUD ─────
 
+  /** Values every session env carries, e.g. TTYM_PORT once the server is listening. */
+  private extraSessionEnv: Record<string, string> = {};
+
+  setExtraSessionEnv(env: Record<string, string>): void {
+    this.extraSessionEnv = { ...this.extraSessionEnv, ...env };
+  }
+
   async create(cmd: string[], cols: number, rows: number, cwd?: string): Promise<Session> {
     const id = this.nextId++;
     await this.persistNextId();
 
-    const extraEnv: Record<string, string> = { TTYM_SESSION_ID: String(id) };
+    const extraEnv: Record<string, string> = { ...this.extraSessionEnv, TTYM_SESSION_ID: String(id) };
     if (this._busUrl) extraEnv.TTYM_BUS_URL = this._busUrl;
 
     const resolvedCwd = cwd || process.env.HOME || '/tmp';
