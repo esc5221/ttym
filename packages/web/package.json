@@ -13,7 +13,8 @@
     "react-dom": "^18.3.0",
     "@ttym/shared": "workspace:*",
     "@ttym/api": "workspace:*",
-    "@ttym/ui": "workspace:*"
+    "@ttym/ui": "workspace:*",
+    "@ttym/vt": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^18.0.0",

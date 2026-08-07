@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TerminalMux, Terminal } from '@ttym/ui';
+import { ansiToHtml, movePanel, insertPanelRight } from '@ttym/vt';
 import * as api from '@ttym/api';
 import type { SessionInfo } from '@ttym/ui';
 import '@xterm/xterm/css/xterm.css';
@@ -141,7 +142,7 @@ function reconcileWorkspacePanels(
   sessionCwds?: Map<number, string>,
 ): PanelState[] {
   return reconcileSessionPanels(prevPanels, sessionIds, {
-    createEmpty: () => ({ key: uuid() }),
+    createEmpty: (): PanelState => ({ key: uuid() }),
     createForSession: (sessionId) => ({
       key: uuid(),
       sessionId,
@@ -156,23 +157,6 @@ function reconcileWorkspacePanels(
     }),
     clearUnassigned: (panel) => ({ ...panel, sessionId: undefined }),
   });
-}
-
-function insertPanelRight(panels: PanelState[], focused: number, panel: PanelState): { panels: PanelState[]; focus: number } {
-  const insertAt = Math.min(Math.max(0, focused + 1), panels.length);
-  const nextPanels = [...panels];
-  nextPanels.splice(insertAt, 0, panel);
-  return { panels: nextPanels, focus: insertAt };
-}
-
-function movePanel(panels: PanelState[], fromIndex: number, toIndex: number): PanelState[] {
-  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= panels.length || toIndex >= panels.length) {
-    return panels;
-  }
-  const next = [...panels];
-  const [moved] = next.splice(fromIndex, 1);
-  next.splice(toIndex, 0, moved);
-  return next;
 }
 
 async function fetchSessionMeta(sessionId: number): Promise<SessionMeta> {
@@ -197,144 +181,6 @@ async function apiCreateWorkspace(ws: { id: string; name: string; layout: Layout
 
 function workspaceDisplayLabel(workspace: Workspace): string {
   return workspaceLabel(workspace.project, workspace.name);
-}
-
-function xterm256Color(code: number): string {
-  if (code < 16) {
-    const base = [
-      '#000000', '#cd3131', '#0dbc79', '#e5e510',
-      '#2472c8', '#bc3fbc', '#11a8cd', '#e5e5e5',
-      '#666666', '#f14c4c', '#23d18b', '#f5f543',
-      '#3b8eea', '#d670d6', '#29b8db', '#ffffff',
-    ];
-    return base[code] ?? '#d4d4d4';
-  }
-  if (code >= 16 && code <= 231) {
-    const n = code - 16;
-    const r = Math.floor(n / 36);
-    const g = Math.floor((n % 36) / 6);
-    const b = n % 6;
-    const channel = [0, 95, 135, 175, 215, 255];
-    return `rgb(${channel[r]}, ${channel[g]}, ${channel[b]})`;
-  }
-  const gray = 8 + (code - 232) * 10;
-  return `rgb(${gray}, ${gray}, ${gray})`;
-}
-
-function ansiToHtml(value: string): string {
-  let result = '';
-  let index = 0;
-  let column = 0;
-  let fg = '#d4d4d4';
-  let bg = 'transparent';
-  let bold = false;
-  let open = false;
-
-  const close = () => {
-    if (open) {
-      result += '</span>';
-      open = false;
-    }
-  };
-
-  const openSpan = () => {
-    close();
-    result += `<span style="color:${fg};background:${bg};font-weight:${bold ? 600 : 400}">`;
-    open = true;
-  };
-
-  openSpan();
-
-  while (index < value.length) {
-    const char = value[index];
-    if (char === '\u001b') {
-      const cursorForward = /^\u001b\[([0-9]*)C/.exec(value.slice(index));
-      if (cursorForward) {
-        const amount = Number(cursorForward[1] || '1');
-        result += ' '.repeat(Math.max(0, amount));
-        column += Math.max(0, amount);
-        index += cursorForward[0].length;
-        continue;
-      }
-
-      const cursorBackward = /^\u001b\[([0-9]*)D/.exec(value.slice(index));
-      if (cursorBackward) {
-        const amount = Number(cursorBackward[1] || '1');
-        column = Math.max(0, column - Math.max(0, amount));
-        index += cursorBackward[0].length;
-        continue;
-      }
-
-      const cursorAbsolute = /^\u001b\[([0-9]*)G/.exec(value.slice(index));
-      if (cursorAbsolute) {
-        const target = Math.max(0, Number(cursorAbsolute[1] || '1') - 1);
-        if (target > column) result += ' '.repeat(target - column);
-        column = target;
-        index += cursorAbsolute[0].length;
-        continue;
-      }
-
-      const sgr = /^\u001b\[([0-9;]*)m/.exec(value.slice(index));
-      if (sgr) {
-        const codes = sgr[1].split(';').filter(Boolean).map((code) => Number(code));
-        if (codes.length === 0) codes.push(0);
-        for (let i = 0; i < codes.length; i += 1) {
-          const code = codes[i];
-          if (code === 0) {
-            fg = '#d4d4d4';
-            bg = 'transparent';
-            bold = false;
-          } else if (code === 1) {
-            bold = true;
-          } else if (code === 22) {
-            bold = false;
-          } else if (code === 39) {
-            fg = '#d4d4d4';
-          } else if (code === 49) {
-            bg = 'transparent';
-          } else if (code >= 30 && code <= 37) {
-            fg = xterm256Color(code - 30);
-          } else if (code >= 90 && code <= 97) {
-            fg = xterm256Color(code - 82);
-          } else if (code >= 40 && code <= 47) {
-            bg = xterm256Color(code - 40);
-          } else if (code >= 100 && code <= 107) {
-            bg = xterm256Color(code - 92);
-          } else if (code === 38 && codes[i + 1] === 5 && typeof codes[i + 2] === 'number') {
-            fg = xterm256Color(codes[i + 2]);
-            i += 2;
-          } else if (code === 48 && codes[i + 1] === 5 && typeof codes[i + 2] === 'number') {
-            bg = xterm256Color(codes[i + 2]);
-            i += 2;
-          }
-        }
-        openSpan();
-        index += sgr[0].length;
-        continue;
-      }
-
-      const otherEscape = /^\u001b(?:[@-Z\\-_]|\[[0-9;?]*[ -/]*[@-~])/.exec(value.slice(index));
-      if (otherEscape) {
-        index += otherEscape[0].length;
-        continue;
-      }
-    }
-
-    if (char === '&') result += '&amp;';
-    else if (char === '<') result += '&lt;';
-    else if (char === '>') result += '&gt;';
-    else if (char === '\n') {
-      result += '\n';
-      column = 0;
-    } else if (char !== '\r') {
-      result += char;
-      column += 1;
-    }
-    index += 1;
-  }
-
-  close();
-  return result;
 }
 
 function memberLabel(name: string | undefined, sessionId: number): string {

@@ -2,8 +2,7 @@ import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import type { IDisposable } from '@xterm/xterm';
-import { LocalEchoController } from './local-echo.js';
-import type { TerminalMux } from './mux.js';
+import { LocalEchoController, type TerminalMux, type ActionHandler } from '@ttym/vt';
 
 /**
  * A TerminalHost owns everything one session's terminal needs — the xterm
@@ -30,10 +29,7 @@ const IMMEDIATE_WRITE_BYTES = 512;
 /** Disconnected hosts kept around for instant re-display before eviction. */
 const MAX_IDLE_HOSTS = 16;
 
-export interface HostCallbacks {
-  onExit?: (sessionId: number) => void;
-  onBell?: () => void;
-}
+// The host speaks to its shell in actions — one-way, optional to handle.
 
 export interface HostOptions {
   mode: 'readwrite' | 'readonly';
@@ -96,7 +92,7 @@ export class TerminalHost {
   private viewPaused = false;
   private mounted = false;
   private inputDisposables: IDisposable[] = [];
-  private callbacks: HostCallbacks = {};
+  private onAction: ActionHandler = () => {};
   private resizeObserver: ResizeObserver | null = null;
   private readonly localEcho: LocalEchoController;
 
@@ -130,15 +126,15 @@ export class TerminalHost {
       requestSnapshot: () => this.mux.requestSnapshot(this.sessionId),
     });
     this.localEcho.setEnabled(opts.localEcho && opts.mode !== 'readonly');
-    this.term.onBell(() => this.callbacks.onBell?.());
+    this.term.onBell(() => this.onAction({ kind: 'bell', sessionId: this.sessionId }));
   }
 
   get isMounted(): boolean { return this.mounted; }
 
   /** Reparent the wrapper into a container. Never re-creates the terminal. */
-  mount(container: HTMLElement, callbacks: HostCallbacks) {
+  mount(container: HTMLElement, onAction: ActionHandler) {
     if (this.disposed) return;
-    this.callbacks = callbacks;
+    this.onAction = onAction;
     if (this.wrapper.parentElement !== container) {
       container.appendChild(this.wrapper);
       if (this.opened) {
@@ -190,7 +186,7 @@ export class TerminalHost {
       onSnapshot: (snap) => this.handleSnapshot(snap),
       onExit: () => {
         this.cancelPendingWrites();
-        this.callbacks.onExit?.(this.sessionId);
+        this.onAction({ kind: 'session-exit', sessionId: this.sessionId });
       },
     }, {
       cols: this.term.cols,

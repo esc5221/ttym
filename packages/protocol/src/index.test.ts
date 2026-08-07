@@ -141,3 +141,14 @@ describe('snapshot watermark', () => {
     expect(Array.from(decoded.payload)).toEqual([0x78]);
   });
 });
+
+describe('forward compatibility', () => {
+  it('decodes a frame with an unknown command instead of rejecting it', () => {
+    // The server is always newest; a client one version behind must be able
+    // to skip commands it does not know rather than die on them.
+    const unknown = encode(7, 0x5f, bytes(1, 2, 3));
+    const decoded = decodeServerFrame(unknown)!;
+    expect(decoded.cmd).toBe(0x5f);
+    expect(Array.from(decoded.payload)).toEqual([1, 2, 3]);
+  });
+});

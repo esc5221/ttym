@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { TerminalMux, CreateOptions } from './mux';
+import type { TerminalMux, CreateOptions } from '@ttym/vt';
 import { acquireHost, destroyHost, type TerminalHost, type HostOptions } from './terminal-host.js';
 
 export interface TerminalProps {
@@ -72,13 +72,17 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
       if (cancelled) return;
       const host = acquireHost(mux, sessionId, optsRef.current);
       hostRef.current = host;
-      host.mount(el, {
-        onExit: (id) => {
-          destroyHost(id);
-          hostRef.current = null;
-          onExitRef.current?.(id);
-        },
-        onBell: () => onBellRef.current?.(),
+      host.mount(el, (action) => {
+        switch (action.kind) {
+          case 'session-exit':
+            destroyHost(action.sessionId);
+            hostRef.current = null;
+            onExitRef.current?.(action.sessionId);
+            break;
+          case 'bell':
+            onBellRef.current?.();
+            break;
+        }
       });
       io = new IntersectionObserver((entries) => {
         intersecting = entries.some((entry) => entry.isIntersecting);

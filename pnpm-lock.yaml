@@ -54,6 +54,9 @@ importers:
       '@ttym/ui':
         specifier: workspace:*
         version: link:../ui
+      '@ttym/vt':
+        specifier: workspace:*
+        version: link:../vt
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
@@ -123,15 +126,9 @@ importers:
 
   packages/ui:
     dependencies:
-      '@ttym/api':
+      '@ttym/vt':
         specifier: workspace:*
-        version: link:../api
-      '@ttym/protocol':
-        specifier: workspace:*
-        version: link:../protocol
-      '@ttym/shared':
-        specifier: workspace:*
-        version: link:../shared
+        version: link:../vt
       '@xterm/addon-fit':
         specifier: ^0.11.0
         version: 0.11.0
@@ -152,6 +149,16 @@ importers:
         specifier: ^5.5.0
         version: 5.9.3
 
+  packages/vt:
+    dependencies:
+      '@ttym/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
   packages/web:
     dependencies:
       '@ttym/api':
@@ -163,6 +170,9 @@ importers:
       '@ttym/ui':
         specifier: workspace:*
         version: link:../ui
+      '@ttym/vt':
+        specifier: workspace:*
+        version: link:../vt
       '@xterm/xterm':
         specifier: ^6.0.0
         version: 6.0.0
