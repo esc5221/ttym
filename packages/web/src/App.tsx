@@ -395,6 +395,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
     return (
       <div
         key={sid}
+        className="reveal-parent"
         onClick={() => setPanel({ kind: 'live', sid })}
         onMouseEnter={(e) => { setHoveredSessionId(sid); setHoveredWsId(null); moveHl(e.currentTarget, 'row'); }}
         style={{
@@ -416,6 +417,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
         </span>
         <span style={{ color: 'var(--text-dim)', fontSize: 10.5, flexShrink: 0 }}>pid {info?.pid ?? '—'}</span>
         <button
+          className="reveal"
           onClick={(e) => { e.stopPropagation(); void terminateSession(sid, wsId); }}
           style={{ ...closeBtnStyle, marginLeft: 0, flexShrink: 0 }}
           title="세션 종료"
@@ -501,6 +503,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
           return (
             <div key={ws.id} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 6, marginBottom: 10, background: 'var(--bg0)' }}>
               <div
+                className="reveal-parent"
                 onClick={() => setPanel({ kind: 'ws', wsId: ws.id })}
                 onMouseEnter={(e) => { setHoveredWsId(ws.id); moveHl(e.currentTarget.parentElement as HTMLElement, 'ws'); }}
                 title="hover: 분할 미리보기 · 클릭: 고정 · 탭: 전체 열기"
@@ -515,6 +518,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
                     </>
                   ) : null}
                   <button
+                    className="reveal"
                     onClick={(e) => { e.stopPropagation(); void deleteWorkspaceCascade(ws); }}
                     style={closeBtnStyle}
                     title="workspace 삭제 (세션 종료)"
@@ -932,6 +936,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
         style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: 'var(--bg0)' }}
       >
         <div
+          className="reveal-parent"
           style={{
             display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 8px',
             background: isFocused ? 'var(--bg0)' : 'var(--bg2)',
@@ -968,13 +973,13 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             ) : null}
             {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'monospace' }}>zoom</span> : null}
             {canRestore ? (
-              <button onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="이전 에이전트 세션 복원">restore</button>
+              <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="이전 에이전트 세션 복원">restore</button>
             ) : null}
-            <button onClick={(e) => { e.stopPropagation(); void doSplit('right', sid); }} style={miniLinkBtnStyle} title="split right">│</button>
-            <button onClick={(e) => { e.stopPropagation(); void doSplit('down', sid); }} style={miniLinkBtnStyle} title="split down">─</button>
-            <button onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={miniLinkBtnStyle} title="detach (세션 유지)">detach</button>
-            <button onClick={(e) => { e.stopPropagation(); void copySessionUrl(sid); }} style={miniLinkBtnStyle}>copy</button>
-            <button onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
+            <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('right', sid); }} style={miniLinkBtnStyle} title="split right">│</button>
+            <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('down', sid); }} style={miniLinkBtnStyle} title="split down">─</button>
+            <button className="reveal" onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={miniLinkBtnStyle} title="detach (세션 유지)">detach</button>
+            <button className="reveal" onClick={(e) => { e.stopPropagation(); void copySessionUrl(sid); }} style={miniLinkBtnStyle}>copy</button>
+            <button className="reveal" onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
           </span>
         </div>
         <div style={{ flex: 1, minHeight: 0 }}>
