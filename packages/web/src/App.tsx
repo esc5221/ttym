@@ -946,8 +946,6 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
           style={{
             display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 8px',
             background: isFocused ? 'var(--bg0)' : 'var(--bg2)',
-            // 통일 문법: 엣지는 "현재". pane은 좌측 세로바 — 탭바의 가로선들과
-            // 평행 충돌하던 상단 라인을 버린다. dead는 같은 자리 err.
             borderLeft: dead ? '2px solid var(--err)' : isFocused ? '2px solid var(--accent)' : '2px solid transparent',
             borderBottom: '1px solid var(--line)', flexShrink: 0, userSelect: 'none',
           }}
@@ -1597,9 +1595,7 @@ const tabStyle: React.CSSProperties = {
 const tabActiveStyle: React.CSSProperties = {
   background: 'var(--bg0)',
   color: 'var(--text)',
-  // 엣지는 "현재": 탭은 하단 언더라인. 보더 박스는 pane·리스트와 결이 달랐다.
-  boxShadow: 'inset 0 -2px 0 var(--accent)',
-  borderRadius: '7px 7px 0 0',
+  border: '1px solid var(--line)',
 };
 
 const tabAddStyle: React.CSSProperties = {

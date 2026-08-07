@@ -71,7 +71,9 @@ export function LayoutView({
     const startDrag = (index: number, e: React.PointerEvent<HTMLDivElement>) => {
       if (!onResize) return;
       e.preventDefault();
-      const container = (e.currentTarget.parentElement as HTMLElement);
+      // 히트존이 헤어라인 안에 중첩돼 parentElement로는 못 찾는다.
+      const container = (e.currentTarget as HTMLElement).closest('[data-splitbox]') as HTMLElement | null;
+      if (!container) return;
       const rect = container.getBoundingClientRect();
       const totalPx = horizontal ? rect.width : rect.height;
       if (totalPx <= 0) return;
@@ -139,7 +141,7 @@ export function LayoutView({
       minWidth: 0,
       minHeight: 0,
     };
-    return <div style={style}>{children}</div>;
+    return <div data-splitbox style={style}>{children}</div>;
   };
 
   return <div style={{ width: '100%', height: '100%' }}>{renderNode(layout, [])}</div>;
@@ -160,28 +162,32 @@ function Splitter({ horizontal, px, color, activeColor, onPointerDown }: {
   onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
 }) {
   const [hot, setHot] = useState(false);
+  void px;
+  // 레이아웃 상 1px 헤어라인만 차지한다. 5px 레인은 pane마다 포커스 바의
+  // 좌측 여백을 다르게 만들었다(맨 왼쪽 pane만 플러시). 드래그 판정은
+  // ±4px 투명 히트존이 담당한다.
   return (
     <div
-      onPointerDown={(e) => { setHot(true); onPointerDown(e); const clear = () => { setHot(false); window.removeEventListener('pointerup', clear); }; window.addEventListener('pointerup', clear); }}
-      onMouseEnter={() => setHot(true)}
-      onMouseLeave={() => setHot(false)}
       style={{
         flexShrink: 0,
-        width: horizontal ? px : '100%',
-        height: horizontal ? '100%' : px,
-        cursor: horizontal ? 'col-resize' : 'row-resize',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        width: horizontal ? 1 : '100%',
+        height: horizontal ? '100%' : 1,
+        background: hot ? activeColor : color,
+        position: 'relative',
         zIndex: 5,
       }}
     >
       <div
+        onPointerDown={(e) => { setHot(true); onPointerDown(e); const clear = () => { setHot(false); window.removeEventListener('pointerup', clear); }; window.addEventListener('pointerup', clear); }}
+        onMouseEnter={() => setHot(true)}
+        onMouseLeave={() => setHot(false)}
         style={{
-          width: horizontal ? 3 : 34,
-          height: horizontal ? 34 : 3,
-          borderRadius: 2,
-          background: hot ? activeColor : color,
+          position: 'absolute',
+          left: horizontal ? -4 : 0,
+          right: horizontal ? -4 : 0,
+          top: horizontal ? 0 : -4,
+          bottom: horizontal ? 0 : -4,
+          cursor: horizontal ? 'col-resize' : 'row-resize',
         }}
       />
     </div>
