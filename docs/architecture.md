@@ -58,9 +58,17 @@ holder는 5초마다 자기 소켓 경로를 확인하고, 사라졌으면 재bi
 
 ```
 [u16 sessionId LE][u8 cmd][payload]
-DATA (서버→클라)   [u32 seq] 프리픽스 — 재생·ACK용
-DATA (클라→서버)   프리픽스 없음 — 키 입력 바이트 그대로
+DATA     (서버→클라)   [u32 seq] 프리픽스 — 재생·ACK용
+SNAPSHOT (서버→클라)   [u32 seq] 프리픽스 — 스냅샷이 렌더된 시점의 watermark.
+                      클라이언트는 이걸로 fromSeq를 갱신해, 스냅샷 재동기화가
+                      또 다른 스냅샷 폴백으로 연쇄되는 것을 끊는다
+DATA     (클라→서버)   프리픽스 없음 — 키 입력 바이트 그대로
 ```
+
+클라이언트의 스냅샷 적용은 `term.reset()`이 아니라 **단일 write의 in-band
+RIS**(`\x1bc` + snap)다. xterm 5.x에서 단일 write 청크는 원자적으로 파싱되므로
+리셋과 재묘화가 한 프레임에 떨어진다 — reset() 호출은 화면을 먼저 비워 빈
+프레임(깜빡임)을 만들고, xterm 내부 write 버퍼의 미처리 바이트도 남긴다.
 
 DATA 프레임은 **방향에 따라 모양이 다르다.** 디코더도 방향을 안다 —
 `decodeServerFrame` / `decodeClientFrame`. 하나의 대칭 decode로 합쳤을 때

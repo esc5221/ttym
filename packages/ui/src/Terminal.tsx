@@ -132,9 +132,23 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
 
     const handleSnapshot = (snapStr: string) => {
       if (disposed) return;
+      // Bytes still queued here predate the snapshot — it already contains
+      // them, and painting them afterwards would corrupt the fresh screen.
+      if (writeRaf !== null) { cancelAnimationFrame(writeRaf); writeRaf = null; }
+      writeChunks = [];
+      writeBytes = 0;
+      // Dropping the queue also drops the write callbacks that would have
+      // released flow control — release it here or the stream stays paused.
+      if (paused) {
+        if (sessionRef.current !== null) mux.resume(sessionRef.current);
+        paused = false;
+      }
       localEchoController.handleSnapshot();
-      term.reset();
-      term.write(snapStr);
+      // RIS in-band instead of term.reset(): a single write() chunk is parsed
+      // atomically in xterm 5.x, so reset and repaint land in one frame — no
+      // blank flash between them. reset() would also leave xterm's own
+      // pending write buffer unflushed, replaying stale bytes after the clear.
+      term.write('\x1bc' + snapStr);
     };
 
     const wireInput = (id: number) => {

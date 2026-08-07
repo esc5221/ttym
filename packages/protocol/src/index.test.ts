@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CMD, encode, encodeData, decode, decodeClientFrame, decodeServerFrame, jsonPayload, parseJson,
+  CMD, encode, encodeData, encodeSnapshot, decode, decodeClientFrame, decodeServerFrame, jsonPayload, parseJson,
   HEADER_BYTES, DATA_HEADER_BYTES,
 } from './index.js';
 
@@ -51,7 +51,8 @@ describe('wire format', () => {
     // The server passes Buffers in; Buffer extends Uint8Array, so this is the
     // same code path — but it is the compatibility the split copies existed for.
     const payload = Buffer.from('hello');
-    const decoded = decode(encode(9, CMD.SNAPSHOT, payload))!;
+    const decoded = decode(encodeSnapshot(9, 7, payload))!;
+    expect(decoded.seq).toBe(7);
     expect(Buffer.from(decoded.payload).toString()).toBe('hello');
   });
 
@@ -114,5 +115,29 @@ describe('direction asymmetry — the Korean input regression', () => {
     const decoded = decodeServerFrame(encodeData(1, 42, new TextEncoder().encode('ok')))!;
     expect(decoded.seq).toBe(42);
     expect(new TextDecoder().decode(decoded.payload)).toBe('ok');
+  });
+});
+
+describe('snapshot watermark', () => {
+  it('round-trips the sequence on a server → client snapshot', () => {
+    const frame = encodeSnapshot(9, 41, new TextEncoder().encode('screen'));
+    const decoded = decodeServerFrame(frame)!;
+    expect(decoded.cmd).toBe(CMD.SNAPSHOT);
+    expect(decoded.seq).toBe(41);
+    expect(new TextDecoder().decode(decoded.payload)).toBe('screen');
+  });
+
+  it('leaves the client → server snapshot request bare', () => {
+    // requestSnapshot sends a headerless frame; the server-side decoder must
+    // not eat anything as a sequence — same asymmetry as DATA.
+    const decoded = decodeClientFrame(encode(9, CMD.SNAPSHOT))!;
+    expect(decoded.seq).toBeUndefined();
+    expect(decoded.payload.length).toBe(0);
+  });
+
+  it('treats a snapshot without room for a sequence as a plain frame', () => {
+    const decoded = decodeServerFrame(bytes(9, 0, CMD.SNAPSHOT, 0x78))!;
+    expect(decoded.seq).toBeUndefined();
+    expect(Array.from(decoded.payload)).toEqual([0x78]);
   });
 });

@@ -20,7 +20,7 @@
  * during the last swap a v2 CLI ran against a v3 server for hours with no way
  * to tell.
  */
-export const API_VERSION = 1;
+export const API_VERSION = 2;
 
 export const CMD = {
   DATA: 0x00,
@@ -64,10 +64,24 @@ export function encode(sessionId: number, cmd: number, payload?: Uint8Array): Ui
 }
 
 export function encodeData(sessionId: number, seq: number, payload: Uint8Array): Uint8Array {
+  return encodeWithSeq(sessionId, CMD.DATA, seq, payload);
+}
+
+/**
+ * Server → client SNAPSHOT carries the ring sequence the snapshot was
+ * rendered at. Without it a client that resynced via snapshot kept its stale
+ * watermark, so the very next RESUME_VIEW fell back to another snapshot —
+ * flashes chaining into flashes.
+ */
+export function encodeSnapshot(sessionId: number, seq: number, payload: Uint8Array): Uint8Array {
+  return encodeWithSeq(sessionId, CMD.SNAPSHOT, seq, payload);
+}
+
+function encodeWithSeq(sessionId: number, cmd: number, seq: number, payload: Uint8Array): Uint8Array {
   const frame = new Uint8Array(DATA_HEADER_BYTES + payload.length);
   frame[0] = sessionId & 0xff;
   frame[1] = (sessionId >>> 8) & 0xff;
-  frame[2] = CMD.DATA;
+  frame[2] = cmd;
   frame[3] = seq & 0xff;
   frame[4] = (seq >>> 8) & 0xff;
   frame[5] = (seq >>> 16) & 0xff;
@@ -96,14 +110,14 @@ function decodeFrame(data: ArrayBuffer | Uint8Array, dataCarriesSeq: boolean): D
   const sessionId = bytes[0] | (bytes[1] << 8);
   const cmd = bytes[2];
 
-  if (dataCarriesSeq && cmd === CMD.DATA && bytes.length >= DATA_HEADER_BYTES) {
+  if (dataCarriesSeq && (cmd === CMD.DATA || cmd === CMD.SNAPSHOT) && bytes.length >= DATA_HEADER_BYTES) {
     const seq = (bytes[3] | (bytes[4] << 8) | (bytes[5] << 16) | (bytes[6] << 24)) >>> 0;
     return { sessionId, cmd, seq, payload: bytes.subarray(DATA_HEADER_BYTES) };
   }
   return { sessionId, cmd, payload: bytes.subarray(HEADER_BYTES) };
 }
 
-/** What a client receives from the server. DATA parses its sequence. */
+/** What a client receives from the server. DATA and SNAPSHOT parse their sequence. */
 export function decodeServerFrame(data: ArrayBuffer | Uint8Array): DecodedFrame | null {
   return decodeFrame(data, true);
 }

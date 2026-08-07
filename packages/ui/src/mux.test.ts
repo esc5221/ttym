@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalMux } from './mux.js';
-import { CMD, decode, encode, encodeData } from './protocol.js';
+import { CMD, decode, encode, encodeData, encodeSnapshot } from './protocol.js';
 
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
   return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
@@ -113,6 +113,33 @@ describe('TerminalMux', () => {
     const resume = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
     expect(resume?.cmd).toBe(CMD.RESUME_VIEW);
     expect(JSON.parse(new TextDecoder().decode(resume!.payload))).toEqual({ fromSeq: 4 });
+  });
+
+  it('advances the watermark from a snapshot so resumeView resumes from it', async () => {
+    const mux = new TerminalMux('ws://example.test');
+    const connected = mux.connect();
+    const socket = FakeWebSocket.latest();
+    socket.open();
+    await connected;
+
+    const onSnapshot = vi.fn();
+    const attachPromise = mux.attachSession(9, { onData: vi.fn(), onSnapshot }, { cols: 80, rows: 24 });
+    socket.emitMessage(encode(9, CMD.ATTACH, new TextEncoder().encode(JSON.stringify({
+      ok: true, id: 9, pid: 1, cmd: ['/bin/sh'], cols: 80, rows: 24,
+      status: 'attached', lastSeq: 3, createdAt: 0, detachedAt: null,
+    }))));
+    await attachPromise;
+
+    // A resync snapshot rendered at seq 41 arrives. Before the watermark
+    // existed the client kept fromSeq=3, and the next resumeView could only
+    // fall back to yet another snapshot.
+    socket.emitMessage(encodeSnapshot(9, 41, new TextEncoder().encode('fresh screen')));
+    expect(onSnapshot).toHaveBeenCalledWith('fresh screen');
+
+    mux.resumeView(9);
+    const resume = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
+    expect(resume?.cmd).toBe(CMD.RESUME_VIEW);
+    expect(JSON.parse(new TextDecoder().decode(resume!.payload))).toEqual({ fromSeq: 41 });
   });
 
   it('detaches tracked sessions on disconnect without faking session exit', async () => {

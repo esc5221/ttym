@@ -142,6 +142,48 @@ describe('createServer', () => {
     expect(snapshot.payload.toString()).toContain('hello');
   });
 
+  it('stamps snapshots with a watermark, and resumeView from it replays delta — not another snapshot', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', "printf 'hello\\n'; stty -echo; exec cat"],
+      cols: 80, rows: 24,
+    }))));
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    await ws1.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid);
+    ws1.send(encode(sid, CMD.DETACH));
+    await ws1.next((f) => f.cmd === CMD.DETACH && f.sessionId === sid);
+    await ws1.close();
+
+    const ws2 = await openClient(port);
+    clients.push(ws2);
+    ws2.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: 0, cols: 80, rows: 24 }))));
+    await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+
+    // The fresh attach resyncs by snapshot — which must carry the ring seq
+    // it was rendered at.
+    const snapshot = await ws2.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid);
+    expect(snapshot.seq).toBeDefined();
+    expect(snapshot.seq!).toBeGreaterThan(0);
+
+    // Miss some output while the view is paused…
+    ws2.send(encode(sid, CMD.PAUSE_VIEW));
+    ws2.send(encode(sid, CMD.DATA, Buffer.from('RESYNC-MARK\n')));
+    await new Promise((r) => setTimeout(r, 400));
+
+    // …then resume from the snapshot's watermark. A client without the
+    // watermark would still send its pre-snapshot fromSeq and be handed a
+    // second snapshot; with it, the gap replays as plain DATA.
+    ws2.send(encode(sid, CMD.RESUME_VIEW, Buffer.from(JSON.stringify({ fromSeq: snapshot.seq }))));
+    const replay = await ws2.next((f) => f.cmd === CMD.DATA && f.sessionId === sid
+      && Buffer.from(f.payload).toString('binary').includes('RESYNC-MARK'));
+    expect(replay.seq!).toBeGreaterThan(snapshot.seq!);
+    await expect(ws2.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid, 400)).rejects.toThrow();
+  });
+
   it('forces snapshot on attach when a sync block is still open', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);

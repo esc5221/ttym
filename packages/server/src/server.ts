@@ -8,7 +8,7 @@ import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
 import { sweepRuntimeDir } from './run-gc.js';
-import { CMD, encode, encodeData, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
+import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
 import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
@@ -821,7 +821,7 @@ export async function createServer(port: number): Promise<TtymServer> {
             if (session && !session.isDead) {
               session.resumeViewer(viewerId);
               // snapshot 전송으로 빠진 구간 복구
-              safeSend(ws, encode(sessionId, CMD.SNAPSHOT, Buffer.from(session.snapshot())));
+              safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
             }
           }
         }, 25);
@@ -940,7 +940,7 @@ export async function createServer(port: number): Promise<TtymServer> {
             // Send initial snapshot (holder may have buffered output before viewer was added)
             const snap = session.snapshot();
             if (snap.length > 0) {
-              safeSend(ws, encode(session.id, CMD.SNAPSHOT, Buffer.from(snap)));
+              safeSend(ws, encodeSnapshot(session.id, session.lastSeq, Buffer.from(snap)));
             }
           }).catch((error) => {
             console.error('Failed to create session:', error);
@@ -974,7 +974,7 @@ export async function createServer(port: number): Promise<TtymServer> {
               safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));
             }
           } else {
-            safeSend(ws, encode(sessionId, CMD.SNAPSHOT, Buffer.from(session.snapshot())));
+            safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
           }
 
           wireSession(sessionId, mode);
@@ -996,7 +996,7 @@ export async function createServer(port: number): Promise<TtymServer> {
         case CMD.SNAPSHOT: {
           const session = manager.get(sessionId);
           if (session && !session.isDead) {
-            safeSend(ws, encode(sessionId, CMD.SNAPSHOT, Buffer.from(session.snapshot())));
+            safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
           }
           break;
         }
@@ -1035,7 +1035,7 @@ export async function createServer(port: number): Promise<TtymServer> {
                 safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));
               }
             } else {
-              safeSend(ws, encode(sessionId, CMD.SNAPSHOT, Buffer.from(session.snapshot())));
+              safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
             }
 
             session.resumeViewer(viewerId);

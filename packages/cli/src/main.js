@@ -165,7 +165,7 @@ function decodeFrame(raw) {
   const buf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
   const sessionId = buf.readUInt16LE(0);
   const cmd = buf[2];
-  if (cmd === CMD.DATA && buf.length >= 7) {
+  if ((cmd === CMD.DATA || cmd === CMD.SNAPSHOT) && buf.length >= 7) {
     return {
       sessionId,
       cmd,
@@ -751,6 +751,7 @@ async function cmdAttach() {
       }
 
       if (frame.cmd === CMD.SNAPSHOT) {
+        if (typeof frame.seq === 'number') lastSeq = frame.seq;
         if (uiMode === 'attached') applySnapshot(decoder.decode(frame.payload));
         return;
       }

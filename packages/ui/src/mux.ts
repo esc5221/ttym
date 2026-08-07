@@ -156,6 +156,10 @@ export class TerminalMux {
         break;
 
       case CMD.SNAPSHOT: {
+        // The snapshot replaces everything up to its watermark; without this
+        // the next resumeView would carry a stale fromSeq and force yet
+        // another snapshot — resyncs chaining into resyncs.
+        if (decoded.seq !== undefined) this._lastSeqs.set(sessionId, decoded.seq);
         const snapStr = this.decoder.decode(payload);
         this.sessions.get(sessionId)?.onSnapshot?.(snapStr);
         break;

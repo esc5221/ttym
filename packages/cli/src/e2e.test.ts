@@ -3,6 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { API_VERSION } from '@ttym/protocol';
 
 /**
  * The CLI's whole contract in one pass: start a server, create a workspace,
@@ -67,7 +68,7 @@ suite('cli end to end', () => {
 
   it('reports its version to clients', async () => {
     const v = await api('/api/version');
-    expect(v?.apiVersion).toBe(1);
+    expect(v?.apiVersion).toBe(API_VERSION);
   });
 
   it('creates a workspace', () => {

@@ -42,6 +42,14 @@ export interface Viewer {
 
 // ───── Holder protocol ─────
 
+const DEFAULT_RING_BYTES = 1024 * 1024;
+
+function ringBytes(): number {
+  const raw = Number(process.env.TTYM_RING_BYTES);
+  if (Number.isFinite(raw) && raw >= 64 * 1024) return Math.trunc(raw);
+  return DEFAULT_RING_BYTES;
+}
+
 const H_CMD_STATE = 0x02;
 const H_CMD_DATA_OUT = 0x03;
 const H_CMD_DATA_IN = 0x04;
@@ -260,8 +268,10 @@ export class Session {
     this.serializer = new SerializeAddon();
     this.term.loadAddon(this.serializer as any);
 
-    // Layer 3
-    this.ring = new OutputRing(128 * 1024);
+    // Layer 3. Sized so a tab hidden through a normal burst of agent output
+    // still resyncs by delta replay instead of a snapshot; the sync filter can
+    // emit a single 512KB block, which the old 128KB ring could not even hold.
+    this.ring = new OutputRing(ringBytes());
   }
 
   /** Create a new session: spawn holder, connect */
@@ -647,6 +657,11 @@ export class Session {
     this.term.write(ansi);
   }
 
+  /** Ring sequence of the last appended output — the snapshot watermark. */
+  get lastSeq(): number {
+    return this.ring.nextSeq - 1;
+  }
+
   info(): SessionInfo {
     return {
       id: this.id,
@@ -656,7 +671,7 @@ export class Session {
       rows: this._rows,
       status: this.status,
       viewerCount: this.viewers.size,
-      lastSeq: this.ring.nextSeq - 1,
+      lastSeq: this.lastSeq,
       createdAt: this.createdAt,
       detachedAt: this._detachedAt,
     };
