@@ -163,8 +163,6 @@ describe('WorkspaceStore', () => {
       ],
     });
   });
-  });
-
 
   it('splits downward into a column and upward before the target', () => {
     const dir = runtimeDir();
