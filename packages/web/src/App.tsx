@@ -606,6 +606,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
   const [focusedSid, setFocusedSid] = useState<number | null>(null);
   const [zoomedSid, setZoomedSid] = useState<number | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [standaloneSessions, setStandaloneSessions] = useState<Array<{ id: number; cwd?: string }>>([]);
   const [attachLoading, setAttachLoading] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -694,6 +695,15 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
       return { ...prev, layout };
     });
   }, [workspaceId]);
+
+  const applyPreset = useCallback(async (preset: 'even-h' | 'even-v' | 'main-v' | 'tiled' | 'auto') => {
+    setLayoutMenuOpen(false);
+    const end = barrier.current.begin();
+    try {
+      const next = await api.updateWorkspace(API_BASE, workspaceId, { preset }) as Workspace;
+      await applyWorkspace(next);
+    } catch {} finally { end(); }
+  }, [workspaceId, applyWorkspace]);
 
   const commitSwap = useCallback((a: number, b: number) => {
     barrier.current.blockFor();
@@ -902,6 +912,19 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
           <span onClick={beginEditName} style={workspaceNameStyle} title="click to rename">{ws?.name ?? workspaceId}</span>
         )}
         <button onClick={() => void doSplit('right')} style={btnStyle}>+ split</button>
+        <span style={{ position: 'relative', display: 'inline-block' }}>
+          <button onClick={() => setLayoutMenuOpen((v) => !v)} style={btnStyle}>layout ▾</button>
+          {layoutMenuOpen ? (
+            <div style={attachDropdownStyle}>
+              <div style={attachDropdownTitleStyle}>preset — 멤버는 그대로, 배치만 바뀐다</div>
+              {(['auto', 'even-h', 'even-v', 'main-v', 'tiled'] as const).map((preset) => (
+                <button key={preset} onClick={() => void applyPreset(preset)} style={attachDropdownItemStyle}>
+                  {preset}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </span>
         <span style={{ position: 'relative', display: 'inline-block' }}>
           <button onClick={toggleAttach} style={btnStyle}>+ attach</button>
           {attachOpen ? (

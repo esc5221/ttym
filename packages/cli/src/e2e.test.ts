@@ -84,6 +84,15 @@ suite('cli end to end', () => {
     await until(async () => ((await api('/api/sessions')) ?? []).length === 1);
   }, 20_000);
 
+
+  it('applies a layout preset without touching the sessions', () => {
+    const before = JSON.parse(ttym(['workspace', 'info', 'e2e/suite', '--json']));
+    const out = JSON.parse(ttym(['workspace', 'layout', 'e2e/suite', 'even-v', '--json']));
+    expect(out.layout).toBeDefined();
+    const after = JSON.parse(ttym(['workspace', 'info', 'e2e/suite', '--json']));
+    expect(after.members.map((m: any) => m.sessionId).sort())
+      .toEqual(before.members.map((m: any) => m.sessionId).sort());
+  });
   it('sends input and reads it back from the screen', async () => {
     ttym(['workspace', 'send', 'e2e/suite', 'sh', '--', 'echo E2E_ROUNDTRIP\n']);
     await until(async () => {

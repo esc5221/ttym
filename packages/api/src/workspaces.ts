@@ -30,7 +30,7 @@ export function createWorkspace(
 export function updateWorkspace(
   base: BaseUrl,
   id: string,
-  patch: { name?: string; project?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[] },
+  patch: { name?: string; project?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: 'even-h' | 'even-v' | 'main-v' | 'tiled' | 'auto' },
 ): Promise<WorkspaceInfo> {
   return request(base, `/api/workspaces/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch });
 }

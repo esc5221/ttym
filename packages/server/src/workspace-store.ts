@@ -4,6 +4,8 @@ import {
   insertPane,
   splitPane,
   removePane,
+  presetLayout,
+  isLayoutPreset,
   layoutSessionIds,
   layoutFromSessionIds,
 } from '@ttym/shared';
@@ -181,13 +183,18 @@ export class WorkspaceStore {
 
   update(
     id: string,
-    patch: { project?: string; name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[] },
+    patch: { project?: string; name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: string },
   ): WorkspaceInfo | null {
     const ws = this.workspaces.get(id);
     if (!ws) return null;
     if (patch.project !== undefined) ws.project = patch.project;
     if (patch.name !== undefined) ws.name = patch.name;
     if (patch.layout !== undefined) ws.layout = patch.layout;
+    if (patch.preset !== undefined && isLayoutPreset(patch.preset)) {
+      // tmux select-layout: re-attach the same members to a fresh tree —
+      // membership order decides who gets the main pane, sessions untouched.
+      ws.layout = presetLayout(patch.preset, ws.members.map((m) => m.sessionId));
+    }
     if (patch.members !== undefined) ws.members = patch.members;
     this.reconcileWorkspace(ws);
     ws.updatedAt = Date.now();

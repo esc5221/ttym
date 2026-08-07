@@ -1287,6 +1287,22 @@ async function cmdWorkspace() {
     return;
   }
 
+  if (action === 'layout') {
+    const workspace = await resolveWorkspace(port, args[0]);
+    const spec = args[1];
+    if (!spec) {
+      console.error('usage: ttym workspace layout <workspace|--current> <even-h|even-v|main-v|tiled|auto|layout-json>');
+      process.exit(1);
+    }
+    // tmux select-layout: 프리셋 이름과 커스텀 트리를 같은 입구로 받는다.
+    const presets = ['even-h', 'even-v', 'main-v', 'tiled', 'auto'];
+    const patch = presets.includes(spec) ? { preset: spec } : { layout: JSON.parse(spec) };
+    const next = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(workspace.id)}`, patch);
+    if (asJson) return printOutput(next, true);
+    console.log(`${next.project}/${next.name} layout updated`);
+    return;
+  }
+
   if (action === 'rename') {
     const workspace = await resolveWorkspace(port, args[0]);
     const name = readOption(args, '--name');

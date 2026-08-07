@@ -7,3 +7,4 @@
  */
 export * from './workspace-domain.js';
 export * from './layout-tree.js';
+export * from './layout-presets.js';
