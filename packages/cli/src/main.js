@@ -1801,6 +1801,73 @@ async function cmdAgent() {
 // These sit beside the old `workspace <verb> <ws> <member>` forms, which keep
 // working untouched. Removal of the old grammar is a later, separate step.
 
+/**
+ * kitty --match 축소판: 'field:query'를 and로 조합해 멤버 집합을 고른다.
+ *   필드  name role tag ws state id
+ *   state idle | busy (에이전트 turn 진행 여부) | agent | shell
+ * 숫자 필드(id)는 숫자로, 나머지는 부분 문자열로 비교한다.
+ */
+async function resolveMatches(port, expr) {
+  const clauses = expr.split(/\s+and\s+/).map((clause) => {
+    const at = clause.indexOf(':');
+    if (at === -1) {
+      console.error(`not a matcher: ${clause} (expected field:query)`);
+      process.exit(1);
+    }
+    return { field: clause.slice(0, at).trim(), query: clause.slice(at + 1).trim() };
+  });
+  const needsState = clauses.some((c) => c.field === 'state');
+
+  const workspaces = await fetchJson(port, '/api/workspaces');
+  const candidates = [];
+  for (const ws of workspaces) {
+    for (const member of ws.members ?? []) {
+      candidates.push({
+        sessionId: member.sessionId,
+        name: member.name ?? '',
+        role: member.role ?? '',
+        tags: member.tags ?? [],
+        ws: `${ws.project}/${ws.name}`,
+        label: `${ws.project}/${ws.name}:${member.name}`,
+      });
+    }
+  }
+  if (needsState) {
+    await Promise.all(candidates.map(async (c) => {
+      try {
+        const runtime = await fetchJson(port, `/api/sessions/${c.sessionId}/runtime`);
+        c.agentKind = runtime.agent?.kind ?? null;
+        c.active = runtime.agent?.active === true;
+      } catch { c.agentKind = null; c.active = false; }
+    }));
+  }
+
+  const matches = candidates.filter((c) => clauses.every(({ field, query }) => {
+    switch (field) {
+      case 'name': return c.name.includes(query);
+      case 'role': return c.role.includes(query);
+      case 'tag': return c.tags.some((t) => String(t).includes(query));
+      case 'ws': return c.ws.includes(query);
+      case 'id': return c.sessionId === Number(query);
+      case 'state':
+        if (query === 'busy') return c.active === true;
+        if (query === 'idle') return c.agentKind !== null && !c.active;
+        if (query === 'agent') return c.agentKind !== null;
+        if (query === 'shell') return !c.agentKind;
+        console.error(`unknown state: ${query} (busy|idle|agent|shell)`);
+        process.exit(1);
+      default:
+        console.error(`unknown match field: ${field} (name|role|tag|ws|state|id)`);
+        process.exit(1);
+    }
+  }));
+  if (matches.length === 0) {
+    console.error(`no members match: ${expr}`);
+    process.exit(1);
+  }
+  return matches;
+}
+
 async function resolveAddress(port, token) {
   if (!token) {
     console.error('address required: ws:name, :name, or #id');
@@ -1913,11 +1980,19 @@ async function cmdSendAddr() {
   const payload = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
   const token = args[0];
   if (!token || !payload) {
-    console.error('usage: ttym send <ws:name|:name|#id> -- "data"');
+    console.error('usage: ttym send <ws:name|:name|#id | --match "expr"> -- "data"');
     process.exit(1);
   }
   const port = getPort();
   await ensureCompatibleServer(port);
+  if (token === '--match') {
+    const targets = await resolveMatches(port, args[1] ?? '');
+    for (const target of targets) {
+      await fetchPost(port, `/api/sessions/${target.sessionId}/send`, { data: payload });
+      console.log(`sent to ${target.label}`);
+    }
+    return;
+  }
   const target = await resolveAddress(port, token);
   const result = await fetchPost(port, `/api/sessions/${target.sessionId}/send`, { data: payload });
   if (hasFlag('--json')) return printOutput(result, true);
@@ -1928,11 +2003,25 @@ async function cmdScreenAddr() {
   const args = process.argv.slice(3);
   const token = args[0];
   if (!token) {
-    console.error('usage: ttym screen <ws:name|:name|#id> [--json]');
+    console.error('usage: ttym screen <ws:name|:name|#id | --match \"expr\"> [--json]');
     process.exit(1);
   }
   const port = getPort();
   await ensureCompatibleServer(port);
+  if (token === '--match') {
+    const targets = await resolveMatches(port, args[1] ?? '');
+    const screens = [];
+    for (const target of targets) {
+      const result = await fetchJson(port, `/api/sessions/${target.sessionId}/screen`);
+      screens.push({ target: target.label, screen: result?.screen ?? '' });
+    }
+    if (hasFlag('--json')) return printOutput(screens, true);
+    for (const entry of screens) {
+      console.log(`── ${entry.target} ──`);
+      process.stdout.write(entry.screen.endsWith('\n') ? entry.screen : entry.screen + '\n');
+    }
+    return;
+  }
   const target = await resolveAddress(port, token);
   const result = await fetchJson(port, `/api/sessions/${target.sessionId}/screen`);
   if (hasFlag('--json')) return printOutput({ target: target.label, screen: result?.screen ?? '' }, true);
@@ -1945,12 +2034,32 @@ async function cmdAwaitAddr() {
   const prompt = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
   const token = args[0];
   if (!token || !prompt) {
-    console.error('usage: ttym await <ws:name|:name|#id> [--timeout ms] -- "prompt"');
+    console.error('usage: ttym await <ws:name|:name|#id | --match \"expr\"> [--timeout ms] -- "prompt"');
     process.exit(1);
   }
   const port = getPort();
   await ensureCompatibleServer(port);
   const timeoutMs = parseInt(readOption(args, '--timeout') || '120000', 10);
+  if (token === '--match') {
+    // 매칭된 멤버 각각에 순차 await — Stop hook 완료 감지가 멤버별 독립이라
+    // 병렬도 되지만, 출력이 섞이지 않게 순서대로 묻는다.
+    const targets = await resolveMatches(port, args[1] ?? '');
+    const results = [];
+    for (const t of targets) {
+      const response = await fetchRequest(port, 'POST', `/api/sessions/${t.sessionId}/interactions`, {
+        prompt: prompt.replace(/[\r\n]+$/, ''),
+        timeoutMs,
+        submit: 'cr',
+      }, timeoutMs + 15_000);
+      results.push({ target: t.label, interaction: response?.interaction ?? null });
+    }
+    if (hasFlag('--json')) return printOutput(results, true);
+    for (const entry of results) {
+      console.log(`── ${entry.target} ──`);
+      console.log(entry.interaction?.transcript ?? `(${entry.interaction?.status ?? 'no response'})`);
+    }
+    return;
+  }
   const target = await resolveAddress(port, token);
 
   const response = await fetchRequest(port, 'POST', `/api/sessions/${target.sessionId}/interactions`, {

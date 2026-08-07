@@ -93,6 +93,13 @@ suite('cli end to end', () => {
     expect(after.members.map((m: any) => m.sessionId).sort())
       .toEqual(before.members.map((m: any) => m.sessionId).sort());
   });
+
+  it('resolves --match over membership fields', () => {
+    const out = JSON.parse(ttym(['screen', '--match', 'ws:e2e and name:sh', '--json']));
+    expect(Array.isArray(out)).toBe(true);
+    expect(out.length).toBeGreaterThan(0);
+    expect(out[0].target).toContain('e2e/suite');
+  });
   it('sends input and reads it back from the screen', async () => {
     ttym(['workspace', 'send', 'e2e/suite', 'sh', '--', 'echo E2E_ROUNDTRIP\n']);
     await until(async () => {
