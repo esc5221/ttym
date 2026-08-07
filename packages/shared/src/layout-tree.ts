@@ -94,6 +94,7 @@ export function splitPane(
   sessionId: number,
   axis: 'row' | 'col' = 'row',
   ratio = 0.5,
+  before = false,
 ): LayoutNode {
   if (sessionId <= 0) return root;
   if (layoutHasSession(root, sessionId)) return root;
@@ -104,7 +105,10 @@ export function splitPane(
   const rewrite = (node: LayoutNode): LayoutNode => {
     if (isPane(node)) {
       if (node.sessionId !== targetSessionId) return node;
-      return split(axis, [node, { type: 'pane', sessionId }], [1 - bounded, bounded]);
+      const fresh: LayoutNode = { type: 'pane', sessionId };
+      return before
+        ? split(axis, [fresh, node], [bounded, 1 - bounded])
+        : split(axis, [node, fresh], [1 - bounded, bounded]);
     }
     if (!layoutHasSession(node, targetSessionId)) return node; // sibling: untouched
     return { ...node, children: node.children.map(rewrite), sizes: alignSizes(node.sizes, node.children.length) };
@@ -155,6 +159,50 @@ export function resizeSplit(root: LayoutNode, path: number[], sizes: number[]): 
     return { ...node, children };
   };
   return rewrite(root, 0);
+}
+
+/** Swap two leaves in place — reorder without disturbing the tree shape. */
+export function swapPanes(root: LayoutNode, a: number, b: number): LayoutNode {
+  if (a === b || !layoutHasSession(root, a) || !layoutHasSession(root, b)) return root;
+  const rewrite = (node: LayoutNode): LayoutNode => {
+    if (isPane(node)) {
+      if (node.sessionId === a) return { type: 'pane', sessionId: b };
+      if (node.sessionId === b) return { type: 'pane', sessionId: a };
+      return node;
+    }
+    return { ...node, children: node.children.map(rewrite) };
+  };
+  return rewrite(root);
+}
+
+/**
+ * Project ratio sizes onto an integer pixel budget.
+ *
+ * Ratios stay the stored truth (viewers disagree on viewport size, so
+ * absolute sizes cannot); the projection borrows the tmux/zellij discipline:
+ * round each share, then hand the rounding error out one pixel at a time —
+ * to the smallest children when growing, the largest when shrinking — so the
+ * distribution never visibly jumps. A floor is enforced when the budget
+ * allows it at all.
+ */
+export function discretizeSizes(sizes: number[], totalPx: number, minPx = 0): number[] {
+  const count = sizes.length;
+  if (count === 0) return [];
+  const shares = normalize(alignSizes(sizes, count));
+  const floor = minPx * count <= totalPx ? minPx : Math.floor(totalPx / count);
+  const px = shares.map((s) => Math.max(floor, Math.round(s * totalPx)));
+
+  let error = totalPx - px.reduce((a, v) => a + v, 0);
+  const order = px.map((v, i) => i).sort((x, y) => (error > 0 ? px[x] - px[y] : px[y] - px[x]));
+  let guard = count * Math.abs(error) + count;
+  while (error !== 0 && guard-- > 0) {
+    for (const i of order) {
+      if (error === 0) break;
+      if (error > 0) { px[i] += 1; error -= 1; }
+      else if (px[i] > floor) { px[i] -= 1; error += 1; }
+    }
+  }
+  return px;
 }
 
 /**

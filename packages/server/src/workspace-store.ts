@@ -235,6 +235,7 @@ export class WorkspaceStore {
     id: string,
     targetSessionId: number | undefined,
     member: Omit<WorkspaceMemberInfo, 'createdAt' | 'updatedAt'>,
+    direction: 'right' | 'left' | 'down' | 'up' = 'right',
   ): WorkspaceInfo | null {
     const ws = this.workspaces.get(id);
     if (!ws) return null;
@@ -252,9 +253,11 @@ export class WorkspaceStore {
 
     // A real split now: the target pane is replaced by a two-way split and
     // keeps its slot size, so nothing else in the layout moves.
+    const axis = direction === 'down' || direction === 'up' ? 'col' as const : 'row' as const;
+    const before = direction === 'left' || direction === 'up';
     ws.layout = targetSessionId === undefined
       ? insertPane(ws.layout, member.sessionId)
-      : splitPane(ws.layout, targetSessionId, member.sessionId);
+      : splitPane(ws.layout, targetSessionId, member.sessionId, axis, 0.5, before);
     this.reconcileWorkspace(ws);
     ws.updatedAt = now;
     this.scheduleSave();

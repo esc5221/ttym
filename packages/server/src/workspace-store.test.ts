@@ -172,6 +172,26 @@ describe('WorkspaceStore', () => {
     });
   });
 
+
+  it('splits downward into a column and upward before the target', () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const created = store.create('dir-ws', 'dir-ws', { type: 'pane', sessionId: 41 }, 'pilot',
+      [{ sessionId: 41, name: 'lead', createdAt: 1, updatedAt: 1 }]);
+
+    const down = store.splitRight(created.id, 41, { sessionId: 42, name: 'below', tags: [] }, 'down')!;
+    expect(down.layout).toEqual({
+      type: 'split', axis: 'col', sizes: [0.5, 0.5],
+      children: [{ type: 'pane', sessionId: 41 }, { type: 'pane', sessionId: 42 }],
+    });
+
+    const up = store.splitRight(created.id, 41, { sessionId: 43, name: 'above', tags: [] }, 'up')!;
+    const col = (up.layout as any).children[0];
+    expect(col.axis).toBe('col');
+    expect(col.children[0].sessionId).toBe(43);
+    expect(col.children[1].sessionId).toBe(41);
+  });
   it('preserves nesting and sizes when a member is added', () => {
     const dir = runtimeDir();
     dirs.push(dir);

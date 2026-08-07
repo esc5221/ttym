@@ -7,6 +7,8 @@ import {
   resizeSplit,
   layoutSessionIds,
   layoutFromSessionIds,
+  swapPanes,
+  discretizeSizes,
 } from './layout-tree.js';
 
 /** row 0.7/0.3 with a nested col 0.5/0.5 on the right — the RFD's example. */
@@ -191,5 +193,62 @@ describe('layoutFromSessionIds — first-time construction only', () => {
 
   it('returns a placeholder for an empty list', () => {
     expect(layoutFromSessionIds([])).toEqual({ type: 'pane', sessionId: 0 });
+  });
+});
+
+describe('swapPanes', () => {
+  it('exchanges two leaves without touching structure or sizes', () => {
+    const tree: LayoutNode = {
+      type: 'split', axis: 'row', sizes: [0.3, 0.7],
+      children: [
+        { type: 'pane', sessionId: 1 },
+        { type: 'split', axis: 'col', sizes: [0.5, 0.5], children: [
+          { type: 'pane', sessionId: 2 }, { type: 'pane', sessionId: 3 },
+        ] },
+      ],
+    };
+    const swapped = swapPanes(tree, 1, 3) as any;
+    expect(swapped.sizes).toEqual([0.3, 0.7]);
+    expect(swapped.children[0].sessionId).toBe(3);
+    expect(swapped.children[1].children[1].sessionId).toBe(1);
+  });
+
+  it('is a no-op when either pane is missing', () => {
+    const tree: LayoutNode = { type: 'pane', sessionId: 1 };
+    expect(swapPanes(tree, 1, 99)).toBe(tree);
+  });
+});
+
+describe('splitPane before', () => {
+  it('places the new pane on the leading side for left/up splits', () => {
+    const tree: LayoutNode = { type: 'pane', sessionId: 1 };
+    const result = splitPane(tree, 1, 2, 'col', 0.5, true) as any;
+    expect(result.axis).toBe('col');
+    expect(result.children[0].sessionId).toBe(2);
+    expect(result.children[1].sessionId).toBe(1);
+  });
+});
+
+describe('discretizeSizes', () => {
+  it('sums exactly to the budget with the error spread one px at a time', () => {
+    const px = discretizeSizes([1 / 3, 1 / 3, 1 / 3], 100);
+    expect(px.reduce((a, v) => a + v, 0)).toBe(100);
+    expect(Math.max(...px) - Math.min(...px)).toBeLessThanOrEqual(1);
+  });
+
+  it('holds the floor when the budget allows it', () => {
+    const px = discretizeSizes([0.9, 0.05, 0.05], 200, 40);
+    expect(px.reduce((a, v) => a + v, 0)).toBe(200);
+    expect(Math.min(...px)).toBeGreaterThanOrEqual(40);
+  });
+
+  it('degrades to an even carve-up when the floor cannot fit', () => {
+    const px = discretizeSizes([0.5, 0.5], 30, 40);
+    expect(px.reduce((a, v) => a + v, 0)).toBe(30);
+  });
+
+  it('is drift-free: projecting twice gives the same answer', () => {
+    const sizes = [0.21, 0.33, 0.46];
+    expect(discretizeSizes(sizes, 977)).toEqual(discretizeSizes(sizes, 977));
   });
 });

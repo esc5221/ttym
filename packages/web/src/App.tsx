@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { TerminalMux, Terminal } from '@ttym/ui';
-import { ansiToHtml, movePanel, insertPanelRight } from '@ttym/vt';
+import { TerminalMux, Terminal, LayoutView } from '@ttym/ui';
+import { ansiToHtml } from '@ttym/vt';
 import * as api from '@ttym/api';
 import type { SessionInfo } from '@ttym/ui';
 import '@xterm/xterm/css/xterm.css';
@@ -9,9 +9,9 @@ import {
   formatCwd,
   layoutToSessionIds,
   memberNameBySession,
-  reconcileSessionPanels,
-  sessionIdsToLayout,
-  shouldBootstrapWorkspacePanels,
+  removePane,
+  resizeSplit,
+  swapPanes,
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
@@ -56,28 +56,7 @@ interface Workspace {
   updatedAt: number;
 }
 
-const DEFAULT_MAX_PANELS = 3;
-const MIN_MAX_PANELS = 1;
-const MAX_MAX_PANELS = 8;
 const LOCAL_ECHO_STORAGE_KEY = 'ttym-demo-local-echo';
-
-function clampMaxPanels(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_MAX_PANELS;
-  return Math.max(MIN_MAX_PANELS, Math.min(MAX_MAX_PANELS, Math.trunc(value)));
-}
-
-function readMaxPanels(): number {
-  const raw = new URLSearchParams(window.location.search).get('maxPanels');
-  if (!raw) return DEFAULT_MAX_PANELS;
-  return clampMaxPanels(Number(raw));
-}
-
-function writeMaxPanels(value: number) {
-  const next = clampMaxPanels(value);
-  const url = new URL(window.location.href);
-  url.searchParams.set('maxPanels', String(next));
-  window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-}
 
 function readLocalEchoEnabled(): boolean {
   try {
@@ -133,30 +112,6 @@ async function copySessionUrl(sessionId: number) {
   input.select();
   document.execCommand('copy');
   document.body.removeChild(input);
-}
-
-function reconcileWorkspacePanels(
-  prevPanels: PanelState[],
-  sessionIds: number[],
-  memberNames: Map<number, string>,
-  sessionCwds?: Map<number, string>,
-): PanelState[] {
-  return reconcileSessionPanels(prevPanels, sessionIds, {
-    createEmpty: (): PanelState => ({ key: uuid() }),
-    createForSession: (sessionId) => ({
-      key: uuid(),
-      sessionId,
-      memberName: memberNames.get(sessionId),
-      cwd: sessionCwds?.get(sessionId),
-    }),
-    decorateSession: (panel, sessionId) => ({
-      ...panel,
-      sessionId,
-      memberName: memberNames.get(sessionId),
-      cwd: sessionCwds?.get(sessionId) ?? panel.cwd,
-    }),
-    clearUnassigned: (panel) => ({ ...panel, sessionId: undefined }),
-  });
 }
 
 async function fetchSessionMeta(sessionId: number): Promise<SessionMeta> {
@@ -228,7 +183,7 @@ async function apiAddMember(
 
 async function apiSplitWorkspace(
   id: string,
-  options: { targetSessionId?: number; cwd?: string; cols?: number; rows?: number; name?: string; role?: string; cmd?: string[] } = {},
+  options: { targetSessionId?: number; cwd?: string; cols?: number; rows?: number; name?: string; role?: string; cmd?: string[]; direction?: 'right' | 'left' | 'down' | 'up' } = {},
 ): Promise<Workspace | null> {
   try {
     const data = await api.splitWorkspace(API_BASE, id, options);
@@ -341,19 +296,19 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
     };
   }, [hoveredSessionId]);
 
-  // 세션이 죽은 것을 워크스페이스에서 정리 (로딩 완료 후에만)
+  // 죽은 세션은 membership만 걷어낸다 — 레이아웃 트리 정리는 서버 몫이라
+  // 클라이언트가 트리를 평탄화할 일이 없다.
   useEffect(() => {
     if (loading || sessions.length === 0) return;
     const aliveIds = new Set(sessions.map((s) => s.id));
     let changed = false;
     for (const ws of workspaces) {
-      const ids = layoutToSessionIds(ws.layout);
-      const liveIds = ids.filter((id) => aliveIds.has(id));
-      if (liveIds.length !== ids.length) {
-        const newLayout = sessionIdsToLayout(liveIds);
-        apiUpdateWorkspace(ws.id, { layout: newLayout });
-        ws.layout = newLayout;
-        changed = true;
+      for (const id of layoutToSessionIds(ws.layout)) {
+        if (id > 0 && !aliveIds.has(id)) {
+          void apiRemoveMember(ws.id, id);
+          ws.layout = removePane(ws.layout, id);
+          changed = true;
+        }
       }
     }
     if (changed) setWorkspaces([...workspaces]);
@@ -641,243 +596,144 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
   );
 }
 
-// ───── 워크스페이스 페이지 (분할 터미널) ─────
+// ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux: TerminalMux; workspaceId: string; maxPanels: number; localEchoEnabled: boolean }) {
-  const [wsName, setWsName] = useState(workspaceId);
-  const [wsProject, setWsProject] = useState('default');
+function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean }) {
+  const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
-  const [panels, setPanels] = useState<PanelState[]>([{ key: uuid() }]);
-  const [focused, setFocused] = useState(0);
-  const [draggedPanelKey, setDraggedPanelKey] = useState<string | null>(null);
+  const [deadSessions, setDeadSessions] = useState<Set<number>>(new Set());
+  const [focusedSid, setFocusedSid] = useState<number | null>(null);
+  const [zoomedSid, setZoomedSid] = useState<number | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const [standaloneSessions, setStandaloneSessions] = useState<Array<{ id: number; cwd?: string }>>([]);
   const [attachLoading, setAttachLoading] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState('');
-  const panelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const initialized = useRef(false);
-  const bootstrappedInitialTerminal = useRef(false);
-  const hydrationSettled = useRef(false);
-  const panelsRef = useRef(panels);
-  const mutationBarrierRef = useRef(new MutationBarrier());
+  const [dragSid, setDragSid] = useState<number | null>(null);
+  const barrier = useRef(new MutationBarrier());
+  const wsRef = useRef<Workspace | null>(null);
+  wsRef.current = ws;
 
-  useEffect(() => {
-    panelsRef.current = panels;
-  }, [panels]);
-
-  useEffect(() => {
-    initialized.current = false;
-    bootstrappedInitialTerminal.current = false;
-    hydrationSettled.current = false;
-    setPanels([{ key: uuid() }]);
-    setFocused(0);
-  }, [workspaceId]);
-
-  const refreshWorkspaceMeta = useCallback(async () => {
-    try {
-      const ws = await api.getWorkspace(API_BASE, workspaceId) as Workspace;
-      setWsName(ws.name);
-      setWsProject(ws.project || 'default');
-      const names = memberNameBySession(ws.members);
-      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-      const cwdEntries = await Promise.all(ids.map(async (id) => {
-        try {
-          const meta = await fetchSessionMeta(id);
-          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-        } catch {
-          return [id, ''] as const;
-        }
-      }));
-      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
-      setMemberNames(Object.fromEntries(names));
-      setSessionCwds(Object.fromEntries(cwdMap));
-      setPanels((prev) => prev.map((panel) => (
-        panel.sessionId !== undefined ? { ...panel, memberName: names.get(panel.sessionId), cwd: cwdMap.get(panel.sessionId) ?? panel.cwd } : panel
-      )));
-    } catch {}
-  }, [workspaceId]);
-
-  // 서버에서 workspace 로드
-  useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-    api.getWorkspace(API_BASE, workspaceId)
-      .catch(() => null)
-      .then(async (ws: Workspace | null) => {
-        if (!ws) return;
-        setWsName(ws.name);
-        setWsProject(ws.project || 'default');
-        setMemberNames(Object.fromEntries((ws.members || []).map((member) => [member.sessionId, member.name])));
-        const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-        if (ids.length > 0) {
-          const names = memberNameBySession(ws.members);
-          const cwdEntries = await Promise.all(ids.map(async (id) => {
-            try {
-              const meta = await fetchSessionMeta(id);
-              return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-            } catch {
-              return [id, ''] as const;
-            }
-          }));
-          const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
-          setSessionCwds(Object.fromEntries(cwdMap));
-          setPanels(ids.map((id) => ({ key: uuid(), sessionId: id, memberName: names.get(id), cwd: cwdMap.get(id) })));
-        }
-      })
-      .catch(() => {})
-      .finally(() => {
-        hydrationSettled.current = true;
-      });
-  }, [workspaceId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const tick = async () => {
-      if (mutationBarrierRef.current.isLocked()) return;
-      const hasPendingLocalPane = panelsRef.current.some((panel) => panel.sessionId === undefined);
-      if (hasPendingLocalPane) return;
-
+  const applyWorkspace = useCallback(async (workspace: Workspace) => {
+    setWs(workspace);
+    setMemberNames(Object.fromEntries(memberNameBySession(workspace.members)));
+    const ids = layoutToSessionIds(workspace.layout).filter((id) => id > 0);
+    const cwdEntries = await Promise.all(ids.map(async (id) => {
       try {
-        const ws = await api.getWorkspace(API_BASE, workspaceId) as Workspace;
-        if (cancelled) return;
+        const meta = await fetchSessionMeta(id);
+        return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
+      } catch { return [id, ''] as const; }
+    }));
+    setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdEntries.filter(([, cwd]) => cwd)) }));
+  }, []);
 
-        const names = memberNameBySession(ws.members);
-        const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-        const cwdEntries = await Promise.all(ids.map(async (id) => {
-          try {
-            const meta = await fetchSessionMeta(id);
-            return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-          } catch {
-            return [id, ''] as const;
-          }
-        }));
-        const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
-        setWsName(ws.name);
-        setWsProject(ws.project || 'default');
-        setMemberNames(Object.fromEntries(names));
-        setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
-        setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
-        setFocused((current) => Math.min(current, Math.max(0, Math.max(ids.length, 1) - 1)));
-      } catch {}
-    };
-
-    const interval = window.setInterval(() => { void tick(); }, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [workspaceId]);
-
-  // 워크스페이스에 세션 ID 동기화 (서버)
-  const syncWorkspace = useCallback((nextPanels: PanelState[]) => {
-    mutationBarrierRef.current.blockFor();
-    const sessionIds = nextPanels.map((p) => p.sessionId).filter((id): id is number => id !== undefined);
-    const layout = sessionIdsToLayout(sessionIds);
-    apiUpdateWorkspace(workspaceId, { layout });
-  }, [workspaceId]);
-
-  const add = useCallback(async () => {
-    const endMutation = mutationBarrierRef.current.begin();
-    const source = panelsRef.current[focused];
+  const refresh = useCallback(async () => {
+    if (barrier.current.isLocked()) return;
     try {
-      const ws = await apiSplitWorkspace(workspaceId, {
-        targetSessionId: source?.sessionId,
-        cwd: source?.cwd,
-        cols: 80,
-        rows: 24,
+      const workspace = await api.getWorkspace(API_BASE, workspaceId) as Workspace;
+      await applyWorkspace(workspace);
+    } catch {}
+  }, [workspaceId, applyWorkspace]);
+
+  useEffect(() => {
+    setWs(null);
+    setDeadSessions(new Set());
+    setZoomedSid(null);
+    void refresh();
+    const interval = window.setInterval(() => { void refresh(); }, 2000);
+    return () => window.clearInterval(interval);
+  }, [workspaceId, refresh]);
+
+  const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
+
+  useEffect(() => {
+    if (sessionIds.length === 0) { setFocusedSid(null); return; }
+    if (focusedSid === null || !sessionIds.includes(focusedSid)) setFocusedSid(sessionIds[0]!);
+  }, [sessionIds.join(','), focusedSid]);
+
+  // ── 변경 연산: 서버가 트리를 소유하고, 클라이언트는 트리 연산 결과를 커밋한다 ──
+
+  const doSplit = useCallback(async (direction: 'right' | 'down', targetSid?: number) => {
+    const end = barrier.current.begin();
+    try {
+      const target = targetSid ?? focusedSid ?? undefined;
+      const data = await apiSplitWorkspace(workspaceId, {
+        targetSessionId: target,
+        cwd: target !== undefined ? sessionCwds[target] : undefined,
+        cols: 80, rows: 24, direction,
       });
-      if (!ws) return;
-      setWsName(ws.name);
-      setWsProject(ws.project || 'default');
-      const names = memberNameBySession(ws.members);
-      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-      const cwdEntries = await Promise.all(ids.map(async (id) => {
-        try {
-          const meta = await fetchSessionMeta(id);
-          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-        } catch {
-          return [id, ''] as const;
-        }
-      }));
-      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
-      setMemberNames(Object.fromEntries(names));
-      setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
-      setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
-      if (source?.sessionId !== undefined) {
-        const targetIndex = ids.indexOf(source.sessionId);
-        if (targetIndex >= 0) setFocused(Math.min(targetIndex + 1, ids.length - 1));
-      } else {
-        setFocused(Math.max(0, ids.length - 1));
-      }
-    } finally {
-      endMutation();
-    }
-  }, [focused, workspaceId]);
+      if (!data) return;
+      await applyWorkspace(data);
+      // apiSplitWorkspace returns workspace; new session id = 최신 member
+      const ids = layoutToSessionIds(data.layout).filter((id) => id > 0);
+      const fresh = ids.find((id) => !sessionIds.includes(id));
+      if (fresh !== undefined) setFocusedSid(fresh);
+    } finally { end(); }
+  }, [workspaceId, focusedSid, sessionCwds, sessionIds.join(','), applyWorkspace]);
 
-  const updatePanelsAfterRemoval = useCallback((prev: PanelState[], index: number) => {
-    const next = prev.filter((_, i) => i !== index);
-    setFocused((f) => {
-      if (next.length === 0) return 0;
-      if (f >= next.length) return next.length - 1;
-      if (f > index) return f - 1;
-      if (f === index) return Math.min(f, next.length - 1);
-      return f;
-    });
-    syncWorkspace(next);
-    return next.length === 0 ? [{ key: uuid() }] : next;
-  }, [syncWorkspace]);
+  const detachMember = useCallback(async (sid: number) => {
+    barrier.current.blockFor();
+    setWs((prev) => prev ? { ...prev, layout: removePane(prev.layout, sid), members: prev.members.filter((m) => m.sessionId !== sid) } : prev);
+    await apiRemoveMember(workspaceId, sid);
+  }, [workspaceId]);
 
-  const detachAt = useCallback((index: number) => {
-    mutationBarrierRef.current.blockFor();
-    setPanels((prev) => {
-      const panel = prev[index];
-      if (panel?.sessionId !== undefined) mux.detachSession(panel.sessionId);
-      return updatePanelsAfterRemoval(prev, index);
-    });
-  }, [mux, updatePanelsAfterRemoval]);
+  const terminateMember = useCallback(async (sid: number) => {
+    barrier.current.blockFor();
+    mux.destroySession(sid);
+    setWs((prev) => prev ? { ...prev, layout: removePane(prev.layout, sid), members: prev.members.filter((m) => m.sessionId !== sid) } : prev);
+    await apiRemoveMember(workspaceId, sid);
+  }, [mux, workspaceId]);
 
-  const terminateAt = useCallback((index: number) => {
-    mutationBarrierRef.current.blockFor();
-    setPanels((prev) => {
-      const panel = prev[index];
-      if (panel?.sessionId !== undefined) mux.destroySession(panel.sessionId);
-      return updatePanelsAfterRemoval(prev, index);
+  const commitResize = useCallback((path: number[], sizes: number[]) => {
+    barrier.current.blockFor();
+    setWs((prev) => {
+      if (!prev) return prev;
+      const layout = resizeSplit(prev.layout, path, sizes);
+      apiUpdateWorkspace(workspaceId, { layout });
+      return { ...prev, layout };
     });
-  }, [mux, updatePanelsAfterRemoval]);
+  }, [workspaceId]);
 
-  const detachWorkspace = useCallback(() => {
-    mutationBarrierRef.current.blockFor();
-    setPanels((prev) => {
-      for (const panel of prev) {
-        if (panel.sessionId !== undefined) mux.detachSession(panel.sessionId);
-      }
-      syncWorkspace([]);
-      return [{ key: uuid() }];
+  const commitSwap = useCallback((a: number, b: number) => {
+    barrier.current.blockFor();
+    setWs((prev) => {
+      if (!prev) return prev;
+      const layout = swapPanes(prev.layout, a, b);
+      apiUpdateWorkspace(workspaceId, { layout });
+      return { ...prev, layout };
     });
-  }, [mux, syncWorkspace]);
+  }, [workspaceId]);
+
+  const restartAt = useCallback(async (sid: number) => {
+    const neighbor = sessionIds.find((id) => id !== sid && !deadSessions.has(id));
+    const cwd = sessionCwds[sid];
+    await detachMember(sid);
+    setDeadSessions((prev) => { const next = new Set(prev); next.delete(sid); return next; });
+    const end = barrier.current.begin();
+    try {
+      const data = await apiSplitWorkspace(workspaceId, { targetSessionId: neighbor, cwd, cols: 80, rows: 24, direction: 'right' });
+      if (data) await applyWorkspace(data);
+    } finally { end(); }
+  }, [sessionIds.join(','), deadSessions, sessionCwds, detachMember, workspaceId, applyWorkspace]);
+
+  // ── attach 드롭다운 (고아 세션 편입) ──
 
   const loadStandaloneSessions = useCallback(async () => {
     setAttachLoading(true);
     try {
       const [list, wsList] = await Promise.all([mux.listSessions(), fetchWorkspaces()]);
       const taken = new Set<number>();
-      for (const ws of wsList) for (const m of ws.members) taken.add(m.sessionId);
+      for (const w of wsList) for (const m of w.members) taken.add(m.sessionId);
       const live = list.filter((s) => s.status !== 'dead' && !taken.has(s.id));
       const enriched = await Promise.all(live.map(async (s) => {
         try {
           const meta = await fetchSessionMeta(s.id);
           return { id: s.id, cwd: typeof meta.cwd === 'string' ? meta.cwd : undefined };
-        } catch {
-          return { id: s.id };
-        }
+        } catch { return { id: s.id }; }
       }));
       setStandaloneSessions(enriched);
-    } finally {
-      setAttachLoading(false);
-    }
+    } finally { setAttachLoading(false); }
   }, [mux]);
 
   const toggleAttach = useCallback(() => {
@@ -888,8 +744,8 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
     });
   }, [loadStandaloneSessions]);
 
-  const attachSession = useCallback(async (sessionId: number) => {
-    const endMutation = mutationBarrierRef.current.begin();
+  const attachSession = useCallback(async (sid: number) => {
+    const end = barrier.current.begin();
     try {
       const used = new Set(Object.values(memberNames));
       let name = '';
@@ -897,208 +753,139 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
         const candidate = `term-${i}`;
         if (!used.has(candidate)) { name = candidate; break; }
       }
-      if (!name) name = `term-${sessionId}`;
-      const ws = await apiAddMember(workspaceId, sessionId, name);
-      if (!ws) return;
-      setWsName(ws.name);
-      setWsProject(ws.project || 'default');
-      const names = memberNameBySession(ws.members);
-      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-      const cwdEntries = await Promise.all(ids.map(async (id) => {
-        try {
-          const meta = await fetchSessionMeta(id);
-          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-        } catch {
-          return [id, ''] as const;
-        }
-      }));
-      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
-      setMemberNames(Object.fromEntries(names));
-      setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
-      setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
-      const attachedIndex = ids.indexOf(sessionId);
-      if (attachedIndex >= 0) setFocused(attachedIndex);
+      if (!name) name = `term-${sid}`;
+      const workspace = await apiAddMember(workspaceId, sid, name);
+      if (!workspace) return;
+      await applyWorkspace(workspace);
+      setFocusedSid(sid);
       setAttachOpen(false);
-    } finally {
-      endMutation();
-    }
-  }, [memberNames, workspaceId]);
+    } finally { end(); }
+  }, [memberNames, workspaceId, applyWorkspace]);
 
   useEffect(() => {
     if (!attachOpen) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setAttachOpen(false);
-    };
+    const handler = (event: KeyboardEvent) => { if (event.key === 'Escape') setAttachOpen(false); };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [attachOpen]);
 
-  const beginEditName = useCallback(() => {
-    setDraftName(wsName);
-    setEditingName(true);
-  }, [wsName]);
+  // ── 이름 편집 ──
 
+  const beginEditName = useCallback(() => { setDraftName(ws?.name ?? ''); setEditingName(true); }, [ws?.name]);
   const commitEditName = useCallback(async () => {
     const next = draftName.trim();
     setEditingName(false);
-    if (!next || next === wsName) return;
-    setWsName(next);
+    if (!next || next === ws?.name) return;
+    setWs((prev) => prev ? { ...prev, name: next } : prev);
     await apiUpdateWorkspace(workspaceId, { name: next });
-  }, [draftName, wsName, workspaceId]);
+  }, [draftName, ws?.name, workspaceId]);
 
-  const cancelEditName = useCallback(() => {
-    setEditingName(false);
-  }, []);
+  // ── 키바인딩: ⌘\ 우분할 · ⌘⇧\ 하분할 · ⌘←→ 포커스 순환 ──
 
-  const removeAt = useCallback((index: number) => {
-    mutationBarrierRef.current.blockFor();
-    setPanels((prev) => updatePanelsAfterRemoval(prev, index));
-  }, [updatePanelsAfterRemoval]);
-
-  const markDeadAt = useCallback((index: number) => {
-    setPanels((prev) => prev.map((p, i) => i === index ? { ...p, dead: true } : p));
-  }, []);
-
-  const restartAt = useCallback(async (index: number) => {
-    const endMutation = mutationBarrierRef.current.begin();
-    const panel = panelsRef.current[index];
-    try {
-      if (panel?.sessionId !== undefined) {
-        await apiRemoveMember(workspaceId, panel.sessionId);
-      }
-      const neighbor = panelsRef.current.find((p, i) => i !== index && p.sessionId !== undefined && !p.dead);
-      const ws = await apiSplitWorkspace(workspaceId, {
-        targetSessionId: neighbor?.sessionId,
-        cwd: panel?.cwd ?? neighbor?.cwd,
-        cols: 80,
-        rows: 24,
-      });
-      if (!ws) return;
-      const names = memberNameBySession(ws.members);
-      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-      const cwdEntries = await Promise.all(ids.map(async (id) => {
-        try {
-          const meta = await fetchSessionMeta(id);
-          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-        } catch {
-          return [id, ''] as const;
-        }
-      }));
-      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
-      setMemberNames(Object.fromEntries(names));
-      setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
-      setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
-      setFocused(index);
-    } finally {
-      endMutation();
-    }
-  }, [workspaceId]);
-
-  const startAt = useCallback(async (index: number) => {
-    const endMutation = mutationBarrierRef.current.begin();
-    const source = panelsRef.current[index] ?? panelsRef.current[Math.max(0, index - 1)];
-    try {
-      const ws = await apiSplitWorkspace(workspaceId, {
-        targetSessionId: source?.sessionId,
-        cwd: source?.cwd,
-        cols: 80,
-        rows: 24,
-      });
-      if (!ws) return;
-      const names = memberNameBySession(ws.members);
-      const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-      const cwdEntries = await Promise.all(ids.map(async (id) => {
-        try {
-          const meta = await fetchSessionMeta(id);
-          return [id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-        } catch {
-          return [id, ''] as const;
-        }
-      }));
-      const cwdMap = new Map(cwdEntries.filter(([, cwd]) => cwd).map(([id, cwd]) => [id, cwd]));
-      setMemberNames(Object.fromEntries(names));
-      setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdMap) }));
-      setPanels((prev) => reconcileWorkspacePanels(prev, ids, names, cwdMap));
-      setFocused(Math.min(index, Math.max(0, ids.length - 1)));
-    } finally {
-      endMutation();
-    }
-  }, [workspaceId]);
-
-  useEffect(() => {
-    if (bootstrappedInitialTerminal.current) return;
-    if (!shouldBootstrapWorkspacePanels({
-      initialized: initialized.current,
-      hydrated: hydrationSettled.current,
-      panels,
-    })) return;
-
-    bootstrappedInitialTerminal.current = true;
-    void startAt(0);
-  }, [panels, startAt]);
-
-  const movePaneTo = useCallback((fromKey: string, toIndex: number) => {
-    setPanels((prev) => {
-      const fromIndex = prev.findIndex((panel) => panel.key === fromKey);
-      if (fromIndex < 0) return prev;
-      const next = movePanel(prev, fromIndex, toIndex);
-      syncWorkspace(next);
-      setFocused(next.findIndex((panel) => panel.key === fromKey));
-      return next;
-    });
-  }, [syncWorkspace]);
-
-  const focusPrev = useCallback(() => setFocused((f) => (f > 0 ? f - 1 : f)), []);
-  const focusNext = useCallback(() => {
-    setPanels((p) => { setFocused((f) => (f < p.length - 1 ? f + 1 : f)); return p; });
-  }, []);
-
-  // 키바인딩
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key === '\\') { e.preventDefault(); add(); return; }
-      if (meta && e.code === 'ArrowLeft') { e.preventDefault(); focusPrev(); return; }
-      if (meta && e.code === 'ArrowRight') { e.preventDefault(); focusNext(); return; }
+      if (meta && e.key === '\\') { e.preventDefault(); void doSplit(e.shiftKey ? 'down' : 'right'); return; }
+      if (meta && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
+        e.preventDefault();
+        if (sessionIds.length === 0) return;
+        const at = focusedSid === null ? 0 : sessionIds.indexOf(focusedSid);
+        const next = e.code === 'ArrowLeft'
+          ? (at - 1 + sessionIds.length) % sessionIds.length
+          : (at + 1) % sessionIds.length;
+        setFocusedSid(sessionIds[next]!);
+      }
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [add, terminateAt, focusPrev, focusNext, focused]);
+  }, [doSplit, sessionIds.join(','), focusedSid]);
 
-  // 포커스 시 xterm textarea에 포커스
-  // panels 레퍼런스가 아니라 focused 패널의 안정된 key에만 의존.
-  // 2초 폴링이 reconcile로 panels 배열을 새로 만들어도, 같은 key면 재포커스하지 않는다.
-  const focusedPanelKey = panels[focused]?.key;
+  // 탭 제목
   useEffect(() => {
-    if (!focusedPanelKey) return;
-    const el = panelRefs.current.get(focusedPanelKey);
-    if (!el) return;
-    el.querySelector('textarea')?.focus();
-  }, [focusedPanelKey]);
+    if (!ws) return;
+    const label = ws.project !== 'default' ? `${ws.project}/${ws.name}` : ws.name;
+    document.title = sessionIds.length > 0 ? `${label} (${sessionIds.length})` : label;
+    return () => { document.title = 'ttym'; };
+  }, [ws?.name, ws?.project, sessionIds.length]);
 
-  // 모든 패널이 닫히면 대시보드로
-  useEffect(() => {
-    if (panels.length === 0) navigate({ page: 'dashboard' });
-  }, [panels.length]);
-
-  // 브라우저 탭 제목
-  useEffect(() => {
-    const count = panels.filter((p) => p.sessionId !== undefined).length;
-    const label = wsProject !== 'default' ? `${wsProject}/${wsName}` : wsName;
-    document.title = count > 0 ? `${label} (${count})` : label;
-    return () => { document.title = 'ttym demo'; };
-  }, [wsName, wsProject, panels]);
-
-  const cols = Math.max(1, Math.min(panels.length || 1, maxPanels));
-  const rows = Math.max(1, Math.ceil((panels.length || 1) / maxPanels));
+  const renderPane = useCallback((sid: number, _path: number[]) => {
+    if (sid <= 0) {
+      return (
+        <div key="empty" style={emptyPaneStyle}>
+          <button onClick={() => void doSplit('right')} style={actionBtnStyle}>start terminal</button>
+        </div>
+      );
+    }
+    const dead = deadSessions.has(sid);
+    const isFocused = focusedSid === sid;
+    const name = memberNames[sid];
+    const cwd = sessionCwds[sid];
+    return (
+      <div
+        key={sid}
+        onMouseDown={() => setFocusedSid(sid)}
+        style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: '#1e1e1e' }}
+      >
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 8px',
+            background: isFocused ? '#1e1e1e' : '#181818',
+            borderTop: dead ? '2px solid #a55' : isFocused ? '2px solid #007acc' : '2px solid transparent',
+            borderBottom: '1px solid #333', flexShrink: 0, userSelect: 'none',
+          }}
+          draggable
+          onDragStart={() => setDragSid(sid)}
+          onDragEnd={() => setDragSid(null)}
+          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+          onDrop={(e) => { e.preventDefault(); if (dragSid !== null && dragSid !== sid) commitSwap(dragSid, sid); setDragSid(null); }}
+          onDoubleClick={() => setZoomedSid((z) => (z === sid ? null : sid))}
+          title="double-click: zoom · drag: swap"
+        >
+          <span style={{ color: isFocused ? '#ccc' : '#666', fontSize: 11, fontFamily: 'monospace', fontWeight: 700 }}>
+            {name || `#${sid}`}
+          </span>
+          {name ? <span style={{ color: '#555', fontSize: 10, fontFamily: 'monospace' }}>#{sid}</span> : null}
+          {cwd ? (
+            <span style={{ color: isFocused ? '#6b90b1' : '#4d6175', fontSize: 10, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cwd}>
+              {formatCwd(cwd)}
+            </span>
+          ) : null}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0 }}>
+            {zoomedSid === sid ? <span style={{ color: '#f0b040', fontSize: 10, fontFamily: 'monospace' }}>zoom</span> : null}
+            <button onClick={(e) => { e.stopPropagation(); void doSplit('right', sid); }} style={miniLinkBtnStyle} title="split right">│</button>
+            <button onClick={(e) => { e.stopPropagation(); void doSplit('down', sid); }} style={miniLinkBtnStyle} title="split down">─</button>
+            <button onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={miniLinkBtnStyle} title="detach (세션 유지)">detach</button>
+            <button onClick={(e) => { e.stopPropagation(); void copySessionUrl(sid); }} style={miniLinkBtnStyle}>copy</button>
+            <button onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
+          </span>
+        </div>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          {!dead ? (
+            <Terminal
+              mux={mux}
+              attachId={sid}
+              localEcho={localEchoEnabled}
+              onExit={() => setDeadSessions((prev) => new Set(prev).add(sid))}
+            />
+          ) : (
+            <div style={emptyPaneStyle}>
+              <span style={{ color: '#a55', fontSize: 11 }}>session ended</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => void restartAt(sid)} style={actionBtnStyle}>restart</button>
+                <button onClick={() => void detachMember(sid)} style={{ ...actionBtnStyle, background: '#333', color: '#888' }}>close</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, mux, localEchoEnabled, doSplit, detachMember, terminateMember, commitSwap, restartAt]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle} title="dashboard">&larr;</button>
-        {wsProject !== 'default' ? (
-          <span style={{ color: '#666', fontSize: 13 }}>{wsProject}/</span>
-        ) : null}
+        {ws && ws.project !== 'default' ? <span style={{ color: '#666', fontSize: 13 }}>{ws.project}/</span> : null}
         {editingName ? (
           <input
             autoFocus
@@ -1107,20 +894,14 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
             onBlur={() => { void commitEditName(); }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') { event.preventDefault(); void commitEditName(); }
-              else if (event.key === 'Escape') { event.preventDefault(); cancelEditName(); }
+              else if (event.key === 'Escape') { event.preventDefault(); setEditingName(false); }
             }}
             style={workspaceNameInputStyle}
           />
         ) : (
-          <span
-            onClick={beginEditName}
-            style={workspaceNameStyle}
-            title="click to rename"
-          >
-            {wsName}
-          </span>
+          <span onClick={beginEditName} style={workspaceNameStyle} title="click to rename">{ws?.name ?? workspaceId}</span>
         )}
-        <button onClick={add} style={btnStyle}>+ split</button>
+        <button onClick={() => void doSplit('right')} style={btnStyle}>+ split</button>
         <span style={{ position: 'relative', display: 'inline-block' }}>
           <button onClick={toggleAttach} style={btnStyle}>+ attach</button>
           {attachOpen ? (
@@ -1132,12 +913,7 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
                 <div style={attachDropdownEmptyStyle}>no detached sessions</div>
               ) : (
                 standaloneSessions.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => void attachSession(s.id)}
-                    style={attachDropdownItemStyle}
-                    title={s.cwd ?? ''}
-                  >
+                  <button key={s.id} onClick={() => void attachSession(s.id)} style={attachDropdownItemStyle} title={s.cwd ?? ''}>
                     <span style={{ color: '#eaf0f6' }}>#{s.id}</span>
                     {s.cwd ? <span style={{ color: '#8892a0', marginLeft: 8, fontSize: 10 }}>{s.cwd}</span> : null}
                   </button>
@@ -1146,163 +922,38 @@ function WorkspacePage({ mux, workspaceId, maxPanels, localEchoEnabled }: { mux:
             </div>
           ) : null}
         </span>
-        <button onClick={detachWorkspace} style={btnStyle}>detach</button>
         <span style={{ color: '#444', fontSize: 11, marginLeft: 'auto' }}>
-          {'\u2318\\ split \u2003 drag reorder \u2003 \u2318\u2190\u2192 navigate'}
+          {'\u2318\\ split \u2003 \u2318\u21e7\\ down \u2003 drag divider resize \u2003 dbl-click zoom'}
         </span>
       </div>
 
-      {panels.length === 0 ? null : (
-        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`, gap: 0, background: '#1e1e1e', overflow: 'hidden' }}>
-          {panels.map((panel, i) => {
-            const isFocused = i === focused;
-            return (
-              <div
-                key={panel.key}
-                ref={(el) => { if (el) panelRefs.current.set(panel.key, el); else panelRefs.current.delete(panel.key); }}
-                onClick={() => setFocused(i)}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = 'move';
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  if (!draggedPanelKey) return;
-                  movePaneTo(draggedPanelKey, i);
-                  setDraggedPanelKey(null);
-                }}
-                style={{
-                  display: 'flex', flexDirection: 'column', background: '#1e1e1e',
-                  minHeight: 0, contain: 'strict',
-                  borderLeft: i > 0 ? '1px solid #333' : 'none',
-                }}
-              >
-                {/* title bar */}
-                <div style={{
-                  display: 'flex', alignItems: 'center', height: 34, padding: '0 8px',
-                  background: isFocused ? '#1e1e1e' : '#181818',
-                  borderTop: panel.dead ? '2px solid #a55' : isFocused ? '2px solid #007acc' : '2px solid transparent',
-                  borderBottom: '1px solid #333', flexShrink: 0, userSelect: 'none',
-                }}
-                draggable
-                onDragStart={() => setDraggedPanelKey(panel.key)}
-                onDragEnd={() => setDraggedPanelKey(null)}
-                >
-                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, minWidth: 0 }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                      <span style={{ color: isFocused ? '#ccc' : '#666', fontSize: 11, fontFamily: 'monospace' }}>
-                        {panel.sessionId ? (panel.memberName || `#${panel.sessionId}`) : 'new'}
-                      </span>
-                      {panel.sessionId && panel.memberName ? (
-                        <span style={{ color: '#555', fontSize: 10, fontFamily: 'monospace' }}>#{panel.sessionId}</span>
-                      ) : null}
-                    </span>
-                    {panel.cwd ? (
-                      <span
-                        style={{
-                          color: isFocused ? '#6b90b1' : '#4d6175',
-                          fontSize: 10,
-                          fontFamily: 'monospace',
-                          maxWidth: '42vw',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                        title={panel.cwd}
-                      >
-                        {formatCwd(panel.cwd)}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
-                    {panel.sessionId ? (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          detachAt(i);
-                        }}
-                        style={miniLinkBtnStyle}
-                        title="Detach pane"
-                      >
-                        detach
-                      </button>
-                    ) : null}
-                    {panel.sessionId ? (
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          await copySessionUrl(panel.sessionId!);
-                        }}
-                        style={miniLinkBtnStyle}
-                        title={`Copy ${getSessionUrl(panel.sessionId)}`}
-                      >
-                        copy
-                      </button>
-                    ) : null}
-                  </span>
-                  {panel.sessionId !== undefined && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); terminateAt(i); }}
-                      style={closeBtnStyle}
-                      title="Terminate"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-                <div style={{ flex: 1, minHeight: 0 }}>
-                  {panel.sessionId !== undefined && !panel.dead ? (
-                    <Terminal
-                      mux={mux}
-                      attachId={panel.sessionId}
-                      localEcho={localEchoEnabled}
-                      onExit={() => markDeadAt(i)}
-                    />
-                  ) : (
-                    <div style={{
-                      height: '100%',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: '#151515',
-                      color: '#666',
-                      fontFamily: 'monospace',
-                      fontSize: 12,
-                      gap: 8,
-                    }}>
-                      {panel.dead ? (
-                        <>
-                          <span style={{ color: '#a55', fontSize: 11 }}>session ended</span>
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <button onClick={() => void restartAt(i)} style={actionBtnStyle}>restart</button>
-                            <button onClick={() => removeAt(i)} style={{ ...actionBtnStyle, background: '#333', color: '#888' }}>close</button>
-                          </div>
-                        </>
-                      ) : (
-                        <button onClick={() => void startAt(i)} style={actionBtnStyle}>start terminal</button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div style={{ flex: 1, minHeight: 0, background: '#1e1e1e' }}>
+        {ws ? (
+          <LayoutView
+            layout={ws.layout}
+            renderPane={renderPane}
+            onResize={commitResize}
+            zoomedSessionId={zoomedSid}
+          />
+        ) : (
+          <div style={{ color: '#666', padding: 40, fontFamily: 'monospace' }}>loading…</div>
+        )}
+      </div>
     </div>
   );
 }
 
+const emptyPaneStyle: React.CSSProperties = {
+  height: '100%', width: '100%',
+  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+  background: '#151515', color: '#666', fontFamily: 'monospace', fontSize: 12, gap: 8,
+};
+
 function SettingsOverlay({
-  maxPanels,
   localEchoEnabled,
-  onChange,
   onLocalEchoChange,
 }: {
-  maxPanels: number;
   localEchoEnabled: boolean;
-  onChange: (value: number) => void;
   onLocalEchoChange: (value: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1323,17 +974,6 @@ function SettingsOverlay({
       {open ? (
         <div style={settingsPopoverStyle}>
           <div style={settingsTitleStyle}>workspace settings</div>
-          <label style={settingsFieldStyle}>
-            <span style={settingsLabelStyle}>max columns</span>
-            <input
-              type="number"
-              min={MIN_MAX_PANELS}
-              max={MAX_MAX_PANELS}
-              value={maxPanels}
-              onChange={(event) => onChange(Number(event.target.value))}
-              style={settingsInputStyle}
-            />
-          </label>
           <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <span style={settingsLabelStyle}>optimistic local echo</span>
             <input
@@ -1343,7 +983,6 @@ function SettingsOverlay({
             />
           </label>
           <div style={settingsHintStyle}>experimental: predicts printable shell echo before server confirmation</div>
-          <div style={settingsHintStyle}>query: `maxPanels` (columns per row)</div>
         </div>
       ) : null}
     </div>
@@ -1534,7 +1173,6 @@ function App() {
   const muxRef = useRef<TerminalMux | null>(null);
   const [connected, setConnected] = useState(false);
   const [route, setRoute] = useState<Route>(parseHash);
-  const [maxPanels, setMaxPanels] = useState(readMaxPanels);
   const [localEchoEnabled, setLocalEchoEnabled] = useState(readLocalEchoEnabled);
 
   useEffect(() => {
@@ -1554,18 +1192,6 @@ function App() {
     const onHash = () => setRoute(parseHash());
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
-  }, []);
-
-  useEffect(() => {
-    const syncFromLocation = () => setMaxPanels(readMaxPanels());
-    window.addEventListener('popstate', syncFromLocation);
-    return () => window.removeEventListener('popstate', syncFromLocation);
-  }, []);
-
-  const handleMaxPanelsChange = useCallback((value: number) => {
-    const next = clampMaxPanels(value);
-    writeMaxPanels(next);
-    setMaxPanels(next);
   }, []);
 
   const handleLocalEchoChange = useCallback((value: boolean) => {
@@ -1596,7 +1222,7 @@ function App() {
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} maxPanels={maxPanels} localEchoEnabled={localEchoEnabled} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} />;
       break;
     default:
       page = <DashboardPage mux={mux} />;
@@ -1607,9 +1233,7 @@ function App() {
     <>
       {page}
       <SettingsOverlay
-        maxPanels={maxPanels}
         localEchoEnabled={localEchoEnabled}
-        onChange={handleMaxPanelsChange}
         onLocalEchoChange={handleLocalEchoChange}
       />
     </>

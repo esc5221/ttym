@@ -126,6 +126,9 @@ importers:
 
   packages/ui:
     dependencies:
+      '@ttym/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@ttym/vt':
         specifier: workspace:*
         version: link:../vt

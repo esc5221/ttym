@@ -63,6 +63,8 @@ export function splitWorkspace(
     name?: string;
     role?: string;
     cmd?: string[];
+    tags?: string[];
+    direction?: 'right' | 'left' | 'down' | 'up';
   } = {},
 ): Promise<{ workspace: WorkspaceInfo; session: SessionInfo }> {
   return request(base, `/api/workspaces/${encodeURIComponent(id)}/split`, { method: 'POST', body: options });

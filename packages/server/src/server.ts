@@ -649,7 +649,9 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
           name,
           role,
           tags,
+          direction,
         } = JSON.parse(body || '{}');
+        const dir = ['right', 'left', 'down', 'up'].includes(direction) ? direction : 'right';
 
         const targetId = Number.isInteger(targetSessionId) ? Number(targetSessionId) : undefined;
         let resolvedCwd: string | undefined;
@@ -673,7 +675,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
             name: typeof name === 'string' && name.trim() ? name : `term-${created.id}`,
             role: typeof role === 'string' ? role : undefined,
             tags: Array.isArray(tags) ? tags : [],
-          });
+          }, dir);
           if (!ws) {
             manager.destroy(created.id);
             json(404, { error: 'not found' });
