@@ -567,9 +567,8 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
 
 function SessionPage({ mux, sessionId, localEchoEnabled }: { mux: TerminalMux; sessionId: number; localEchoEnabled: boolean }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={toolbarStyle}>
-        <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
         <span style={{ color: 'var(--text-soft)', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <span>session #{sessionId}</span>
           <button
@@ -592,9 +591,8 @@ function SessionPage({ mux, sessionId, localEchoEnabled }: { mux: TerminalMux; s
 
 function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={toolbarStyle}>
-        <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
         <span style={{ color: 'var(--text-soft)', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <span>session #{sessionId}</span>
           <button
@@ -618,7 +616,7 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean }) {
+function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState> }) {
   const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
@@ -632,7 +630,6 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [dragSid, setDragSid] = useState<number | null>(null);
-  const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
   const [lastAgentIds, setLastAgentIds] = useState<Record<number, { claude?: string; codex?: string }>>({});
   const [turns, setTurns] = useState<AgentTurn[]>([]);
   const [awaitBusy, setAwaitBusy] = useState(false);
@@ -688,23 +685,6 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
   }, [workspaceId, refresh, applyWorkspace, mux]);
 
   const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
-
-  useEffect(() => {
-    if (sessionIds.length === 0) return;
-    let cancelled = false;
-    const tick = async () => {
-      const entries = await Promise.all(sessionIds.map(async (id) => {
-        try {
-          const runtime = await api.getSessionRuntime(API_BASE, id);
-          return [id, { kind: runtime.agent.kind, active: runtime.agent.active }] as const;
-        } catch { return [id, { kind: null, active: false }] as const; }
-      }));
-      if (!cancelled) setAgentStates(Object.fromEntries(entries));
-    };
-    void tick();
-    const timer = window.setInterval(() => { void tick(); }, 3000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [sessionIds.join(',')]);
 
   const submitAwait = useCallback(async () => {
     const prompt = awaitInput.trim();
@@ -988,9 +968,8 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
   }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, mux, localEchoEnabled, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={toolbarStyle}>
-        <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle} title="dashboard">&larr;</button>
         {ws && ws.project !== 'default' ? <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>{ws.project}/</span> : null}
         {editingName ? (
           <input
@@ -1134,7 +1113,7 @@ function SettingsOverlay({
   }, []);
 
   return (
-    <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 100 }}>
+    <div style={{ position: 'relative', zIndex: 100 }}>
       <button onClick={() => setOpen((value) => !value)} style={settingsButtonStyle}>
         settings
       </button>
@@ -1218,9 +1197,8 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
   const noSessions = sessions.length === 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg0)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg0)' }}>
       <div style={toolbarStyle}>
-        <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
         <span style={{ color: 'var(--text-soft)', fontSize: 12 }}>overview</span>
         <span style={{ color: 'var(--text-dim)', fontSize: 11, marginLeft: 'auto' }}>
           {sessions.length} session{sessions.length !== 1 ? 's' : ''}
@@ -1362,6 +1340,8 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [route, setRoute] = useState<Route>(parseHash);
   const [localEchoEnabled, setLocalEchoEnabled] = useState(readLocalEchoEnabled);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
 
   useEffect(() => {
     const wsUrl = `${isSecure ? 'wss' : 'ws'}://${TTYM_HOST}/ws`;
@@ -1381,6 +1361,64 @@ function App() {
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+
+  // 탭 스트립의 데이터: workspace 목록은 push 구동, 초기 1회만 fetch.
+  useEffect(() => {
+    if (!connected) return;
+    void fetchWorkspaces().then(setWorkspaces);
+    const mux = muxRef.current;
+    if (!mux) return;
+    return mux.onWorkspace((event) => {
+      setWorkspaces((prev) => {
+        if (event.deletedId) return prev.filter((w) => w.id !== event.deletedId);
+        const next = event.workspace as unknown as Workspace | undefined;
+        if (!next) return prev;
+        const at = prev.findIndex((w) => w.id === next.id);
+        if (at === -1) return [...prev, next];
+        const copy = prev.slice(); copy[at] = next; return copy;
+      });
+    });
+  }, [connected]);
+
+  // 에이전트 상태는 앱 수준에서 한 번만 집계한다 — 탭 점·pane 점이 같은 소스를 본다.
+  useEffect(() => {
+    if (!connected) return;
+    const memberIds = [...new Set(workspaces.flatMap((w) => layoutToSessionIds(w.layout).filter((id) => id > 0)))];
+    if (memberIds.length === 0) { setAgentStates({}); return; }
+    let cancelled = false;
+    const tick = async () => {
+      const entries = await Promise.all(memberIds.map(async (id) => {
+        try {
+          const runtime = await api.getSessionRuntime(API_BASE, id);
+          return [id, { kind: runtime.agent.kind, active: runtime.agent.active }] as const;
+        } catch { return [id, { kind: null, active: false }] as const; }
+      }));
+      if (!cancelled) setAgentStates(Object.fromEntries(entries));
+    };
+    void tick();
+    const timer = window.setInterval(() => { void tick(); }, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [connected, workspaces.map((w) => w.id + ':' + layoutToSessionIds(w.layout).join('.')).join('|')]);
+
+  const createWorkspaceTab = useCallback(async () => {
+    const id = uuid().slice(0, 8);
+    const ws = await apiCreateWorkspace({ id, name: `workspace ${workspaces.length + 1}`, layout: { type: 'pane', sessionId: 0 } });
+    if (ws) navigate({ page: 'workspace', id: ws.id });
+  }, [workspaces.length]);
+
+  // ⌘1 = 홈, ⌘2.. = workspace 탭
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !/^[1-9]$/.test(e.key)) return;
+      const at = Number(e.key) - 1;
+      e.preventDefault();
+      if (at === 0) { navigate({ page: 'dashboard' }); return; }
+      const ws = workspaces[at - 1];
+      if (ws) navigate({ page: 'workspace', id: ws.id });
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [workspaces]);
 
   const handleLocalEchoChange = useCallback((value: boolean) => {
     writeLocalEchoEnabled(value);
@@ -1410,23 +1448,102 @@ function App() {
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} />;
       break;
     default:
       page = <DashboardPage mux={mux} />;
       break;
   }
 
+  const homeActive = route.page === 'dashboard' || route.page === 'overview';
+
   return (
-    <>
-      {page}
-      <SettingsOverlay
-        localEchoEnabled={localEchoEnabled}
-        onLocalEchoChange={handleLocalEchoChange}
-      />
-    </>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      <div style={tabStripStyle}>
+        <button
+          onClick={() => navigate({ page: 'dashboard' })}
+          style={{ ...tabStyle, ...(homeActive ? tabActiveStyle : null) }}
+          title="home · ⌘1"
+        >⌂</button>
+        {workspaces.map((ws, i) => {
+          const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+          const running = ids.map((id) => agentStates[id]).find((a) => a?.active && a.kind);
+          const anyAgent = ids.map((id) => agentStates[id]).find((a) => a?.kind);
+          const active = route.page === 'workspace' && route.id === ws.id;
+          const dotColor = (running ?? anyAgent)?.kind ? AGENT_COLORS[(running ?? anyAgent)!.kind!] : undefined;
+          return (
+            <button
+              key={ws.id}
+              onClick={() => navigate({ page: 'workspace', id: ws.id })}
+              style={{ ...tabStyle, ...(active ? tabActiveStyle : null) }}
+              title={`${workspaceDisplayLabel(ws)} · ⌘${i + 2}`}
+            >
+              {dotColor ? (
+                <span
+                  className={running ? 'agent-dot-run' : undefined}
+                  style={{ width: 5, height: 5, borderRadius: '50%', background: dotColor, opacity: running ? 1 : 0.4, flexShrink: 0 }}
+                />
+              ) : null}
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                {workspaceDisplayLabel(ws)}
+              </span>
+              <span style={{ color: 'var(--text-dim)' }}>{ids.length}</span>
+            </button>
+          );
+        })}
+        <button onClick={() => void createWorkspaceTab()} style={tabAddStyle} title="new workspace">+</button>
+        <span style={{ marginLeft: 'auto' }} />
+        <SettingsOverlay
+          localEchoEnabled={localEchoEnabled}
+          onLocalEchoChange={handleLocalEchoChange}
+        />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        {page}
+      </div>
+    </div>
   );
 }
+
+const tabStripStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  height: 42,
+  padding: '0 10px',
+  background: 'var(--bg2)',
+  borderBottom: '1px solid var(--line)',
+  fontFamily: 'monospace',
+  flexShrink: 0,
+  userSelect: 'none',
+};
+
+const tabStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 7,
+  height: 29,
+  padding: '0 13px',
+  borderRadius: 7,
+  fontSize: 12,
+  fontFamily: 'monospace',
+  color: 'var(--text-dim)',
+  background: 'transparent',
+  border: '1px solid transparent',
+  cursor: 'pointer',
+};
+
+const tabActiveStyle: React.CSSProperties = {
+  background: 'var(--bg0)',
+  color: 'var(--text)',
+  border: '1px solid var(--line)',
+};
+
+const tabAddStyle: React.CSSProperties = {
+  ...tabStyle,
+  fontSize: 15,
+  padding: '0 9px',
+};
 
 // ───── 스타일 ─────
 
@@ -1567,6 +1684,8 @@ const attachDropdownEmptyStyle: React.CSSProperties = {
 };
 
 const settingsPopoverStyle: React.CSSProperties = {
+  position: 'absolute',
+  right: 0,
   marginTop: 8,
   width: 220,
   padding: 12,
