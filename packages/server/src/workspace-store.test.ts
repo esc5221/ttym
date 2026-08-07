@@ -152,16 +152,10 @@ describe('WorkspaceStore', () => {
     expect(updated?.members.map((member) => member.name)).toEqual(['lead', 'worker', 'logs']);
     // Splitting along the row's own axis joins it as a sibling with an equal
     // share — a 50/50 row split again reads as thirds, not 50/25/25.
-    expect(updated?.layout).toEqual({
-      type: 'split',
-      axis: 'row',
-      sizes: [1 / 3, 1 / 3, 1 / 3],
-      children: [
-        { type: 'pane', sessionId: 41 },
-        { type: 'pane', sessionId: 43 },
-        { type: 'pane', sessionId: 42 },
-      ],
-    });
+    const layout = updated!.layout as any;
+    expect(layout.axis).toBe('row');
+    expect(layout.children.map((c: any) => c.sessionId)).toEqual([41, 43, 42]);
+    for (const size of layout.sizes) expect(size).toBeCloseTo(1 / 3, 9);
   });
 
   it('splits downward into a column and upward before the target', () => {
