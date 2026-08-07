@@ -40,6 +40,30 @@ export interface HostOptions {
 
 const registry = new Map<number, TerminalHost>();
 
+/** 터미널 배경 = 앱 배경. 토큰 CSS가 없으면 종전 하드코딩 값으로 동작한다. */
+function cssVar(name: string, fallback: string): string {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return value || fallback;
+  } catch { return fallback; }
+}
+
+function terminalTheme() {
+  return {
+    background: cssVar('--term-bg', '#1e1e1e'),
+    foreground: cssVar('--term-fg', '#d4d4d4'),
+    cursor: cssVar('--term-fg', '#d4d4d4'),
+  };
+}
+
+/** 테마 토글 후 호출: 살아있는 모든 터미널에 새 팔레트를 적용한다. */
+export function refreshTerminalThemes() {
+  const theme = terminalTheme();
+  for (const host of registry.values()) {
+    host.term.options.theme = theme;
+  }
+}
+
 export function getHost(sessionId: number): TerminalHost | undefined {
   return registry.get(sessionId);
 }
@@ -114,7 +138,7 @@ export class TerminalHost {
       cursorBlink: opts.mode !== 'readonly',
       fontSize: opts.fontSize,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-      theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+      theme: terminalTheme(),
       disableStdin: opts.mode === 'readonly',
     });
     this.fit = new FitAddon();

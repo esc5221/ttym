@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { TerminalMux, Terminal, LayoutView } from '@ttym/ui';
+import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes } from '@ttym/ui';
 import { ansiToHtml } from '@ttym/vt';
 import * as api from '@ttym/api';
 import type { SessionInfo } from '@ttym/ui';
@@ -59,7 +59,7 @@ interface Workspace {
 const LOCAL_ECHO_STORAGE_KEY = 'ttym-demo-local-echo';
 
 // 에이전트 식별색 — 정체는 이름의 색, 활동은 4px 점. 필 배지는 쓰지 않는다.
-const AGENT_COLORS: Record<string, string> = { 'claude-code': '#e8955c', codex: '#7ec8e8' };
+const AGENT_COLORS: Record<string, string> = { 'claude-code': 'var(--agent-claude)', codex: 'var(--agent-codex)' };
 
 interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean }
 interface AgentTurn { sid: number; prompt: string; transcript: string | null; status: string }
@@ -369,11 +369,11 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
   }, [mux, workspaces]);
 
   return (
-    <div style={{ padding: 32, fontFamily: 'monospace', color: '#ccc', width: '100%', maxWidth: 1400, margin: '0 auto' }}>
+    <div style={{ padding: 32, fontFamily: 'monospace', color: 'var(--text)', width: '100%', maxWidth: 1400, margin: '0 auto' }}>
       <div style={{ marginBottom: 24 }}>
         <button
           onClick={() => navigate({ page: 'overview' })}
-          style={{ ...actionBtnStyle, background: '#0d3a58', color: '#4fc3f7', border: '1px solid #007acc' }}
+          style={{ ...actionBtnStyle, background: 'var(--accent-bg)', color: 'var(--accent)', border: '1px solid #007acc' }}
         >
           overview — live preview
         </button>
@@ -381,15 +381,15 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
 
       <div style={{ marginBottom: 32 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-          <h2 style={{ fontSize: 13, margin: 0, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>
+          <h2 style={{ fontSize: 13, margin: 0, color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: 1 }}>
             workspaces
           </h2>
           <button onClick={createWorkspace} style={actionBtnStyle}>+ new</button>
         </div>
         {workspaces.length === 0 ? (
-          <div style={{ color: '#444', fontSize: 12, padding: '8px 0' }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: '8px 0' }}>
             no workspaces.{' '}
-            <span onClick={createWorkspace} style={{ color: '#007acc', cursor: 'pointer' }}>create one</span>
+            <span onClick={createWorkspace} style={{ color: 'var(--accent)', cursor: 'pointer' }}>create one</span>
             {' '}to group terminals.
           </div>
         ) : (
@@ -397,18 +397,18 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
             {workspaces.map((ws) => (
               <div
                 key={ws.id}
-                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#252525', cursor: 'pointer', minWidth: 0 }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: 'var(--bg1)', cursor: 'pointer', minWidth: 0 }}
                 onClick={() => navigate({ page: 'workspace', id: ws.id })}
               >
-                <span style={{ color: '#eee', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span style={{ color: 'var(--text)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {workspaceDisplayLabel(ws)}
                 </span>
-                <span style={{ color: '#666', fontSize: 11, flexShrink: 0 }}>
+                <span style={{ color: 'var(--text-dim)', fontSize: 11, flexShrink: 0 }}>
                   {layoutToSessionIds(ws.layout).filter((id) => id > 0).length} session{layoutToSessionIds(ws.layout).filter((id) => id > 0).length !== 1 ? 's' : ''}
                 </span>
                 <button
                   onClick={(e) => { e.stopPropagation(); deleteWorkspace(ws.id); }}
-                  style={{ ...closeBtnStyle, color: '#555', fontSize: 12 }}
+                  style={{ ...closeBtnStyle, color: 'var(--text-dim)', fontSize: 12 }}
                   title="Terminate workspace"
                 >
                   ×
@@ -421,18 +421,18 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
 
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-          <h2 style={{ fontSize: 13, margin: 0, color: '#888', textTransform: 'uppercase', letterSpacing: 1 }}>
+          <h2 style={{ fontSize: 13, margin: 0, color: 'var(--text-soft)', textTransform: 'uppercase', letterSpacing: 1 }}>
             sessions
           </h2>
           <button onClick={createSession} style={actionBtnStyle}>+ new</button>
           <button onClick={refresh} style={{ ...actionBtnStyle, background: 'transparent' }}>refresh</button>
         </div>
         {loading ? (
-          <div style={{ color: '#666', fontSize: 12 }}>loading...</div>
+          <div style={{ color: 'var(--text-dim)', fontSize: 12 }}>loading...</div>
         ) : sessions.length === 0 ? (
-          <div style={{ color: '#444', fontSize: 12, padding: '8px 0' }}>
+          <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: '8px 0' }}>
             no active sessions.{' '}
-            <span onClick={createSession} style={{ color: '#007acc', cursor: 'pointer' }}>create one</span>
+            <span onClick={createSession} style={{ color: 'var(--accent)', cursor: 'pointer' }}>create one</span>
           </div>
         ) : (
           <div style={{
@@ -458,14 +458,14 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                         alignItems: 'center',
                         gap: 12,
                         padding: '8px 12px',
-                        background: hovered ? '#2b2f35' : '#252525',
+                        background: hovered ? 'var(--bg3)' : 'var(--bg1)',
                         cursor: 'pointer',
-                        borderLeft: `3px solid ${s.status === 'attached' ? '#007acc' : '#555'}`,
+                        borderLeft: `3px solid ${s.status === 'attached' ? 'var(--accent)' : 'var(--text-dim)'}`,
                         minWidth: 0,
                       }}
                     >
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, width: 72, flexShrink: 0 }}>
-                        <span style={{ color: '#eee', fontWeight: 600, width: 36 }}>#{s.id}</span>
+                        <span style={{ color: 'var(--text)', fontWeight: 600, width: 36 }}>#{s.id}</span>
                         <button
                           onClick={async (e) => {
                             e.stopPropagation();
@@ -478,31 +478,31 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                         </button>
                       </span>
                       <span style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-                        <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
-                        <span style={{ color: '#666', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <span style={{ color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</span>
+                        <span style={{ color: 'var(--text-dim)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {meta} · {(sessionCwds[s.id] ? `${formatCwd(sessionCwds[s.id])} · ` : '')}{s.cmd.join(' ')}
                         </span>
                       </span>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0, marginLeft: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                         <span style={{
                           fontSize: 11, padding: '1px 6px', borderRadius: 3,
-                          background: s.status === 'attached' ? '#0d3a58' : '#333',
-                          color: s.status === 'attached' ? '#4fc3f7' : '#888',
+                          background: s.status === 'attached' ? 'var(--accent-bg)' : 'var(--line)',
+                          color: s.status === 'attached' ? 'var(--accent)' : 'var(--text-soft)',
                           flexShrink: 0,
                         }}>
                           {s.status}
                         </span>
-                        <span style={{ color: '#555', fontSize: 11, flexShrink: 0, width: 74, textAlign: 'right' }}>pid {s.pid}</span>
+                        <span style={{ color: 'var(--text-dim)', fontSize: 11, flexShrink: 0, width: 74, textAlign: 'right' }}>pid {s.pid}</span>
                         <button
                           onClick={(e) => { e.stopPropagation(); navigate({ page: 'viewer', id: s.id }); }}
-                          style={{ ...actionBtnStyle, padding: '1px 6px', fontSize: 10, background: '#2a2a2a', flexShrink: 0 }}
+                          style={{ ...actionBtnStyle, padding: '1px 6px', fontSize: 10, background: 'var(--bg2)', flexShrink: 0 }}
                           title="View readonly"
                         >
                           view
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); mux.destroySession(s.id); refresh(); }}
-                          style={{ ...closeBtnStyle, color: '#555', fontSize: 12, flexShrink: 0, marginLeft: 0 }}
+                          style={{ ...closeBtnStyle, color: 'var(--text-dim)', fontSize: 12, flexShrink: 0, marginLeft: 0 }}
                           title="Kill session"
                         >
                           ×
@@ -517,7 +517,7 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
               style={{
                 position: compactLayout ? 'relative' : 'sticky',
                 top: compactLayout ? 0 : 24,
-                background: '#1b1f24',
+                background: 'var(--bg1)',
                 border: '1px solid #2d3440',
                 borderRadius: 4,
                 overflow: 'hidden',
@@ -530,12 +530,12 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                 alignItems: 'center',
                 gap: 8,
                 padding: '6px 10px',
-                background: '#171b20',
+                background: 'var(--bg2)',
                 borderBottom: '1px solid #2d3440',
                 fontSize: 11,
               }}>
-                <span style={{ color: '#9fb3c8' }}>preview</span>
-                <span style={{ color: '#566373', marginLeft: 'auto' }}>
+                <span style={{ color: 'var(--text-soft)' }}>preview</span>
+                <span style={{ color: 'var(--text-dim)', marginLeft: 'auto' }}>
                   {hoveredSessionId !== null ? `#${hoveredSessionId}` : 'no session'}
                 </span>
               </div>
@@ -546,8 +546,8 @@ function DashboardPage({ mux }: { mux: TerminalMux }) {
                   height: compactLayout ? 320 : 'min(58vh, 620px)',
                   overflow: 'auto',
                   padding: '12px 14px',
-                  background: '#0f141a',
-                  color: '#d4d4d4',
+                  background: 'var(--bg0)',
+                  color: 'var(--term-fg)',
                   fontFamily: 'monospace',
                   fontSize: 12,
                   lineHeight: 1.45,
@@ -570,7 +570,7 @@ function SessionPage({ mux, sessionId, localEchoEnabled }: { mux: TerminalMux; s
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
-        <span style={{ color: '#aaa', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ color: 'var(--text-soft)', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <span>session #{sessionId}</span>
           <button
             onClick={async () => copySessionUrl(sessionId)}
@@ -595,7 +595,7 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
-        <span style={{ color: '#aaa', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ color: 'var(--text-soft)', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <span>session #{sessionId}</span>
           <button
             onClick={async () => copySessionUrl(sessionId)}
@@ -605,7 +605,7 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
             copy
           </button>
         </span>
-        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 3, background: '#3a2a00', color: '#f0b040' }}>
+        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 3, background: 'var(--accent-bg)', color: 'var(--warn)' }}>
           readonly
         </span>
       </div>
@@ -920,12 +920,12 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
       <div
         key={sid}
         onMouseDown={() => setFocusedSid(sid)}
-        style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: '#1e1e1e' }}
+        style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: 'var(--bg0)' }}
       >
         <div
           style={{
             display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 8px',
-            background: isFocused ? '#1e1e1e' : '#181818',
+            background: isFocused ? 'var(--bg0)' : 'var(--bg2)',
             borderTop: dead ? '2px solid #a55' : isFocused ? '2px solid #007acc' : '2px solid transparent',
             borderBottom: '1px solid #333', flexShrink: 0, userSelect: 'none',
           }}
@@ -944,17 +944,17 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
               title={agent?.active ? `${agent.kind} · running` : `${agent?.kind} · idle`}
             />
           ) : null}
-          <span style={{ color: agentColor ?? (isFocused ? '#ccc' : '#666'), fontSize: 11, fontFamily: 'monospace', fontWeight: 700 }}>
+          <span style={{ color: agentColor ?? (isFocused ? 'var(--text)' : 'var(--text-dim)'), fontSize: 11, fontFamily: 'monospace', fontWeight: 700 }}>
             {name || `#${sid}`}
           </span>
-          {name ? <span style={{ color: '#555', fontSize: 10, fontFamily: 'monospace' }}>#{sid}</span> : null}
+          {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'monospace' }}>#{sid}</span> : null}
           {cwd ? (
-            <span style={{ color: isFocused ? '#6b90b1' : '#4d6175', fontSize: 10, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cwd}>
+            <span style={{ color: isFocused ? 'var(--cwd)' : 'var(--cwd)', fontSize: 10, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cwd}>
               {formatCwd(cwd)}
             </span>
           ) : null}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0 }}>
-            {zoomedSid === sid ? <span style={{ color: '#f0b040', fontSize: 10, fontFamily: 'monospace' }}>zoom</span> : null}
+            {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'monospace' }}>zoom</span> : null}
             {canRestore ? (
               <button onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="이전 에이전트 세션 복원">restore</button>
             ) : null}
@@ -975,10 +975,10 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
             />
           ) : (
             <div style={emptyPaneStyle}>
-              <span style={{ color: '#a55', fontSize: 11 }}>session ended</span>
+              <span style={{ color: 'var(--err)', fontSize: 11 }}>session ended</span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => void restartAt(sid)} style={actionBtnStyle}>restart</button>
-                <button onClick={() => void detachMember(sid)} style={{ ...actionBtnStyle, background: '#333', color: '#888' }}>close</button>
+                <button onClick={() => void detachMember(sid)} style={{ ...actionBtnStyle, background: 'var(--line)', color: 'var(--text-soft)' }}>close</button>
               </div>
             </div>
           )}
@@ -991,7 +991,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle} title="dashboard">&larr;</button>
-        {ws && ws.project !== 'default' ? <span style={{ color: '#666', fontSize: 13 }}>{ws.project}/</span> : null}
+        {ws && ws.project !== 'default' ? <span style={{ color: 'var(--text-dim)', fontSize: 13 }}>{ws.project}/</span> : null}
         {editingName ? (
           <input
             autoFocus
@@ -1033,20 +1033,20 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
               ) : (
                 standaloneSessions.map((s) => (
                   <button key={s.id} onClick={() => void attachSession(s.id)} style={attachDropdownItemStyle} title={s.cwd ?? ''}>
-                    <span style={{ color: '#eaf0f6' }}>#{s.id}</span>
-                    {s.cwd ? <span style={{ color: '#8892a0', marginLeft: 8, fontSize: 10 }}>{s.cwd}</span> : null}
+                    <span style={{ color: 'var(--text)' }}>#{s.id}</span>
+                    {s.cwd ? <span style={{ color: 'var(--text-soft)', marginLeft: 8, fontSize: 10 }}>{s.cwd}</span> : null}
                   </button>
                 ))
               )}
             </div>
           ) : null}
         </span>
-        <span style={{ color: '#444', fontSize: 11, marginLeft: 'auto' }}>
+        <span style={{ color: 'var(--text-dim)', fontSize: 11, marginLeft: 'auto' }}>
           {'\u2318\\ split \u2003 \u2318\u21e7\\ down \u2003 drag divider resize \u2003 dbl-click zoom'}
         </span>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, background: '#1e1e1e' }}>
+      <div style={{ flex: 1, minHeight: 0, background: 'var(--bg0)' }}>
         {ws ? (
           <LayoutView
             layout={ws.layout}
@@ -1055,42 +1055,42 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
             zoomedSessionId={zoomedSid}
           />
         ) : (
-          <div style={{ color: '#666', padding: 40, fontFamily: 'monospace' }}>loading…</div>
+          <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'monospace' }}>loading…</div>
         )}
       </div>
 
       {focusedSid !== null && agentStates[focusedSid]?.kind ? (
-        <div style={{ borderTop: '1px solid #3a4656', background: '#161b22', flexShrink: 0, fontFamily: 'monospace' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', fontSize: 11, color: '#aab4c0', borderBottom: '1px solid #262d38' }}>
+        <div style={{ borderTop: '1px solid #3a4656', background: 'var(--bg1)', flexShrink: 0, fontFamily: 'monospace' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', fontSize: 11, color: 'var(--text-soft)', borderBottom: '1px solid #262d38' }}>
             <span style={{ color: AGENT_COLORS[agentStates[focusedSid]!.kind!], fontWeight: 700 }}>await</span>
             <span>→ {memberNames[focusedSid] || `#${focusedSid}`}</span>
             <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               {awaitBusy ? (
                 <>
                   <span className="agent-dot-run" style={{ width: 5, height: 5, borderRadius: '50%', background: AGENT_COLORS[agentStates[focusedSid]!.kind!] }} />
-                  <span style={{ color: '#6f7987', fontSize: 10.5 }}>turn 진행중</span>
+                  <span style={{ color: 'var(--text-dim)', fontSize: 10.5 }}>turn 진행중</span>
                 </>
               ) : null}
             </span>
           </div>
           {turns.filter((t) => t.sid === focusedSid).slice(-3).map((t, i) => (
             <div key={i} style={{ padding: '8px 14px 2px', fontSize: 11.5, lineHeight: 1.6 }}>
-              <div style={{ color: '#4fa3f7', marginBottom: 3 }}>❯ {t.prompt}</div>
-              <div style={{ color: t.status === 'failed' ? '#f26d6d' : '#aab4c0', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto' }}>
+              <div style={{ color: 'var(--accent)', marginBottom: 3 }}>❯ {t.prompt}</div>
+              <div style={{ color: t.status === 'failed' ? 'var(--err)' : 'var(--text-soft)', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto' }}>
                 {t.transcript ?? (t.status === 'pending' ? '…' : `(${t.status})`)}
               </div>
             </div>
           ))}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '8px 14px 12px', background: '#0f141a', border: '1px solid #3a4656', borderRadius: 8, padding: '7px 12px' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '8px 14px 12px', background: 'var(--bg0)', border: '1px solid #3a4656', borderRadius: 8, padding: '7px 12px' }}>
             <input
               value={awaitInput}
               onChange={(e) => setAwaitInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') void submitAwait(); }}
               placeholder="프롬프트 입력 — Stop hook이 완료를 알리면 이번 턴 transcript만 표시"
-              style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: '#e6edf5', fontFamily: 'monospace', fontSize: 12 }}
+              style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontFamily: 'monospace', fontSize: 12 }}
               disabled={awaitBusy}
             />
-            <span style={{ fontSize: 10, border: '1px solid #3a4656', borderRadius: 4, padding: '1px 6px', color: '#6f7987' }}>⏎ send</span>
+            <span style={{ fontSize: 10, border: '1px solid #3a4656', borderRadius: 4, padding: '1px 6px', color: 'var(--text-dim)' }}>⏎ send</span>
           </div>
         </div>
       ) : null}
@@ -1101,7 +1101,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
 const emptyPaneStyle: React.CSSProperties = {
   height: '100%', width: '100%',
   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-  background: '#151515', color: '#666', fontFamily: 'monospace', fontSize: 12, gap: 8,
+  background: 'var(--bg1)', color: 'var(--text-dim)', fontFamily: 'monospace', fontSize: 12, gap: 8,
 };
 
 function SettingsOverlay({
@@ -1112,6 +1112,18 @@ function SettingsOverlay({
   onLocalEchoChange: (value: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>(
+    () => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'),
+  );
+
+  const applyTheme = useCallback((next: 'dark' | 'light') => {
+    setTheme(next);
+    if (next === 'light') document.documentElement.dataset.theme = 'light';
+    else delete document.documentElement.dataset.theme;
+    try { localStorage.setItem('ttym-theme', next); } catch {}
+    // 터미널 배경 = 앱 배경 원칙: 살아있는 xterm들도 같은 프레임에 갈아입는다.
+    refreshTerminalThemes();
+  }, []);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1128,7 +1140,28 @@ function SettingsOverlay({
       </button>
       {open ? (
         <div style={settingsPopoverStyle}>
-          <div style={settingsTitleStyle}>workspace settings</div>
+          <div style={settingsTitleStyle}>settings</div>
+          <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span style={settingsLabelStyle}>theme</span>
+            <span style={{ display: 'inline-flex', gap: 6 }}>
+              {(['dark', 'light'] as const).map((option) => (
+                <button
+                  key={option}
+                  onClick={() => applyTheme(option)}
+                  style={{
+                    ...actionBtnStyle,
+                    padding: '2px 10px',
+                    fontSize: 11,
+                    background: theme === option ? 'var(--accent-bg)' : 'var(--bg2)',
+                    color: theme === option ? 'var(--accent)' : 'var(--text-soft)',
+                    borderColor: theme === option ? 'var(--accent-dim)' : 'var(--line)',
+                  }}
+                >
+                  {option}
+                </button>
+              ))}
+            </span>
+          </label>
           <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <span style={settingsLabelStyle}>optimistic local echo</span>
             <input
@@ -1178,26 +1211,26 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
 
   if (loading) {
     return (
-      <div style={{ color: '#666', padding: 40, fontFamily: 'monospace' }}>loading...</div>
+      <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'monospace' }}>loading...</div>
     );
   }
 
   const noSessions = sessions.length === 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#111' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg0)' }}>
       <div style={toolbarStyle}>
         <button onClick={() => navigate({ page: 'dashboard' })} style={btnStyle}>&larr; dashboard</button>
-        <span style={{ color: '#aaa', fontSize: 12 }}>overview</span>
-        <span style={{ color: '#555', fontSize: 11, marginLeft: 'auto' }}>
+        <span style={{ color: 'var(--text-soft)', fontSize: 12 }}>overview</span>
+        <span style={{ color: 'var(--text-dim)', fontSize: 11, marginLeft: 'auto' }}>
           {sessions.length} session{sessions.length !== 1 ? 's' : ''}
         </span>
       </div>
 
       {noSessions ? (
-        <div style={{ color: '#444', fontSize: 13, fontFamily: 'monospace', padding: 40 }}>
+        <div style={{ color: 'var(--text-dim)', fontSize: 13, fontFamily: 'monospace', padding: 40 }}>
           no active sessions. go to{' '}
-          <span onClick={() => navigate({ page: 'dashboard' })} style={{ color: '#007acc', cursor: 'pointer' }}>
+          <span onClick={() => navigate({ page: 'dashboard' })} style={{ color: 'var(--accent)', cursor: 'pointer' }}>
             dashboard
           </span>
           {' '}to create one.
@@ -1209,18 +1242,18 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
               <div
                 style={{
                   display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
-                  padding: '6px 12px', background: '#1a1a1a', borderRadius: 4,
+                  padding: '6px 12px', background: 'var(--bg1)', borderRadius: 4,
                   cursor: 'pointer',
                 }}
                 onClick={() => navigate({ page: 'workspace', id: ws.id })}
               >
-                <span style={{ color: '#ccc', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
+                <span style={{ color: 'var(--text)', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
                   {workspaceDisplayLabel(ws)}
                 </span>
-                <span style={{ color: '#555', fontSize: 11, fontFamily: 'monospace' }}>
+                <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'monospace' }}>
                   {ws.liveSessions.length} session{ws.liveSessions.length !== 1 ? 's' : ''}
                 </span>
-                <span style={{ color: '#444', fontSize: 11, fontFamily: 'monospace', marginLeft: 'auto' }}>
+                <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'monospace', marginLeft: 'auto' }}>
                   click to open &rarr;
                 </span>
               </div>
@@ -1246,12 +1279,12 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
             <div>
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
-                padding: '6px 12px', background: '#1a1a1a', borderRadius: 4,
+                padding: '6px 12px', background: 'var(--bg1)', borderRadius: 4,
               }}>
-                <span style={{ color: '#888', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
+                <span style={{ color: 'var(--text-soft)', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
                   standalone
                 </span>
-                <span style={{ color: '#555', fontSize: 11, fontFamily: 'monospace' }}>
+                <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'monospace' }}>
                   {standalone.length} session{standalone.length !== 1 ? 's' : ''}
                 </span>
               </div>
@@ -1286,30 +1319,30 @@ function PreviewCard({ mux, sessionId, label, sublabel, status }: {
     <div
       style={{
         display: 'flex', flexDirection: 'column',
-        background: '#1e1e1e', borderRadius: 4, overflow: 'hidden',
+        background: 'var(--bg0)', borderRadius: 4, overflow: 'hidden',
         border: '1px solid #2a2a2a',
         cursor: 'pointer',
         transition: 'border-color 0.15s',
       }}
       onClick={() => navigate({ page: 'session', id: sessionId })}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#007acc'; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = '#2a2a2a'; }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent)'; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--bg2)'; }}
     >
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
-        padding: '4px 10px', background: '#181818',
+        padding: '4px 10px', background: 'var(--bg2)',
         borderBottom: '1px solid #2a2a2a',
         fontFamily: 'monospace', fontSize: 11, userSelect: 'none',
       }}>
         <span style={{
           width: 6, height: 6, borderRadius: '50%',
-          background: status === 'attached' ? '#4fc3f7' : '#555',
+          background: status === 'attached' ? 'var(--accent)' : 'var(--text-dim)',
           flexShrink: 0,
         }} />
         <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-          <span style={{ color: '#ddd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+          <span style={{ color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
           {sublabel ? (
-            <span style={{ color: '#666', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ color: 'var(--text-dim)', fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {sublabel}
             </span>
           ) : null}
@@ -1356,7 +1389,7 @@ function App() {
 
   if (!connected || !muxRef.current) {
     return (
-      <div style={{ color: '#888', padding: 40, fontFamily: 'monospace' }}>
+      <div style={{ color: 'var(--text-soft)', padding: 40, fontFamily: 'monospace' }}>
         connecting to ttym server...
       </div>
     );
@@ -1407,8 +1440,8 @@ const toolbarStyle: React.CSSProperties = {
 };
 
 const btnStyle: React.CSSProperties = {
-  background: '#2d2d2d',
-  color: '#ccc',
+  background: 'var(--bg2)',
+  color: 'var(--text)',
   border: '1px solid #444',
   padding: '3px 10px',
   cursor: 'pointer',
@@ -1418,8 +1451,8 @@ const btnStyle: React.CSSProperties = {
 };
 
 const actionBtnStyle: React.CSSProperties = {
-  background: '#2d2d2d',
-  color: '#ccc',
+  background: 'var(--bg2)',
+  color: 'var(--text)',
   border: '1px solid #444',
   padding: '4px 12px',
   cursor: 'pointer',
@@ -1432,7 +1465,7 @@ const closeBtnStyle: React.CSSProperties = {
   marginLeft: 'auto',
   background: 'none',
   border: 'none',
-  color: '#555',
+  color: 'var(--text-dim)',
   cursor: 'pointer',
   fontSize: 14,
   fontFamily: 'monospace',
@@ -1442,8 +1475,8 @@ const closeBtnStyle: React.CSSProperties = {
 };
 
 const miniLinkBtnStyle: React.CSSProperties = {
-  background: '#1c2631',
-  color: '#8ab4d8',
+  background: 'var(--accent-bg)',
+  color: 'var(--accent)',
   border: '1px solid #314253',
   padding: '1px 5px',
   cursor: 'pointer',
@@ -1454,9 +1487,9 @@ const miniLinkBtnStyle: React.CSSProperties = {
 };
 
 const settingsButtonStyle: React.CSSProperties = {
-  background: 'rgba(18, 23, 31, 0.96)',
-  color: '#c7d1dd',
-  border: '1px solid rgba(79, 93, 113, 0.58)',
+  background: 'var(--bg2)',
+  color: 'var(--text-soft)',
+  border: '1px solid var(--line-strong)',
   padding: '6px 10px',
   cursor: 'pointer',
   fontFamily: 'monospace',
@@ -1465,7 +1498,7 @@ const settingsButtonStyle: React.CSSProperties = {
 };
 
 const workspaceNameStyle: React.CSSProperties = {
-  color: '#eaf0f6',
+  color: 'var(--text)',
   fontSize: 15,
   fontWeight: 600,
   cursor: 'pointer',
@@ -1475,9 +1508,9 @@ const workspaceNameStyle: React.CSSProperties = {
 };
 
 const workspaceNameInputStyle: React.CSSProperties = {
-  background: 'rgba(21, 28, 37, 0.98)',
-  color: '#eaf0f6',
-  border: '1px solid rgba(79, 93, 113, 0.62)',
+  background: 'var(--bg2)',
+  color: 'var(--text)',
+  border: '1px solid var(--line-strong)',
   borderRadius: 4,
   padding: '2px 6px',
   fontFamily: 'monospace',
@@ -1496,8 +1529,8 @@ const attachDropdownStyle: React.CSSProperties = {
   overflowY: 'auto',
   padding: 6,
   borderRadius: 8,
-  border: '1px solid rgba(79, 93, 113, 0.56)',
-  background: 'rgba(12, 17, 24, 0.98)',
+  border: '1px solid var(--line-strong)',
+  background: 'var(--bg1)',
   boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
   backdropFilter: 'blur(14px)',
   fontFamily: 'monospace',
@@ -1505,7 +1538,7 @@ const attachDropdownStyle: React.CSSProperties = {
 };
 
 const attachDropdownTitleStyle: React.CSSProperties = {
-  color: '#aab4c0',
+  color: 'var(--text-soft)',
   fontSize: 10,
   textTransform: 'uppercase',
   letterSpacing: 0.5,
@@ -1519,7 +1552,7 @@ const attachDropdownItemStyle: React.CSSProperties = {
   padding: '6px 8px',
   background: 'transparent',
   border: 'none',
-  color: '#c7d1dd',
+  color: 'var(--text-soft)',
   fontFamily: 'monospace',
   fontSize: 12,
   textAlign: 'left',
@@ -1529,7 +1562,7 @@ const attachDropdownItemStyle: React.CSSProperties = {
 
 const attachDropdownEmptyStyle: React.CSSProperties = {
   padding: '8px',
-  color: '#666',
+  color: 'var(--text-dim)',
   fontSize: 11,
 };
 
@@ -1538,15 +1571,15 @@ const settingsPopoverStyle: React.CSSProperties = {
   width: 220,
   padding: 12,
   borderRadius: 10,
-  border: '1px solid rgba(79, 93, 113, 0.56)',
-  background: 'rgba(12, 17, 24, 0.98)',
+  border: '1px solid var(--line-strong)',
+  background: 'var(--bg1)',
   boxShadow: '0 18px 42px rgba(0, 0, 0, 0.42)',
   backdropFilter: 'blur(14px)',
   fontFamily: 'monospace',
 };
 
 const settingsTitleStyle: React.CSSProperties = {
-  color: '#eaf0f6',
+  color: 'var(--text)',
   fontSize: 12,
   fontWeight: 600,
   marginBottom: 10,
@@ -1559,15 +1592,15 @@ const settingsFieldStyle: React.CSSProperties = {
 };
 
 const settingsLabelStyle: React.CSSProperties = {
-  color: '#aab4c0',
+  color: 'var(--text-soft)',
   fontSize: 11,
 };
 
 const settingsInputStyle: React.CSSProperties = {
   width: '100%',
-  border: '1px solid rgba(79, 93, 113, 0.62)',
-  background: 'rgba(21, 28, 37, 0.98)',
-  color: '#eaf0f6',
+  border: '1px solid var(--line-strong)',
+  background: 'var(--bg2)',
+  color: 'var(--text)',
   borderRadius: 7,
   padding: '7px 9px',
   outline: 'none',
@@ -1575,7 +1608,7 @@ const settingsInputStyle: React.CSSProperties = {
 };
 
 const settingsHintStyle: React.CSSProperties = {
-  color: '#6f7987',
+  color: 'var(--text-dim)',
   fontSize: 10,
   marginTop: 8,
 };
