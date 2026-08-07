@@ -7,6 +7,7 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; transition: none !important; animation: none !important; }
       .agent-dot-run { animation: agent-pulse 1.4s ease-in-out infinite !important; }
+      .morph-hl { transition: top .18s cubic-bezier(.2,.8,.25,1), left .18s cubic-bezier(.2,.8,.25,1), width .18s cubic-bezier(.2,.8,.25,1), height .18s cubic-bezier(.2,.8,.25,1), opacity .15s ease, background .18s ease, border-color .18s ease, border-radius .18s ease !important; }
       @keyframes agent-pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
     html, body { min-height: 100%; background: var(--bg0, #1e1e1e); overflow-x: hidden; overflow-y: auto; }
     #root { min-height: 100%; background: var(--bg0, #1e1e1e); }

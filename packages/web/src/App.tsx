@@ -244,6 +244,27 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
   // 우측 패널: hover 미리보기 ↔ live 터미널(행 클릭) ↔ workspace 분할 미니뷰(제목 클릭)
   const [panel, setPanel] = useState<DashPanel>({ kind: 'hover' });
   const [hoveredWsId, setHoveredWsId] = useState<string | null>(null);
+  // 모핑 하이라이트: 행별 배경 대신 리스트에 단 하나 떠 있는 박스가
+  // hover 대상의 rect로 미끄러진다. variant가 곧 "무엇을 보고 있나"다.
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [hl, setHl] = useState<{ top: number; left: number; width: number; height: number; variant: 'row' | 'ws'; visible: boolean }>(
+    { top: 0, left: 0, width: 0, height: 0, variant: 'row', visible: false },
+  );
+
+  const moveHl = useCallback((el: HTMLElement, variant: 'row' | 'ws') => {
+    const container = listRef.current;
+    if (!container) return;
+    const cRect = container.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    setHl({
+      top: rect.top - cRect.top + container.scrollTop,
+      left: rect.left - cRect.left,
+      width: rect.width,
+      height: rect.height,
+      variant,
+      visible: true,
+    });
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -360,16 +381,14 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
     const info = infoBySession.get(sid);
     const agent = agentStates[sid];
     const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
-    const hovered = hoveredSessionId === sid;
     return (
       <div
         key={sid}
         onClick={() => setPanel({ kind: 'live', sid })}
-        onMouseEnter={() => { setHoveredSessionId(sid); setHoveredWsId(null); }}
+        onMouseEnter={(e) => { setHoveredSessionId(sid); setHoveredWsId(null); moveHl(e.currentTarget, 'row'); }}
         style={{
           display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px',
           borderRadius: 8, cursor: 'pointer', minWidth: 0,
-          background: hovered ? 'var(--bg3)' : 'transparent',
         }}
       >
         <span
@@ -426,7 +445,28 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: compactLayout ? 'minmax(0, 1fr)' : 'minmax(360px, 460px) minmax(0, 1fr)', fontFamily: 'monospace' }}>
-      <div style={{ borderRight: compactLayout ? 'none' : '1px solid var(--line)', background: 'var(--bg1)', padding: 14, overflowY: 'auto', minHeight: 0 }}>
+      <div
+        ref={listRef}
+        onMouseLeave={() => setHl((prev) => ({ ...prev, visible: false }))}
+        onScroll={() => setHl((prev) => (prev.visible ? { ...prev, visible: false } : prev))}
+        style={{ borderRight: compactLayout ? 'none' : '1px solid var(--line)', background: 'var(--bg1)', padding: 14, overflowY: 'auto', minHeight: 0, position: 'relative', isolation: 'isolate' }}
+      >
+        <div
+          className="morph-hl"
+          style={{
+            position: 'absolute',
+            top: hl.top,
+            left: hl.left,
+            width: hl.width,
+            height: hl.height,
+            borderRadius: hl.variant === 'ws' ? 10 : 8,
+            background: hl.variant === 'ws' ? 'var(--accent-bg)' : 'var(--bg3)',
+            border: hl.variant === 'ws' ? '1px solid var(--accent-dim)' : '1px solid transparent',
+            opacity: hl.visible ? (hl.variant === 'ws' ? 0.6 : 1) : 0,
+            zIndex: -1,
+            pointerEvents: 'none',
+          }}
+        />
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 4px 12px', color: 'var(--text-dim)', fontSize: 11 }}>
           <span>{sessions.length} session{sessions.length !== 1 ? 's' : ''}</span>
           <span>·</span>
@@ -451,7 +491,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled }: { mux: TerminalMu
             <div key={ws.id} style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 6, marginBottom: 10, background: 'var(--bg0)' }}>
               <div
                 onClick={() => setPanel({ kind: 'ws', wsId: ws.id })}
-                onMouseEnter={() => setHoveredWsId(ws.id)}
+                onMouseEnter={(e) => { setHoveredWsId(ws.id); moveHl(e.currentTarget.parentElement as HTMLElement, 'ws'); }}
                 title="hover: 분할 미리보기 · 클릭: 고정 · 탭: 전체 열기"
                 style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', fontSize: 12, fontWeight: 700, color: 'var(--text-soft)', cursor: 'pointer' }}
               >
