@@ -59,6 +59,42 @@ interface Workspace {
 
 const LOCAL_ECHO_STORAGE_KEY = 'ttym-demo-local-echo';
 
+// UI 스타일: frame(기본) = bg0 들판 + 라운드 프레임 + dim 포커스,
+// classic = bg2 크롬 바 + 좌측 포커스 바. 차이는 전부 이 테이블 한 곳에 산다.
+type UiStyle = 'frame' | 'classic';
+const UI_STYLE_STORAGE_KEY = 'ttym-ui-style';
+
+const UI_STYLES = {
+  frame: {
+    stripBg: 'var(--bg0)',
+    stripLine: 'none',
+    tabActiveBg: 'var(--bg2)',
+    wrapPad: 5,
+    splitterPx: 6,
+    splitterColor: 'transparent',
+    paneRadius: 6,
+    termPad: '0 6px 6px',
+    frameBorder: true,
+    headerBar: false,
+  },
+  classic: {
+    stripBg: 'var(--bg2)',
+    stripLine: '1px solid var(--line)',
+    tabActiveBg: 'var(--bg0)',
+    wrapPad: 0,
+    splitterPx: 5,
+    splitterColor: 'var(--line)',
+    paneRadius: 0,
+    termPad: '0',
+    frameBorder: false,
+    headerBar: true,
+  },
+} as const;
+
+function readUiStyle(): UiStyle {
+  try { return localStorage.getItem(UI_STYLE_STORAGE_KEY) === 'classic' ? 'classic' : 'frame'; } catch { return 'frame'; }
+}
+
 // 에이전트 식별색 — 정체는 이름의 색, 활동은 4px 점. 필 배지는 쓰지 않는다.
 const AGENT_COLORS: Record<string, string> = { 'claude-code': 'var(--agent-claude)', codex: 'var(--agent-codex)' };
 
@@ -659,7 +695,8 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, actionsSlot }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null }) {
+function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, actionsSlot, uiStyle }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle }) {
+  const U = UI_STYLES[uiStyle];
   const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
@@ -939,15 +976,23 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
       <div
         key={sid}
         onMouseDown={() => { setFocusedSid(sid); setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; }); }}
-        style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: 'var(--bg0)' }}
+        style={{
+          display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: 'var(--bg0)',
+          border: U.frameBorder ? (dead ? '1px solid var(--err)' : '1px solid var(--line)') : 'none',
+          borderRadius: U.paneRadius,
+          overflow: 'hidden',
+        }}
       >
         <div
           className="reveal-parent"
           style={{
-            display: 'flex', alignItems: 'center', gap: 8, height: 30, padding: '0 8px',
-            background: isFocused ? 'var(--bg0)' : 'var(--bg2)',
-            borderLeft: dead ? '2px solid var(--err)' : isFocused ? '2px solid var(--accent)' : '2px solid transparent',
-            borderBottom: '1px solid var(--line)', flexShrink: 0, userSelect: 'none',
+            display: 'flex', alignItems: 'center', height: 30, padding: 0,
+            flexShrink: 0, userSelect: 'none', position: 'relative',
+            ...(U.headerBar ? {
+              background: isFocused ? 'var(--bg0)' : 'var(--bg2)',
+              borderLeft: dead ? '2px solid var(--err)' : isFocused ? '2px solid var(--accent)' : '2px solid transparent',
+              borderBottom: '1px solid var(--line)',
+            } : null),
           }}
           draggable
           onDragStart={() => setDragSid(sid)}
@@ -957,23 +1002,36 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
           onDoubleClick={() => setZoomedSid((z) => (z === sid ? null : sid))}
           title="double-click: zoom · drag: swap"
         >
-          {agentColor ? (
-            <span
-              className={agent?.active ? 'agent-dot-run' : undefined}
-              style={{ width: 5, height: 5, borderRadius: '50%', background: agentColor, opacity: agent?.active ? 1 : 0.4, flexShrink: 0 }}
-              title={agent?.active ? `${agent.kind} · running` : `${agent?.kind} · idle`}
-            />
-          ) : null}
-          <span style={{ color: agentColor ?? (isFocused ? 'var(--text)' : 'var(--text-dim)'), fontSize: 11, fontFamily: 'monospace', fontWeight: 700 }}>
-            {name || `#${sid}`}
-          </span>
-          {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'monospace' }}>#{sid}</span> : null}
-          {cwd ? (
-            <span style={{ color: isFocused ? 'var(--cwd)' : 'var(--cwd)', fontSize: 10, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={cwd}>
-              {formatCwd(cwd)}
+          <span
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 10px',
+              // frame: 포커스 신호는 텍스트 밝기 하나. classic: 바 배경이 말한다.
+              flexGrow: 1, flexShrink: 1, minWidth: 0, overflow: 'hidden',
+              height: '100%',
+              opacity: U.headerBar ? 1 : isFocused ? 1 : 0.45,
+            }}
+          >
+            {agentColor ? (
+              <span
+                className={agent?.active ? 'agent-dot-run' : undefined}
+                style={{ width: 5, height: 5, borderRadius: '50%', background: agentColor, opacity: agent?.active ? 1 : 0.4, flexShrink: 0 }}
+                title={agent?.active ? `${agent.kind} · running` : `${agent?.kind} · idle`}
+              />
+            ) : null}
+            <span style={{ color: agentColor ?? (isFocused ? 'var(--text)' : 'var(--text-soft)'), fontSize: 11, fontFamily: 'monospace', fontWeight: 700, flexShrink: 0 }}>
+              {name || `#${sid}`}
             </span>
-          ) : null}
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0 }}>
+            {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'monospace', flexShrink: 0 }}>#{sid}</span> : null}
+            {cwd ? (
+              <span style={{ color: 'var(--cwd)', fontSize: 10, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={cwd}>
+                {formatCwd(cwd)}
+              </span>
+            ) : null}
+          </span>
+          <span style={{
+            position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+            display: 'inline-flex', alignItems: 'center', gap: 6, zIndex: 2,
+          }}>
             {bells.has(sid) ? (
               <span title="bell" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)', boxShadow: '0 0 6px var(--warn)', flexShrink: 0 }} />
             ) : null}
@@ -988,7 +1046,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
           </span>
         </div>
-        <div style={{ flex: 1, minHeight: 0 }}>
+        <div style={{ flex: 1, minHeight: 0, padding: U.termPad }}>
           {!dead ? (
             <Terminal
               mux={mux}
@@ -1054,14 +1112,15 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {actionsSlot ? createPortal(stripActions, actionsSlot) : null}
-      <div style={{ flex: 1, minHeight: 0, background: 'var(--bg0)' }}>
+      <div style={{ flex: 1, minHeight: 0, background: 'var(--bg0)', padding: U.wrapPad }}>
         {ws ? (
           <LayoutView
             layout={ws.layout}
             renderPane={renderPane}
             onResize={commitResize}
             zoomedSessionId={zoomedSid}
-            splitterColor="var(--line)"
+            splitterPx={U.splitterPx}
+            splitterColor={U.splitterColor}
             splitterActiveColor="var(--accent)"
           />
         ) : (
@@ -1117,9 +1176,13 @@ const emptyPaneStyle: React.CSSProperties = {
 function SettingsOverlay({
   localEchoEnabled,
   onLocalEchoChange,
+  uiStyle,
+  onUiStyleChange,
 }: {
   localEchoEnabled: boolean;
   onLocalEchoChange: (value: boolean) => void;
+  uiStyle: UiStyle;
+  onUiStyleChange: (value: UiStyle) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>(
@@ -1151,6 +1214,27 @@ function SettingsOverlay({
       {open ? (
         <div style={settingsPopoverStyle}>
           <div style={settingsTitleStyle}>settings</div>
+          <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span style={settingsLabelStyle}>ui style</span>
+            <span style={{ display: 'inline-flex', gap: 6 }}>
+              {(['frame', 'classic'] as const).map((option) => (
+                <button
+                  key={option}
+                  onClick={() => onUiStyleChange(option)}
+                  style={{
+                    ...actionBtnStyle,
+                    padding: '2px 10px',
+                    fontSize: 11,
+                    background: uiStyle === option ? 'var(--accent-bg)' : 'var(--bg2)',
+                    color: uiStyle === option ? 'var(--accent)' : 'var(--text-soft)',
+                    borderColor: uiStyle === option ? 'var(--accent-dim)' : 'var(--line)',
+                  }}
+                >
+                  {option}
+                </button>
+              ))}
+            </span>
+          </label>
           <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
             <span style={settingsLabelStyle}>theme</span>
             <span style={{ display: 'inline-flex', gap: 6 }}>
@@ -1371,6 +1455,7 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [route, setRoute] = useState<Route>(parseHash);
   const [localEchoEnabled, setLocalEchoEnabled] = useState(readLocalEchoEnabled);
+  const [uiStyle, setUiStyle] = useState<UiStyle>(readUiStyle);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
   const [stripSlot, setStripSlot] = useState<HTMLSpanElement | null>(null);
@@ -1467,6 +1552,11 @@ function App() {
     setLocalEchoEnabled(value);
   }, []);
 
+  const handleUiStyleChange = useCallback((value: UiStyle) => {
+    try { localStorage.setItem(UI_STYLE_STORAGE_KEY, value); } catch {}
+    setUiStyle(value);
+  }, []);
+
   if (!connected || !muxRef.current) {
     return (
       <div style={{ color: 'var(--text-soft)', padding: 40, fontFamily: 'monospace' }}>
@@ -1490,7 +1580,7 @@ function App() {
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} />;
       break;
     default:
       page = <DashboardPage mux={mux} agentStates={agentStates} localEchoEnabled={localEchoEnabled} actionsSlot={stripSlot} />;
@@ -1501,10 +1591,10 @@ function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <div style={tabStripStyle}>
+      <div style={{ ...tabStripStyle, background: UI_STYLES[uiStyle].stripBg, borderBottom: UI_STYLES[uiStyle].stripLine }}>
         <button
           onClick={() => navigate({ page: 'dashboard' })}
-          style={{ ...tabStyle, ...(homeActive ? tabActiveStyle : null) }}
+          style={{ ...tabStyle, ...(homeActive ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}
           title="home · ⌘1"
         >⌂</button>
         {workspaces.map((ws, i) => {
@@ -1517,7 +1607,7 @@ function App() {
             <button
               key={ws.id}
               onClick={() => navigate({ page: 'workspace', id: ws.id })}
-              style={{ ...tabStyle, ...(active ? tabActiveStyle : null) }}
+              style={{ ...tabStyle, ...(active ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}
               title={`${workspaceDisplayLabel(ws)} · ⌘${i + 2} · 더블클릭: 이름 변경`}
               onDoubleClick={() => { setRenamingId(ws.id); setRenameDraft(ws.name); }}
             >
@@ -1555,6 +1645,8 @@ function App() {
         <SettingsOverlay
           localEchoEnabled={localEchoEnabled}
           onLocalEchoChange={handleLocalEchoChange}
+          uiStyle={uiStyle}
+          onUiStyleChange={handleUiStyleChange}
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -1570,8 +1662,9 @@ const tabStripStyle: React.CSSProperties = {
   gap: 4,
   height: 42,
   padding: '0 10px',
-  background: 'var(--bg2)',
-  borderBottom: '1px solid var(--line)',
+  // 면은 bg0 하나 — 스트립도 workspace와 같은 들판이다. 슬래브 은퇴.
+  // 구분선도 없다: 같은 면이라 경계가 필요 없어졌다.
+  background: 'var(--bg0)',
   fontFamily: 'monospace',
   flexShrink: 0,
   userSelect: 'none',
@@ -1593,7 +1686,8 @@ const tabStyle: React.CSSProperties = {
 };
 
 const tabActiveStyle: React.CSSProperties = {
-  background: 'var(--bg0)',
+  // 화면에서 유일하게 채워진 크롬 = 현재 워크스페이스.
+  background: 'var(--bg2)',
   color: 'var(--text)',
   border: '1px solid var(--line)',
 };
