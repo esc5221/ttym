@@ -58,6 +58,12 @@ interface Workspace {
 
 const LOCAL_ECHO_STORAGE_KEY = 'ttym-demo-local-echo';
 
+// 에이전트 식별색 — 정체는 이름의 색, 활동은 4px 점. 필 배지는 쓰지 않는다.
+const AGENT_COLORS: Record<string, string> = { 'claude-code': '#e8955c', codex: '#7ec8e8' };
+
+interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean }
+interface AgentTurn { sid: number; prompt: string; transcript: string | null; status: string }
+
 function readLocalEchoEnabled(): boolean {
   try {
     return window.localStorage.getItem(LOCAL_ECHO_STORAGE_KEY) === '1';
@@ -626,6 +632,11 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
   const [editingName, setEditingName] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [dragSid, setDragSid] = useState<number | null>(null);
+  const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
+  const [lastAgentIds, setLastAgentIds] = useState<Record<number, { claude?: string; codex?: string }>>({});
+  const [turns, setTurns] = useState<AgentTurn[]>([]);
+  const [awaitBusy, setAwaitBusy] = useState(false);
+  const [awaitInput, setAwaitInput] = useState('');
   const barrier = useRef(new MutationBarrier());
   const wsRef = useRef<Workspace | null>(null);
   wsRef.current = ws;
@@ -641,6 +652,16 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
       } catch { return [id, ''] as const; }
     }));
     setSessionCwds((prev) => ({ ...prev, ...Object.fromEntries(cwdEntries.filter(([, cwd]) => cwd)) }));
+    const lastEntries = await Promise.all(ids.map(async (id) => {
+      try {
+        const meta = await fetchSessionMeta(id);
+        return [id, {
+          claude: typeof meta.claudeLastSessionId === 'string' ? meta.claudeLastSessionId : undefined,
+          codex: typeof meta.codexLastSessionId === 'string' ? meta.codexLastSessionId : undefined,
+        }] as const;
+      } catch { return [id, {}] as const; }
+    }));
+    setLastAgentIds(Object.fromEntries(lastEntries));
   }, []);
 
   const refresh = useCallback(async () => {
@@ -667,6 +688,48 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
   }, [workspaceId, refresh, applyWorkspace, mux]);
 
   const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
+
+  useEffect(() => {
+    if (sessionIds.length === 0) return;
+    let cancelled = false;
+    const tick = async () => {
+      const entries = await Promise.all(sessionIds.map(async (id) => {
+        try {
+          const runtime = await api.getSessionRuntime(API_BASE, id);
+          return [id, { kind: runtime.agent.kind, active: runtime.agent.active }] as const;
+        } catch { return [id, { kind: null, active: false }] as const; }
+      }));
+      if (!cancelled) setAgentStates(Object.fromEntries(entries));
+    };
+    void tick();
+    const timer = window.setInterval(() => { void tick(); }, 3000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [sessionIds.join(',')]);
+
+  const submitAwait = useCallback(async () => {
+    const prompt = awaitInput.trim();
+    const sid = focusedSid;
+    if (!prompt || sid === null || awaitBusy) return;
+    setAwaitInput('');
+    setAwaitBusy(true);
+    setTurns((prev) => [...prev, { sid, prompt, transcript: null, status: 'pending' }]);
+    try {
+      const { interaction } = await api.submitInteraction(API_BASE, sid, { prompt, timeoutMs: 120_000 });
+      setTurns((prev) => prev.map((t) => (t.sid === sid && t.prompt === prompt && t.status === 'pending')
+        ? { ...t, transcript: interaction.transcript, status: interaction.status } : t));
+    } catch {
+      setTurns((prev) => prev.map((t) => (t.sid === sid && t.prompt === prompt && t.status === 'pending')
+        ? { ...t, status: 'failed' } : t));
+    } finally { setAwaitBusy(false); }
+  }, [awaitInput, focusedSid, awaitBusy]);
+
+  const restoreAgent = useCallback((sid: number) => {
+    const last = lastAgentIds[sid];
+    if (!last) return;
+    const cmd = last.claude ? `claude --resume ${last.claude}` : last.codex ? `codex resume ${last.codex}` : null;
+    if (!cmd) return;
+    void api.sendToSession(API_BASE, sid, cmd + '\r');
+  }, [lastAgentIds]);
 
   useEffect(() => {
     if (sessionIds.length === 0) { setFocusedSid(null); return; }
@@ -850,6 +913,9 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
     const isFocused = focusedSid === sid;
     const name = memberNames[sid];
     const cwd = sessionCwds[sid];
+    const agent = agentStates[sid];
+    const agentColor = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
+    const canRestore = !agent?.active && (lastAgentIds[sid]?.claude || lastAgentIds[sid]?.codex);
     return (
       <div
         key={sid}
@@ -871,7 +937,14 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
           onDoubleClick={() => setZoomedSid((z) => (z === sid ? null : sid))}
           title="double-click: zoom · drag: swap"
         >
-          <span style={{ color: isFocused ? '#ccc' : '#666', fontSize: 11, fontFamily: 'monospace', fontWeight: 700 }}>
+          {agentColor ? (
+            <span
+              className={agent?.active ? 'agent-dot-run' : undefined}
+              style={{ width: 5, height: 5, borderRadius: '50%', background: agentColor, opacity: agent?.active ? 1 : 0.4, flexShrink: 0 }}
+              title={agent?.active ? `${agent.kind} · running` : `${agent?.kind} · idle`}
+            />
+          ) : null}
+          <span style={{ color: agentColor ?? (isFocused ? '#ccc' : '#666'), fontSize: 11, fontFamily: 'monospace', fontWeight: 700 }}>
             {name || `#${sid}`}
           </span>
           {name ? <span style={{ color: '#555', fontSize: 10, fontFamily: 'monospace' }}>#{sid}</span> : null}
@@ -882,6 +955,9 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
           ) : null}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexShrink: 0 }}>
             {zoomedSid === sid ? <span style={{ color: '#f0b040', fontSize: 10, fontFamily: 'monospace' }}>zoom</span> : null}
+            {canRestore ? (
+              <button onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="이전 에이전트 세션 복원">restore</button>
+            ) : null}
             <button onClick={(e) => { e.stopPropagation(); void doSplit('right', sid); }} style={miniLinkBtnStyle} title="split right">│</button>
             <button onClick={(e) => { e.stopPropagation(); void doSplit('down', sid); }} style={miniLinkBtnStyle} title="split down">─</button>
             <button onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={miniLinkBtnStyle} title="detach (세션 유지)">detach</button>
@@ -909,7 +985,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, mux, localEchoEnabled, doSplit, detachMember, terminateMember, commitSwap, restartAt]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, mux, localEchoEnabled, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -982,6 +1058,42 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled }: { mux: TerminalMu
           <div style={{ color: '#666', padding: 40, fontFamily: 'monospace' }}>loading…</div>
         )}
       </div>
+
+      {focusedSid !== null && agentStates[focusedSid]?.kind ? (
+        <div style={{ borderTop: '1px solid #3a4656', background: '#161b22', flexShrink: 0, fontFamily: 'monospace' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', fontSize: 11, color: '#aab4c0', borderBottom: '1px solid #262d38' }}>
+            <span style={{ color: AGENT_COLORS[agentStates[focusedSid]!.kind!], fontWeight: 700 }}>await</span>
+            <span>→ {memberNames[focusedSid] || `#${focusedSid}`}</span>
+            <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              {awaitBusy ? (
+                <>
+                  <span className="agent-dot-run" style={{ width: 5, height: 5, borderRadius: '50%', background: AGENT_COLORS[agentStates[focusedSid]!.kind!] }} />
+                  <span style={{ color: '#6f7987', fontSize: 10.5 }}>turn 진행중</span>
+                </>
+              ) : null}
+            </span>
+          </div>
+          {turns.filter((t) => t.sid === focusedSid).slice(-3).map((t, i) => (
+            <div key={i} style={{ padding: '8px 14px 2px', fontSize: 11.5, lineHeight: 1.6 }}>
+              <div style={{ color: '#4fa3f7', marginBottom: 3 }}>❯ {t.prompt}</div>
+              <div style={{ color: t.status === 'failed' ? '#f26d6d' : '#aab4c0', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto' }}>
+                {t.transcript ?? (t.status === 'pending' ? '…' : `(${t.status})`)}
+              </div>
+            </div>
+          ))}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '8px 14px 12px', background: '#0f141a', border: '1px solid #3a4656', borderRadius: 8, padding: '7px 12px' }}>
+            <input
+              value={awaitInput}
+              onChange={(e) => setAwaitInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') void submitAwait(); }}
+              placeholder="프롬프트 입력 — Stop hook이 완료를 알리면 이번 턴 transcript만 표시"
+              style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: '#e6edf5', fontFamily: 'monospace', fontSize: 12 }}
+              disabled={awaitBusy}
+            />
+            <span style={{ fontSize: 10, border: '1px solid #3a4656', borderRadius: 4, padding: '1px 6px', color: '#6f7987' }}>⏎ send</span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
