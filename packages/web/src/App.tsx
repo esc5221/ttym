@@ -454,7 +454,6 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
         <span style={{ color: 'var(--text-dim)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
           {(sessionCwds[sid] ? `${formatCwd(sessionCwds[sid])} · ` : '') + (info ? info.cmd.join(' ') : '')}
         </span>
-        <span style={{ color: 'var(--text-dim)', fontSize: 10.5, flexShrink: 0 }}>pid {info?.pid ?? '—'}</span>
         <button
           className="reveal"
           onClick={(e) => { e.stopPropagation(); void terminateSession(sid, wsId); }}
