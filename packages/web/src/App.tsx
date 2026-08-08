@@ -1510,13 +1510,14 @@ function App() {
     });
   }, [connected]);
 
-  // 에이전트 상태는 앱 수준에서 한 번만 집계한다 — 탭 점·pane 점이 같은 소스를 본다.
+  // 에이전트 상태: 정상 경로는 서버 push(CMD.AGENT — 훅이 쓰는 순간 도착).
+  // 초기 1회 일괄 조회 + 60초 안전망만 남는다. 이게 마지막 폴링이었다.
   useEffect(() => {
     if (!connected) return;
     const memberIds = [...new Set(workspaces.flatMap((w) => layoutToSessionIds(w.layout).filter((id) => id > 0)))];
     if (memberIds.length === 0) { setAgentStates({}); return; }
     let cancelled = false;
-    const tick = async () => {
+    const sweep = async () => {
       const entries = await Promise.all(memberIds.map(async (id) => {
         try {
           const runtime = await api.getSessionRuntime(API_BASE, id);
@@ -1525,9 +1526,13 @@ function App() {
       }));
       if (!cancelled) setAgentStates(Object.fromEntries(entries));
     };
-    void tick();
-    const timer = window.setInterval(() => { void tick(); }, 3000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    void sweep();
+    const fallback = window.setInterval(() => { void sweep(); }, 60_000);
+    const mux = muxRef.current;
+    const unsubscribe = mux ? mux.onAgent((event) => {
+      setAgentStates((prev) => ({ ...prev, [event.sessionId]: { kind: event.kind, active: event.active } }));
+    }) : undefined;
+    return () => { cancelled = true; window.clearInterval(fallback); unsubscribe?.(); };
   }, [connected, workspaces.map((w) => w.id + ':' + layoutToSessionIds(w.layout).join('.')).join('|')]);
 
   const createWorkspaceTab = useCallback(async () => {

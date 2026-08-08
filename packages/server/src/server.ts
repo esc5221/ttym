@@ -170,7 +170,7 @@ export interface TtymServer {
 
 // ───── HTTP API ─────
 
-function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, req: IncomingMessage, res: ServerResponse): boolean {
+function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
 
@@ -344,6 +344,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         }
         const merged = await manager.setMeta(id, patch);
         log(`AGENT META session=${id} keys=${Object.keys(patch).join(',')}`);
+        onAgentMeta?.(id, merged as Record<string, unknown>);
         json(200, merged);
       } catch {
         json(400, { error: 'invalid body' });
@@ -769,7 +770,7 @@ export async function createServer(port: number): Promise<TtymServer> {
 
   const httpServer = createHttpServer((req, res) => {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
-    if (handleHttpApi(manager, workspaceStore, interactions, req, res)) return;
+    if (handleHttpApi(manager, workspaceStore, interactions, req, res, broadcastAgentState)) return;
     if (handleDemoApp(req, res)) return;
     res.writeHead(404);
     res.end('not found');
@@ -779,6 +780,25 @@ export async function createServer(port: number): Promise<TtymServer> {
   // Workspace changes push to every connected client — full tree +
   // generation. Clients stop polling; a missed event costs nothing because
   // the next one carries the entire state again.
+  // Agent state pushes the moment a hook writes it — the last poll the web
+  // client ran (3s runtime sweep) dies with this.
+  function broadcastAgentState(sessionId: number, meta: Record<string, unknown>) {
+    const kind = meta.claudeSessionId || meta.claudeLastSessionId
+      ? 'claude-code'
+      : meta.codexSessionId || meta.codexLastSessionId ? 'codex' : null;
+    const event = {
+      sessionId,
+      kind,
+      active: meta.claudeActive === true || meta.codexActive === true,
+    };
+    const frame = encode(0, CMD.AGENT, jsonPayload(event));
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        try { client.send(frame); } catch {}
+      }
+    }
+  }
+
   const unsubscribeWorkspaceChanges = workspaceStore.onChange((event) => {
     const frame = encode(0, CMD.WORKSPACE, jsonPayload(event));
     for (const client of wss.clients) {

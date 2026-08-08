@@ -216,6 +216,31 @@ describe('createServer', () => {
     }
   });
 
+  it('pushes agent state to WS clients when a hook writes it', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24,
+    }))));
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/internal/sessions/${sid}/agent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ claudeSessionId: 'abc-123', claudeActive: true }),
+    });
+    expect(res.status).toBe(200);
+
+    const evt = await ws1.next((f) => f.cmd === CMD.AGENT);
+    const agent = JSON.parse(Buffer.from(evt.payload).toString());
+    expect(agent.sessionId).toBe(sid);
+    expect(agent.kind).toBe('claude-code');
+    expect(agent.active).toBe(true);
+  });
+
   it('pushes workspace changes to every WS client — full tree, with a generation', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);

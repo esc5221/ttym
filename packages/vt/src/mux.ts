@@ -36,6 +36,12 @@ export interface WorkspaceChangeEvent {
   deletedId?: string;
 }
 
+export interface AgentStateEvent {
+  sessionId: number;
+  kind: 'claude-code' | 'codex' | null;
+  active: boolean;
+}
+
 interface PendingCreate {
   resolve: (id: number) => void;
   reject: (error: Error) => void;
@@ -70,6 +76,7 @@ export class TerminalMux {
   private readonly decoder = new TextDecoder();
   private _lastSeqs = new Map<number, number>(); // sessionId → 최신 수신 seq
   private workspaceListeners = new Set<(event: WorkspaceChangeEvent) => void>();
+  private agentListeners = new Set<(event: AgentStateEvent) => void>();
 
   constructor(url: string) {
     this.url = url;
@@ -237,6 +244,17 @@ export class TerminalMux {
         break;
       }
 
+      case CMD.AGENT: {
+        let event: AgentStateEvent | null = null;
+        try { event = JSON.parse(this.decoder.decode(payload)); } catch {}
+        if (event && typeof event.sessionId === 'number') {
+          for (const listener of this.agentListeners) {
+            try { listener(event); } catch {}
+          }
+        }
+        break;
+      }
+
       case CMD.DESTROY: {
         this.sessions.get(sessionId)?.onExit?.();
         this.sessions.delete(sessionId);
@@ -329,6 +347,12 @@ export class TerminalMux {
   }
 
   // ───── hidden 탭 ─────
+
+  /** Subscribe to agent state pushes. Returns the unsubscribe. */
+  onAgent(listener: (event: AgentStateEvent) => void): () => void {
+    this.agentListeners.add(listener);
+    return () => this.agentListeners.delete(listener);
+  }
 
   /** Subscribe to workspace change pushes. Returns the unsubscribe. */
   onWorkspace(listener: (event: WorkspaceChangeEvent) => void): () => void {

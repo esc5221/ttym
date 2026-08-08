@@ -39,6 +39,8 @@ export const CMD = {
   RESUME_VIEW: 0x0d,
   /** Server → client: a workspace changed — full tree + generation, never a diff. */
   WORKSPACE: 0x0e,
+  /** Server → client: a session's agent state changed (kind/active). */
+  AGENT: 0x0f,
 } as const;
 
 export type CmdValue = (typeof CMD)[keyof typeof CMD];
