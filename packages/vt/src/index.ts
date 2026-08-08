@@ -1,5 +1,5 @@
 export { TerminalMux } from './mux.js';
-export type { CreateOptions, SessionInfo, WorkspaceChangeEvent, AgentStateEvent } from './mux.js';
+export type { CreateOptions, SessionInfo, WorkspaceChangeEvent, AgentStateEvent, ConfigChangeEvent } from './mux.js';
 export { LocalEchoController } from './local-echo.js';
 export { ansiToHtml, stripAnsi, xterm256Color } from './ansi.js';
 export type { AnsiToHtmlOptions } from './ansi.js';

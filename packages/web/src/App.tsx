@@ -698,7 +698,7 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, actionsSlot, uiStyle }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle }) {
+function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number }) {
   const U = UI_STYLES[uiStyle];
   const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
@@ -1054,6 +1054,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             <Terminal
               mux={mux}
               attachId={sid}
+              fontSize={fontSize}
               localEcho={localEchoEnabled}
               onExit={() => setDeadSessions((prev) => new Set(prev).add(sid))}
               onBell={() => setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid)))}
@@ -1070,7 +1071,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, bells, mux, localEchoEnabled, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, bells, mux, localEchoEnabled, fontSize, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
@@ -1181,11 +1182,17 @@ function SettingsOverlay({
   onLocalEchoChange,
   uiStyle,
   onUiStyleChange,
+  fontSize,
+  onFontSizeChange,
+  onThemeChange,
 }: {
   localEchoEnabled: boolean;
   onLocalEchoChange: (value: boolean) => void;
   uiStyle: UiStyle;
   onUiStyleChange: (value: UiStyle) => void;
+  fontSize: number;
+  onFontSizeChange: (value: number) => void;
+  onThemeChange: (value: 'dark' | 'light') => void;
 }) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>(
@@ -1199,7 +1206,8 @@ function SettingsOverlay({
     try { localStorage.setItem('ttym-theme', next); } catch {}
     // 터미널 배경 = 앱 배경 원칙: 살아있는 xterm들도 같은 프레임에 갈아입는다.
     refreshTerminalThemes();
-  }, []);
+    onThemeChange(next);
+  }, [onThemeChange]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1257,6 +1265,14 @@ function SettingsOverlay({
                   {option}
                 </button>
               ))}
+            </span>
+          </label>
+          <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <span style={settingsLabelStyle}>font size</span>
+            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+              <button onClick={() => onFontSizeChange(Math.max(8, fontSize - 1))} style={{ ...actionBtnStyle, padding: '2px 8px', fontSize: 11 }}>−</button>
+              <span style={{ color: 'var(--text)', fontSize: 12, fontFamily: 'monospace', width: 20, textAlign: 'center' }}>{fontSize}</span>
+              <button onClick={() => onFontSizeChange(Math.min(32, fontSize + 1))} style={{ ...actionBtnStyle, padding: '2px 8px', fontSize: 11 }}>+</button>
             </span>
           </label>
           <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
@@ -1459,6 +1475,7 @@ function App() {
   const [route, setRoute] = useState<Route>(parseHash);
   const [localEchoEnabled, setLocalEchoEnabled] = useState(readLocalEchoEnabled);
   const [uiStyle, setUiStyle] = useState<UiStyle>(readUiStyle);
+  const [fontSize, setFontSize] = useState(14);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
   const [stripSlot, setStripSlot] = useState<HTMLSpanElement | null>(null);
@@ -1588,6 +1605,37 @@ function App() {
     setUiStyle(value);
   }, []);
 
+  // ── config: 서버 소유의 ~/.ttym/config가 모든 표면·창의 진실이다.
+  // localStorage는 첫 페인트 플래시를 막는 캐시로만 남는다.
+  const applyConfig = useCallback((values: Record<string, string>) => {
+    if (values.theme === 'light' || values.theme === 'dark') {
+      if (values.theme === 'light') document.documentElement.dataset.theme = 'light';
+      else delete document.documentElement.dataset.theme;
+      try { localStorage.setItem('ttym-theme', values.theme); } catch {}
+      refreshTerminalThemes();
+    }
+    if (values['ui-style'] === 'frame' || values['ui-style'] === 'classic') {
+      setUiStyle(values['ui-style']);
+      try { localStorage.setItem(UI_STYLE_STORAGE_KEY, values['ui-style']); } catch {}
+    }
+    if (values['local-echo'] !== undefined) setLocalEchoEnabled(values['local-echo'] === 'true');
+    if (values['font-size'] !== undefined) {
+      const size = Number(values['font-size']);
+      if (Number.isFinite(size) && size >= 8 && size <= 32) setFontSize(size);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!connected) return;
+    void api.getConfig(API_BASE).then(({ values }) => applyConfig(values)).catch(() => {});
+    const mux = muxRef.current;
+    return mux ? mux.onConfig(({ values }) => applyConfig(values)) : undefined;
+  }, [connected, applyConfig]);
+
+  const patchConfig = useCallback((patch: Record<string, string | null>) => {
+    void api.patchConfig(API_BASE, patch).catch(() => {});
+  }, []);
+
   if (!connected || !muxRef.current) {
     return (
       <div style={{ color: 'var(--text-soft)', padding: 40, fontFamily: 'monospace' }}>
@@ -1611,7 +1659,7 @@ function App() {
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} />;
       break;
     default:
       page = <DashboardPage mux={mux} agentStates={agentStates} localEchoEnabled={localEchoEnabled} actionsSlot={stripSlot} />;
@@ -1678,9 +1726,12 @@ function App() {
         <span ref={setStripSlot} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} />
         <SettingsOverlay
           localEchoEnabled={localEchoEnabled}
-          onLocalEchoChange={handleLocalEchoChange}
+          onLocalEchoChange={(value) => { handleLocalEchoChange(value); patchConfig({ 'local-echo': String(value) }); }}
           uiStyle={uiStyle}
-          onUiStyleChange={handleUiStyleChange}
+          onUiStyleChange={(value) => { handleUiStyleChange(value); patchConfig({ 'ui-style': value }); }}
+          fontSize={fontSize}
+          onFontSizeChange={(value) => { setFontSize(value); patchConfig({ 'font-size': String(value) }); }}
+          onThemeChange={(value) => patchConfig({ theme: value })}
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

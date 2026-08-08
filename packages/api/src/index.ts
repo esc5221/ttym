@@ -13,6 +13,7 @@ export { ApiError, request, resolveBase, type BaseUrl, type RequestOptions } fro
 export * from './sessions.js';
 export * from './workspaces.js';
 export * from './interactions.js';
+export * from './config.js';
 
 import type { BaseUrl } from './transport.js';
 import * as sessions from './sessions.js';

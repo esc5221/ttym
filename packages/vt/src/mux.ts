@@ -42,6 +42,10 @@ export interface AgentStateEvent {
   active: boolean;
 }
 
+export interface ConfigChangeEvent {
+  values: Record<string, string>;
+}
+
 interface PendingCreate {
   resolve: (id: number) => void;
   reject: (error: Error) => void;
@@ -77,6 +81,7 @@ export class TerminalMux {
   private _lastSeqs = new Map<number, number>(); // sessionId → 최신 수신 seq
   private workspaceListeners = new Set<(event: WorkspaceChangeEvent) => void>();
   private agentListeners = new Set<(event: AgentStateEvent) => void>();
+  private configListeners = new Set<(event: ConfigChangeEvent) => void>();
 
   constructor(url: string) {
     this.url = url;
@@ -255,6 +260,17 @@ export class TerminalMux {
         break;
       }
 
+      case CMD.CONFIG: {
+        let event: ConfigChangeEvent | null = null;
+        try { event = JSON.parse(this.decoder.decode(payload)); } catch {}
+        if (event && event.values && typeof event.values === 'object') {
+          for (const listener of this.configListeners) {
+            try { listener(event); } catch {}
+          }
+        }
+        break;
+      }
+
       case CMD.DESTROY: {
         this.sessions.get(sessionId)?.onExit?.();
         this.sessions.delete(sessionId);
@@ -347,6 +363,12 @@ export class TerminalMux {
   }
 
   // ───── hidden 탭 ─────
+
+  /** Subscribe to config pushes — every window applies the same file. */
+  onConfig(listener: (event: ConfigChangeEvent) => void): () => void {
+    this.configListeners.add(listener);
+    return () => this.configListeners.delete(listener);
+  }
 
   /** Subscribe to agent state pushes. Returns the unsubscribe. */
   onAgent(listener: (event: AgentStateEvent) => void): () => void {

@@ -73,6 +73,9 @@ describe('createServer', () => {
 
   beforeEach(async () => {
     process.env.TTYM_RUNTIME_DIR = runtimeDir;
+    // Config lives under the home dir — without this a config PATCH test
+    // would write straight into the developer's real ~/.ttym/config.
+    process.env.TTYM_HOME = runtimeDir;
     server = await createServer(0);
   });
 
@@ -88,6 +91,7 @@ describe('createServer', () => {
     await new Promise((r) => setTimeout(r, 200));
     try { rmSync(runtimeDir, { recursive: true }); } catch {}
     delete process.env.TTYM_RUNTIME_DIR;
+    delete process.env.TTYM_HOME;
   });
 
   it('returns error and cleans up when verify detects early exit', async () => {
@@ -214,6 +218,30 @@ describe('createServer', () => {
       delete process.env.CLAUDE_CODE_CHILD_SESSION;
       delete process.env.CLAUDE_JOB_DIR;
     }
+  });
+
+  it('serves the config file and pushes patches to every client', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    const initial = await (await fetch(`http://127.0.0.1:${port}/api/config`)).json();
+    expect(initial.values).toBeDefined();
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/config`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ theme: 'light', 'font-size': '15' }),
+    });
+    expect(res.status).toBe(200);
+
+    const evt = await ws1.next((f) => f.cmd === CMD.CONFIG);
+    const pushed = JSON.parse(Buffer.from(evt.payload).toString());
+    expect(pushed.values.theme).toBe('light');
+    expect(pushed.values['font-size']).toBe('15');
+
+    const readBack = await (await fetch(`http://127.0.0.1:${port}/api/config`)).json();
+    expect(readBack.values.theme).toBe('light');
   });
 
   it('pushes agent state to WS clients when a hook writes it', async () => {

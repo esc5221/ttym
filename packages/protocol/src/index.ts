@@ -41,6 +41,8 @@ export const CMD = {
   WORKSPACE: 0x0e,
   /** Server → client: a session's agent state changed (kind/active). */
   AGENT: 0x0f,
+  /** Server → client: the config file changed — full values, never a diff. */
+  CONFIG: 0x10,
 } as const;
 
 export type CmdValue = (typeof CMD)[keyof typeof CMD];

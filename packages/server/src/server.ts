@@ -8,6 +8,8 @@ import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
 import { sweepRuntimeDir } from './run-gc.js';
+import { ConfigStore } from './config-file.js';
+import { getHomeDir } from './session.js';
 import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
 import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
@@ -170,7 +172,7 @@ export interface TtymServer {
 
 // ───── HTTP API ─────
 
-function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void): boolean {
+function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
 
@@ -195,6 +197,39 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     req.on('data', (c) => body += c);
     req.on('end', () => resolve(body));
   });
+
+  // GET|PATCH /api/config — the flat key=value file, served so every surface
+  // (web, desktop, each window) reads and writes the same truth.
+  if (path === '/api/config') {
+    if (req.method === 'GET') {
+      json(200, { values: config.get() });
+      return true;
+    }
+    if (req.method === 'PATCH') {
+      readBody().then(async (body) => {
+        try {
+          const patch = JSON.parse(body);
+          if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+            json(400, { error: 'body must be an object of key: string|null' });
+            return;
+          }
+          for (const value of Object.values(patch)) {
+            if (value !== null && typeof value !== 'string') {
+              json(400, { error: 'values must be strings, or null to delete' });
+              return;
+            }
+          }
+          const values = await config.patch(patch as Record<string, string | null>);
+          log(`CONFIG PATCH keys=${Object.keys(patch).join(',')}`);
+          onConfigChange?.(values);
+          json(200, { values });
+        } catch {
+          json(400, { error: 'invalid body' });
+        }
+      });
+      return true;
+    }
+  }
 
   // GET /api/version — lets a client refuse an incompatible server
   if (path === '/api/version' && req.method === 'GET') {
@@ -731,6 +766,8 @@ export async function createServer(port: number): Promise<TtymServer> {
   // they can be revived later by adding them back to a workspace.
   const workspaceStore = new WorkspaceStore(manager.runtimeDir);
   await workspaceStore.load();
+  const configStore = new ConfigStore(resolve(getHomeDir(), 'config'));
+  await configStore.load();
   const interactions = new InteractionStore();
   const restoreAllowlist = new Set<number>();
   for (const ws of workspaceStore.list()) {
@@ -770,7 +807,7 @@ export async function createServer(port: number): Promise<TtymServer> {
 
   const httpServer = createHttpServer((req, res) => {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
-    if (handleHttpApi(manager, workspaceStore, interactions, req, res, broadcastAgentState)) return;
+    if (handleHttpApi(manager, workspaceStore, interactions, configStore, req, res, broadcastAgentState, broadcastConfig)) return;
     if (handleDemoApp(req, res)) return;
     res.writeHead(404);
     res.end('not found');
@@ -792,6 +829,15 @@ export async function createServer(port: number): Promise<TtymServer> {
       active: meta.claudeActive === true || meta.codexActive === true,
     };
     const frame = encode(0, CMD.AGENT, jsonPayload(event));
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        try { client.send(frame); } catch {}
+      }
+    }
+  }
+
+  function broadcastConfig(values: Record<string, string>) {
+    const frame = encode(0, CMD.CONFIG, jsonPayload({ values }));
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) {
         try { client.send(frame); } catch {}
