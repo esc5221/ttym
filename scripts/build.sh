@@ -11,7 +11,7 @@ rm -rf "$DIST"
 mkdir -p "$DIST"
 
 # 1. Rust holder
-echo "[1/3] Building holder (Rust)..."
+echo "[1/4] Building holder (Rust)..."
 cd "$ROOT/holder"
 cargo build --release 2>&1 | tail -1
 cp target/release/ttym-holder "$DIST/"
@@ -22,7 +22,7 @@ fi
 echo "      $(du -h "$DIST/ttym-holder" | cut -f1) ttym-holder"
 
 # 2. Server bundle
-echo "[2/3] Bundling server (esbuild)..."
+echo "[2/4] Bundling server (esbuild)..."
 cd "$ROOT"
 npx esbuild packages/server/src/index.ts \
   --bundle \
@@ -38,7 +38,7 @@ echo "      $(du -h "$DIST/ttym-server.js" | cut -f1) ttym-server.js"
 # 3. CLI bundle + package.json
 # Bundled rather than copied: the source imports workspace TS packages, and
 # inlining ws means dist no longer needs the repo node_modules at runtime.
-echo "[3/3] Bundling CLI (esbuild)..."
+echo "[3/4] Bundling CLI (esbuild)..."
 npx esbuild packages/cli/src/main.js \
   --bundle \
   --platform=node \
@@ -49,6 +49,12 @@ npx esbuild packages/cli/src/main.js \
   2>&1 | tail -1
 chmod +x "$DIST/ttym"
 echo '{"type":"module"}' > "$DIST/package.json"
+
+# The server serves the web app from packages/web/dist — without this step a
+# fresh checkout builds a server that 404s its own UI (it happened: the first
+# production v3 swap shipped exactly that).
+echo "[4/4] Building web app (vite)..."
+pnpm --dir packages/web build 2>&1 | tail -1
 
 echo ""
 echo "=== Build complete ==="
