@@ -103,7 +103,6 @@ function readUiStyle(): UiStyle {
 const AGENT_COLORS: Record<string, string> = { 'claude-code': 'var(--agent-claude)', codex: 'var(--agent-codex)' };
 
 interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean }
-interface AgentTurn { sid: number; prompt: string; transcript: string | null; status: string }
 
 function readLocalEchoEnabled(): boolean {
   try {
@@ -713,10 +712,6 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   const [dragSid, setDragSid] = useState<number | null>(null);
   const [bells, setBells] = useState<Set<number>>(new Set());
   const [lastAgentIds, setLastAgentIds] = useState<Record<number, { claude?: string; codex?: string }>>({});
-  const [turns, setTurns] = useState<AgentTurn[]>([]);
-  const [awaitBusy, setAwaitBusy] = useState(false);
-  const [awaitSeconds, setAwaitSeconds] = useState(0);
-  const [awaitInput, setAwaitInput] = useState('');
   const barrier = useRef(new MutationBarrier());
   const wsRef = useRef<Workspace | null>(null);
   wsRef.current = ws;
@@ -768,30 +763,6 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   }, [workspaceId, refresh, applyWorkspace, mux]);
 
   const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
-
-  const submitAwait = useCallback(async () => {
-    const prompt = awaitInput.trim();
-    const sid = focusedSid;
-    if (!prompt || sid === null || awaitBusy) return;
-    setAwaitInput('');
-    setAwaitBusy(true);
-    setAwaitSeconds(0);
-    setTurns((prev) => [...prev, { sid, prompt, transcript: null, status: 'pending' }]);
-    try {
-      const { interaction } = await api.submitInteraction(API_BASE, sid, { prompt, timeoutMs: 120_000 });
-      setTurns((prev) => prev.map((t) => (t.sid === sid && t.prompt === prompt && t.status === 'pending')
-        ? { ...t, transcript: interaction.transcript, status: interaction.status } : t));
-    } catch {
-      setTurns((prev) => prev.map((t) => (t.sid === sid && t.prompt === prompt && t.status === 'pending')
-        ? { ...t, status: 'failed' } : t));
-    } finally { setAwaitBusy(false); }
-  }, [awaitInput, focusedSid, awaitBusy]);
-
-  useEffect(() => {
-    if (!awaitBusy) return;
-    const timer = window.setInterval(() => setAwaitSeconds((v) => v + 1), 1000);
-    return () => window.clearInterval(timer);
-  }, [awaitBusy]);
 
   const restoreAgent = useCallback((sid: number) => {
     const last = lastAgentIds[sid];
@@ -1132,41 +1103,6 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
         )}
       </div>
 
-      {focusedSid !== null && agentStates[focusedSid]?.kind ? (
-        <div style={{ borderTop: '1px solid #3a4656', background: 'var(--bg1)', flexShrink: 0, fontFamily: 'monospace' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', fontSize: 11, color: 'var(--text-soft)', borderBottom: '1px solid #262d38' }}>
-            <span style={{ color: AGENT_COLORS[agentStates[focusedSid]!.kind!], fontWeight: 700 }}>await</span>
-            <span>→ {memberNames[focusedSid] || `#${focusedSid}`}</span>
-            <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              {awaitBusy ? (
-                <>
-                  <span className="agent-dot-run" style={{ width: 5, height: 5, borderRadius: '50%', background: AGENT_COLORS[agentStates[focusedSid]!.kind!] }} />
-                  <span style={{ color: 'var(--text-dim)', fontSize: 10.5 }}>turn 진행중 · {awaitSeconds}s</span>
-                </>
-              ) : null}
-            </span>
-          </div>
-          {turns.filter((t) => t.sid === focusedSid).slice(-3).map((t, i) => (
-            <div key={i} style={{ padding: '8px 14px 2px', fontSize: 11.5, lineHeight: 1.6 }}>
-              <div style={{ color: 'var(--accent)', marginBottom: 3 }}>❯ {t.prompt}</div>
-              <div style={{ color: t.status === 'failed' ? 'var(--err)' : 'var(--text-soft)', whiteSpace: 'pre-wrap', maxHeight: 180, overflowY: 'auto' }}>
-                {t.transcript ?? (t.status === 'pending' ? '…' : `(${t.status})`)}
-              </div>
-            </div>
-          ))}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', margin: '8px 14px 12px', background: 'var(--bg0)', border: '1px solid #3a4656', borderRadius: 8, padding: '7px 12px' }}>
-            <input
-              value={awaitInput}
-              onChange={(e) => setAwaitInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void submitAwait(); }}
-              placeholder="프롬프트 입력 — Stop hook이 완료를 알리면 이번 턴 transcript만 표시"
-              style={{ flex: 1, background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontFamily: 'monospace', fontSize: 12 }}
-              disabled={awaitBusy}
-            />
-            <span style={{ fontSize: 10, border: '1px solid #3a4656', borderRadius: 4, padding: '1px 6px', color: 'var(--text-dim)' }}>⏎ send</span>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
