@@ -86,27 +86,12 @@ export class TerminalMux {
 
   constructor(url: string) {
     this.url = url;
-    // 새로고침은 페이지 메모리의 seq 워터마크를 지워 모든 pane을 전체
-    // 스냅샷 경로로 밀어넣는다 — 탭 단위 sessionStorage에 보존해두면
-    // ring(1MB) 창 안의 새로고침은 delta 재생으로 끝난다.
-    try {
-      if (typeof sessionStorage !== 'undefined') {
-        const raw = sessionStorage.getItem('ttym-last-seqs');
-        if (raw) {
-          for (const [id, seq] of Object.entries(JSON.parse(raw))) {
-            if (typeof seq === 'number') this._lastSeqs.set(Number(id), seq);
-          }
-        }
-        window.addEventListener('pagehide', () => this.persistSeqs());
-      }
-    } catch {}
-  }
-
-  private persistSeqs() {
-    try {
-      if (typeof sessionStorage === 'undefined') return;
-      sessionStorage.setItem('ttym-last-seqs', JSON.stringify(Object.fromEntries(this._lastSeqs)));
-    } catch {}
+    // Seq watermarks live and die with this page. Persisting them across a
+    // reload (sessionStorage) shipped once and was a correctness bug: the
+    // watermark says "parsed through N" but the reloaded xterm is blank, so
+    // the server sends delta-only and the pane renders nothing until fresh
+    // output arrives. Delta resync is valid only while the xterm buffer that
+    // earned the watermark is still alive — a fresh page must snapshot.
   }
 
   connect(): Promise<void> {
@@ -118,7 +103,9 @@ export class TerminalMux {
       const ws = new WebSocket(this.url);
       this.ws = ws;
       ws.binaryType = 'arraybuffer';
+      let opened = false;
       ws.onopen = () => {
+        opened = true;
         // HELLO 전송
         this.sendRaw(encode(0, CMD.HELLO, this.encoder.encode(JSON.stringify({
           clientId: this.clientId(),
@@ -130,8 +117,13 @@ export class TerminalMux {
       ws.onclose = () => {
         if (this.ws === ws) {
           this.cleanup(new Error('WebSocket closed'));
-          for (const listener of this.disconnectListeners) {
-            try { listener(); } catch {}
+          // Only a connection that actually opened gets to announce a drop.
+          // A failed dial also fires onclose; surfacing that as "disconnect"
+          // spins up a second retry loop beside the caller's own.
+          if (opened) {
+            for (const listener of this.disconnectListeners) {
+              try { listener(); } catch {}
+            }
           }
         }
       };

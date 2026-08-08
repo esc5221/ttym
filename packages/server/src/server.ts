@@ -9,7 +9,7 @@ import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
 import { sweepRuntimeDir } from './run-gc.js';
 import { ConfigStore } from './config-file.js';
-import { getHomeDir } from './session.js';
+import { getHomeDir, type Session } from './session.js';
 import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
 import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
@@ -24,6 +24,10 @@ const WS_HIGH_WATER = 1 << 20;
 // the stream from stuttering at the boundary.
 const ACK_HIGH_WATER = 256 * 1024;
 const ACK_LOW_WATER = 16 * 1024;
+/** Delta replay above this falls back to one capped snapshot (tmux attach model). */
+const REPLAY_MAX_BYTES = 64 * 1024;
+/** Replay chunks merge into frames of about this size. */
+const REPLAY_FRAME_BYTES = 16 * 1024;
 const WS_LOW_WATER = 1 << 18;
 
 const DEBUG = true;
@@ -939,6 +943,53 @@ export async function createServer(port: number): Promise<TtymServer> {
       batcher.lastSentSeq = watermark;
     }
 
+    /**
+     * Resync a viewer at `fromSeq`: delta replay when it is small and honest,
+     * snapshot otherwise. Three ways a delta can lie or hurt, all measured on
+     * production before this existed:
+     *  - fromSeq ahead of the session (watermark from a previous server boot;
+     *    seqs restart at 1 on recovery) — since() is empty, the viewer would
+     *    get nothing and stay blank forever;
+     *  - delta bigger than REPLAY_MAX_BYTES — a long-hidden pane can owe the
+     *    whole ring (1MB), which replays as a slow visible pour where one
+     *    capped snapshot paints atomically;
+     *  - chunk-per-frame replay — 1MB of ring arrived as 137k tiny frames.
+     *    Replay merges chunks into few frames, each stamped with the last
+     *    seq it contains.
+     */
+    function sendResync(sessionId: number, session: Session, batcher: SessionBatcher, fromSeq: number) {
+      if (!session.shouldForceSnapshotReplay() && fromSeq > 0
+          && fromSeq <= session.lastSeq && session.ring.canReplaySince(fromSeq)) {
+        const chunks = session.ring.since(fromSeq);
+        let total = 0;
+        for (const chunk of chunks) total += chunk.data.length;
+        if (total <= REPLAY_MAX_BYTES) {
+          let group: Buffer[] = [];
+          let groupBytes = 0;
+          let groupSeq = fromSeq;
+          const flushGroup = () => {
+            if (groupBytes === 0) return;
+            safeSend(ws, encodeData(sessionId, groupSeq, Buffer.concat(group, groupBytes)));
+            batcher.sentEntries.push({ seq: groupSeq, bytes: groupBytes });
+            batcher.unackedBytes += groupBytes;
+            batcher.lastSentSeq = groupSeq;
+            group = [];
+            groupBytes = 0;
+          };
+          for (const chunk of chunks) {
+            group.push(chunk.data);
+            groupBytes += chunk.data.length;
+            groupSeq = chunk.seq;
+            if (groupBytes >= REPLAY_FRAME_BYTES) flushGroup();
+          }
+          flushGroup();
+          return;
+        }
+      }
+      safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
+      noteSnapshotSent(batcher, session.lastSeq);
+    }
+
     /** Ack through `seq`: shrink the unacked window; resume a paused viewer
      *  once the client has digested down to the low-water mark. */
     function handleViewerAck(sessionId: number, seq: number) {
@@ -1111,18 +1162,7 @@ export async function createServer(port: number): Promise<TtymServer> {
           log(`ATTACH session=${sessionId} viewer=${viewerId.slice(0, 8)} mode=${mode} fromSeq=${fromSeq}`);
           safeSend(ws, encode(sessionId, CMD.ATTACH, jsonPayload({ ok: true, ...session.info() })));
 
-          if (!session.shouldForceSnapshotReplay() && fromSeq > 0 && session.ring.canReplaySince(fromSeq)) {
-            const batcher = getBatcher(sessionId);
-            for (const chunk of session.ring.since(fromSeq)) {
-              safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));
-              batcher.sentEntries.push({ seq: chunk.seq, bytes: chunk.data.length });
-              batcher.unackedBytes += chunk.data.length;
-              batcher.lastSentSeq = chunk.seq;
-            }
-          } else {
-            safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
-            noteSnapshotSent(getBatcher(sessionId), session.lastSeq);
-          }
+          sendResync(sessionId, session, getBatcher(sessionId), fromSeq);
 
           wireSession(sessionId, mode);
           break;
@@ -1178,17 +1218,7 @@ export async function createServer(port: number): Promise<TtymServer> {
             batcher.pausedView = false;
 
             const fromSeq = meta?.fromSeq ?? 0;
-            if (!session.shouldForceSnapshotReplay() && fromSeq > 0 && session.ring.canReplaySince(fromSeq)) {
-              for (const chunk of session.ring.since(fromSeq)) {
-                safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));
-                batcher.sentEntries.push({ seq: chunk.seq, bytes: chunk.data.length });
-                batcher.unackedBytes += chunk.data.length;
-                batcher.lastSentSeq = chunk.seq;
-              }
-            } else {
-              safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
-              noteSnapshotSent(batcher, session.lastSeq);
-            }
+            sendResync(sessionId, session, batcher, fromSeq);
 
             session.resumeViewer(viewerId);
             log(`RESUME_VIEW session=${sessionId} viewer=${viewerId.slice(0, 8)} fromSeq=${fromSeq}`);

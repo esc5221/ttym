@@ -5,7 +5,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "node scripts/e2e-refresh.mjs",
     "desktop:dev": "pnpm --dir packages/desktop tauri:dev",
     "desktop:build": "pnpm --dir packages/desktop tauri:build"
   },

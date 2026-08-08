@@ -303,6 +303,62 @@ describe('createServer', () => {
     expect(JSON.parse(Buffer.from(deletedEvt.payload).toString()).deletedId).toBe('push-ws');
   });
 
+  it('falls back to snapshot when fromSeq is ahead of the session (stale watermark from a previous boot)', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', "printf 'FUTURE-BASE\\n'; stty -echo; exec cat"],
+      cols: 80, rows: 24,
+    }))));
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    await ws1.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT) && f.sessionId === sid);
+    await ws1.close();
+
+    // 서버 재시작 후 seq는 1부터 다시 시작하는데 클라이언트 장부는 이전
+    // 부팅의 큰 seq를 들고 온다. canReplaySince는 미래 seq에 true를 주고
+    // since()는 빈 배열이라, 가드가 없으면 아무것도 안 보내 빈 화면이 된다.
+    const ws2 = await openClient(port);
+    clients.push(ws2);
+    ws2.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: 1_000_000, cols: 80, rows: 24 }))));
+    await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+
+    const resync = await ws2.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid);
+    expect(resync.payload.toString()).toContain('FUTURE-BASE');
+  });
+
+  it('falls back to snapshot when the delta owed is larger than the replay cap', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    // sleep 간격이 chunk 경계를 만든다 — 한 번에 뿜으면 holder가 한 chunk로
+    // 합쳐버려 "옛 워터마크가 대량 chunk를 빚진" 프로덕션 모양이 안 나온다.
+    // 40 × 2KB = 80KB > 상한 64KB.
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc',
+        'i=0; while [ $i -lt 40 ]; do printf "%2048s" x; sleep 0.02; i=$((i+1)); done; printf "CHUNK-END"; stty -echo; exec cat'],
+      cols: 80, rows: 24,
+    }))));
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    await ws1.next((f) => (f.cmd === CMD.DATA || f.cmd === CMD.SNAPSHOT)
+      && f.sessionId === sid && Buffer.from(f.payload).toString('binary').includes('CHUNK-END'));
+    await ws1.close();
+
+    // 오래 가려져 있던 pane의 옛 워터마크: ring이 커버하더라도 대량 raw
+    // ANSI 재생 대신 캡된 스냅샷 한 방이어야 한다.
+    const ws2 = await openClient(port);
+    clients.push(ws2);
+    ws2.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: 1, cols: 80, rows: 24 }))));
+    await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+
+    const resync = await ws2.next((f) => (f.cmd === CMD.SNAPSHOT || f.cmd === CMD.DATA) && f.sessionId === sid);
+    expect(resync.cmd).toBe(CMD.SNAPSHOT);
+  }, 30_000);
+
   it('stamps snapshots with a watermark, and resumeView from it replays delta — not another snapshot', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);

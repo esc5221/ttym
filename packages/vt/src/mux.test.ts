@@ -145,13 +145,14 @@ describe('TerminalMux', () => {
     expect(JSON.parse(new TextDecoder().decode(resume!.payload))).toEqual({ fromSeq: 41 });
   });
 
-  it('restores seq watermarks from sessionStorage so a refresh replays delta', async () => {
+  it('ignores watermarks a previous page life left in sessionStorage — a fresh page must snapshot', async () => {
     const store = new Map<string, string>();
     vi.stubGlobal('sessionStorage', {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => { store.set(k, v); },
     });
-    // 이전 페이지 수명에서 저장된 워터마크
+    // 한때 이걸 복원하는 최적화가 있었고 정확성 버그였다: 리로드된 xterm은
+    // 백지인데 장부만 살아나면 서버가 델타만 보내 화면이 안 그려진다.
     store.set('ttym-last-seqs', JSON.stringify({ 9: 41 }));
 
     const mux = new TerminalMux('ws://example.test');
@@ -163,7 +164,7 @@ describe('TerminalMux', () => {
     const attachPromise = mux.attachSession(9, { onData: vi.fn() }, { cols: 80, rows: 24 });
     const attach = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
     expect(attach?.cmd).toBe(CMD.ATTACH);
-    expect(JSON.parse(new TextDecoder().decode(attach!.payload)).fromSeq).toBe(41);
+    expect(JSON.parse(new TextDecoder().decode(attach!.payload)).fromSeq).toBe(0);
 
     socket.emitMessage(encode(9, CMD.ATTACH, new TextEncoder().encode(JSON.stringify({
       ok: true, id: 9, pid: 1, cmd: ['/bin/sh'], cols: 80, rows: 24,
@@ -172,6 +173,29 @@ describe('TerminalMux', () => {
     await attachPromise;
     vi.unstubAllGlobals();
     vi.stubGlobal('WebSocket', FakeWebSocket);
+  });
+
+  it('fires onDisconnect only for a connection that actually opened', async () => {
+    const mux = new TerminalMux('ws://example.test');
+    const dropped = vi.fn();
+    mux.onDisconnect(dropped);
+
+    // 실패한 다이얼: onerror 후 onclose — disconnect로 알리면 호출자의
+    // 재시도 루프 옆에 두 번째 루프가 돌기 시작한다.
+    const failed = mux.connect();
+    const socket1 = FakeWebSocket.latest();
+    socket1.onerror?.();
+    socket1.close();
+    await expect(failed).rejects.toThrow();
+    expect(dropped).not.toHaveBeenCalled();
+
+    // 성공 후의 끊김만 disconnect다.
+    const connected = mux.connect();
+    const socket2 = FakeWebSocket.latest();
+    socket2.open();
+    await connected;
+    socket2.close();
+    expect(dropped).toHaveBeenCalledTimes(1);
   });
 
   it('detaches tracked sessions on disconnect without faking session exit', async () => {
