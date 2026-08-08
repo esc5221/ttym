@@ -1,0 +1,22 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-ui",
+  "description": "The served web UI (127.0.0.1) \u2014 window verbs only, no app IPC. The native marker is injected data, not a command surface.",
+  "windows": [
+    "main",
+    "main-*"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  },
+  "permissions": [
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:webview:default",
+    "core:webview:allow-set-webview-zoom",
+    "core:event:default"
+  ]
+}

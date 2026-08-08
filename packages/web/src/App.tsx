@@ -62,6 +62,10 @@ const LOCAL_ECHO_STORAGE_KEY = 'ttym-demo-local-echo';
 // UI 스타일: frame(기본) = bg0 들판 + 라운드 프레임 + dim 포커스,
 // classic = bg2 크롬 바 + 좌측 포커스 바. 차이는 전부 이 테이블 한 곳에 산다.
 type UiStyle = 'frame' | 'classic';
+
+// 데스크톱 셸(Tauri)이 주입하는 마커 — 순수 데이터, IPC 없음.
+// 감지되면 트래픽라이트 자리를 비우고 스트립을 창 드래그 영역으로 쓴다.
+const IS_NATIVE = typeof (window as unknown as { __TTYM_NATIVE__?: unknown }).__TTYM_NATIVE__ !== 'undefined';
 const UI_STYLE_STORAGE_KEY = 'ttym-ui-style';
 
 const UI_STYLES = {
@@ -1532,6 +1536,29 @@ function App() {
     if (ws) navigate({ page: 'workspace', id: ws.id });
   }, [workspaces.length]);
 
+  // 창별 세밀 줌 (데스크톱 셸에서만): ⌘+/− 5% 스텝, ⌘0 리셋. 50~200% 클램프.
+  // 브라우저 줌은 오리진 단위로 전 창이 동기화되지만 webview 줌은 창의 것이다.
+  const zoomRef = useRef(1);
+  useEffect(() => {
+    if (!IS_NATIVE) return;
+    const tauri = (window as unknown as { __TAURI__?: { webview?: { getCurrentWebview?: () => { setZoom: (f: number) => Promise<void> } } } }).__TAURI__;
+    const webview = tauri?.webview?.getCurrentWebview?.();
+    if (!webview) return;
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      let next: number | null = null;
+      if (e.key === '=' || e.key === '+') next = zoomRef.current + 0.05;
+      else if (e.key === '-') next = zoomRef.current - 0.05;
+      else if (e.key === '0') next = 1;
+      if (next === null) return;
+      e.preventDefault();
+      zoomRef.current = Math.min(2, Math.max(0.5, Math.round(next * 100) / 100));
+      void webview.setZoom(zoomRef.current);
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, []);
+
   // ⌘1 = 홈, ⌘2.. = workspace 탭
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1590,7 +1617,10 @@ function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <div style={{ ...tabStripStyle, background: UI_STYLES[uiStyle].stripBg, borderBottom: UI_STYLES[uiStyle].stripLine }}>
+      <div
+        {...(IS_NATIVE ? { 'data-tauri-drag-region': true } : {})}
+        style={{ ...tabStripStyle, background: UI_STYLES[uiStyle].stripBg, borderBottom: UI_STYLES[uiStyle].stripLine, paddingLeft: IS_NATIVE ? 84 : 10 }}
+      >
         <button
           onClick={() => navigate({ page: 'dashboard' })}
           style={{ ...tabStyle, ...(homeActive ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}

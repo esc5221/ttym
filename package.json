@@ -6,16 +6,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "desktop:prepare": "./scripts/build.sh && pnpm --dir packages/desktop build",
-    "desktop:dev": "pnpm --dir packages/desktop dev",
-    "desktop:build": "pnpm --dir packages/desktop build",
-    "desktop:release": "pnpm --dir packages/desktop tauri:build",
-    "desktop:release:debug": "pnpm --dir packages/desktop tauri:build:debug",
-    "desktop:install": "./scripts/install-native-app.sh",
-    "desktop:open": "open /Applications/ttym-native.app || open ~/Applications/ttym-native.app",
-    "desktop:ship": "pnpm run native:release && pnpm run native:install && pnpm run native:open",
-    "desktop:tauri:dev": "pnpm --dir packages/desktop tauri:dev",
-    "desktop:tauri:build": "pnpm --dir packages/desktop tauri:build"
+    "desktop:dev": "pnpm --dir packages/desktop tauri:dev",
+    "desktop:build": "pnpm --dir packages/desktop tauri:build"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>ttym</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #1e1e1e; color: #777;
+    font: 13px "SF Mono", Menlo, monospace;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-font-smoothing: antialiased;
+  }
+  .box { text-align: center; line-height: 2; }
+  .err { color: #f14c4c; max-width: 480px; white-space: pre-wrap; line-height: 1.6; }
+</style>
+</head>
+<body>
+<!--
+  부팅 스플래시. 데몬을 보장(bootstrap)한 뒤 서버가 서빙하는 web UI로
+  이동한다 — 이 파일 이후의 모든 화면은 브라우저와 동일한 그 앱이다.
+-->
+<div class="box" id="status">ttym 서버 확인 중…</div>
+<script>
+  const status = document.getElementById('status');
+  const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+  if (!invoke) {
+    status.className = 'err';
+    status.textContent = 'Tauri 런타임을 찾지 못했다 (withGlobalTauri 필요)';
+  } else {
+    invoke('bootstrap')
+      .then((info) => {
+        status.textContent = `연결 중… :${info.port}`;
+        window.location.replace(`http://127.0.0.1:${info.port}/`);
+      })
+      .catch((err) => {
+        status.className = 'err';
+        status.textContent = '서버 기동 실패\n\n' + String(err);
+      });
+  }
+</script>
+</body>
+</html>
