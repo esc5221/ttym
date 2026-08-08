@@ -145,6 +145,35 @@ describe('TerminalMux', () => {
     expect(JSON.parse(new TextDecoder().decode(resume!.payload))).toEqual({ fromSeq: 41 });
   });
 
+  it('restores seq watermarks from sessionStorage so a refresh replays delta', async () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, v); },
+    });
+    // 이전 페이지 수명에서 저장된 워터마크
+    store.set('ttym-last-seqs', JSON.stringify({ 9: 41 }));
+
+    const mux = new TerminalMux('ws://example.test');
+    const connected = mux.connect();
+    const socket = FakeWebSocket.latest();
+    socket.open();
+    await connected;
+
+    const attachPromise = mux.attachSession(9, { onData: vi.fn() }, { cols: 80, rows: 24 });
+    const attach = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
+    expect(attach?.cmd).toBe(CMD.ATTACH);
+    expect(JSON.parse(new TextDecoder().decode(attach!.payload)).fromSeq).toBe(41);
+
+    socket.emitMessage(encode(9, CMD.ATTACH, new TextEncoder().encode(JSON.stringify({
+      ok: true, id: 9, pid: 1, cmd: ['/bin/sh'], cols: 80, rows: 24,
+      status: 'attached', lastSeq: 41, createdAt: 0, detachedAt: null,
+    }))));
+    await attachPromise;
+    vi.unstubAllGlobals();
+    vi.stubGlobal('WebSocket', FakeWebSocket);
+  });
+
   it('detaches tracked sessions on disconnect without faking session exit', async () => {
     const mux = new TerminalMux('ws://example.test');
     const connected = mux.connect();

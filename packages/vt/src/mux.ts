@@ -79,12 +79,34 @@ export class TerminalMux {
   private readonly encoder = new TextEncoder();
   private readonly decoder = new TextDecoder();
   private _lastSeqs = new Map<number, number>(); // sessionId → 최신 수신 seq
+  private disconnectListeners = new Set<() => void>();
   private workspaceListeners = new Set<(event: WorkspaceChangeEvent) => void>();
   private agentListeners = new Set<(event: AgentStateEvent) => void>();
   private configListeners = new Set<(event: ConfigChangeEvent) => void>();
 
   constructor(url: string) {
     this.url = url;
+    // 새로고침은 페이지 메모리의 seq 워터마크를 지워 모든 pane을 전체
+    // 스냅샷 경로로 밀어넣는다 — 탭 단위 sessionStorage에 보존해두면
+    // ring(1MB) 창 안의 새로고침은 delta 재생으로 끝난다.
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        const raw = sessionStorage.getItem('ttym-last-seqs');
+        if (raw) {
+          for (const [id, seq] of Object.entries(JSON.parse(raw))) {
+            if (typeof seq === 'number') this._lastSeqs.set(Number(id), seq);
+          }
+        }
+        window.addEventListener('pagehide', () => this.persistSeqs());
+      }
+    } catch {}
+  }
+
+  private persistSeqs() {
+    try {
+      if (typeof sessionStorage === 'undefined') return;
+      sessionStorage.setItem('ttym-last-seqs', JSON.stringify(Object.fromEntries(this._lastSeqs)));
+    } catch {}
   }
 
   connect(): Promise<void> {
@@ -106,7 +128,12 @@ export class TerminalMux {
       ws.onerror = () => reject(new Error('WebSocket connection failed'));
       ws.onmessage = (e) => this.handleMessage(e);
       ws.onclose = () => {
-        if (this.ws === ws) this.cleanup(new Error('WebSocket closed'));
+        if (this.ws === ws) {
+          this.cleanup(new Error('WebSocket closed'));
+          for (const listener of this.disconnectListeners) {
+            try { listener(); } catch {}
+          }
+        }
       };
     });
   }
@@ -363,6 +390,12 @@ export class TerminalMux {
   }
 
   // ───── hidden 탭 ─────
+
+  /** Fires when the socket drops after a successful connect. */
+  onDisconnect(listener: () => void): () => void {
+    this.disconnectListeners.add(listener);
+    return () => this.disconnectListeners.delete(listener);
+  }
 
   /** Subscribe to config pushes — every window applies the same file. */
   onConfig(listener: (event: ConfigChangeEvent) => void): () => void {

@@ -40,6 +40,18 @@ export interface HostOptions {
 
 const registry = new Map<number, TerminalHost>();
 
+// A refresh mounts every visible pane in the same tick; letting them all
+// attach at once stacks N snapshot parses on one main-thread frame. The
+// queue spaces attaches 40ms apart — imperceptible per pane, and the page
+// stays interactive through a cold reload of a fat workspace.
+let activationChain: Promise<void> = Promise.resolve();
+function queueActivation(run: () => void) {
+  activationChain = activationChain.then(() => {
+    run();
+    return new Promise((resolveDelay) => setTimeout(resolveDelay, 40));
+  });
+}
+
 /** 터미널 배경 = 앱 배경. 토큰 CSS가 없으면 종전 하드코딩 값으로 동작한다. */
 function cssVar(name: string, fallback: string): string {
   try {
@@ -205,6 +217,13 @@ export class TerminalHost {
       requestAnimationFrame(() => { if (!this.disposed) this.wrapper.style.visibility = 'visible'; });
     }
     this.connected = true;
+    queueActivation(() => {
+      if (this.disposed || !this.connected) return;
+      this.doAttach();
+    });
+  }
+
+  private doAttach() {
     this.mux.attachSession(this.sessionId, {
       onData: (data, seq) => this.handleData(data, seq),
       onSnapshot: (snap) => this.handleSnapshot(snap),

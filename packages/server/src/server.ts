@@ -924,7 +924,7 @@ export async function createServer(port: number): Promise<TtymServer> {
             if (session && !session.isDead) {
               session.resumeViewer(viewerId);
               // snapshot 전송으로 빠진 구간 복구
-              safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+              safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
               noteSnapshotSent(batcher, session.lastSeq);
             }
           }
@@ -965,7 +965,7 @@ export async function createServer(port: number): Promise<TtymServer> {
             batcher.lastSentSeq = chunk.seq;
           }
         } else {
-          safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+          safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
           noteSnapshotSent(batcher, session.lastSeq);
         }
       }
@@ -1120,7 +1120,7 @@ export async function createServer(port: number): Promise<TtymServer> {
               batcher.lastSentSeq = chunk.seq;
             }
           } else {
-            safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+            safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
             noteSnapshotSent(getBatcher(sessionId), session.lastSeq);
           }
 
@@ -1143,7 +1143,7 @@ export async function createServer(port: number): Promise<TtymServer> {
         case CMD.SNAPSHOT: {
           const session = manager.get(sessionId);
           if (session && !session.isDead) {
-            safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+            safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
             noteSnapshotSent(getBatcher(sessionId), session.lastSeq);
           }
           break;
@@ -1186,7 +1186,7 @@ export async function createServer(port: number): Promise<TtymServer> {
                 batcher.lastSentSeq = chunk.seq;
               }
             } else {
-              safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.snapshot())));
+              safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
               noteSnapshotSent(batcher, session.lastSeq);
             }
 

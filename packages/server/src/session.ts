@@ -646,6 +646,17 @@ export class Session {
   }
 
   /**
+   * Viewer resync snapshot: recent scrollback only. Serialize is synchronous
+   * CPU on the event loop and the client parses the result on its main
+   * thread — a refresh of N fat panes at full 3000-line history is exactly
+   * how a reload turns into seconds of loading. Checkpoints and /screen keep
+   * the full serialize; a viewer joining live gets the tmux-attach deal.
+   */
+  viewerSnapshot(): string {
+    return this.serializer.serialize({ scrollback: 1000 });
+  }
+
+  /**
    * Mark the row the next output will land on, so a later call can read back
    * everything written since.
    *

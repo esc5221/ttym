@@ -1490,17 +1490,53 @@ function App() {
     try { await api.updateWorkspace(API_BASE, id, { name }); } catch {}
   }, [renamingId, renameDraft]);
 
+  const [connectNote, setConnectNote] = useState('connecting to ttym server...');
+
   useEffect(() => {
     const wsUrl = `${isSecure ? 'wss' : 'ws'}://${TTYM_HOST}/ws`;
-    console.log('[ttym] TTYM_HOST:', TTYM_HOST);
-    console.log('[ttym] API_BASE:', API_BASE);
-    console.log('[ttym] WS URL:', wsUrl);
     const mux = new TerminalMux(wsUrl);
     muxRef.current = mux;
-    mux.connect()
-      .then(() => { console.log('[ttym] connected'); setConnected(true); })
-      .catch((err) => console.error('[ttym] connect failed:', err));
-    return () => mux.disconnect();
+    let cancelled = false;
+
+    // 한 번 삐끗하면 영원히 "connecting..."이던 결함 — 백오프 재시도.
+    const attempt = async (delayMs: number) => {
+      while (!cancelled) {
+        try {
+          await mux.connect();
+          if (!cancelled) setConnected(true);
+          return;
+        } catch {
+          setConnectNote(`서버 연결 재시도 중… (${Math.round(delayMs / 1000) || 1}s)`);
+          await new Promise((r) => setTimeout(r, delayMs));
+          delayMs = Math.min(delayMs * 2, 5000);
+        }
+      }
+    };
+    void attempt(500);
+
+    // 접속 후 끊기면 조용히 재접속하고 리로드한다 — seq 보존 덕에 리로드는
+    // 이제 delta 재생으로 싸다.
+    const unsubscribe = mux.onDisconnect(() => {
+      if (cancelled) return;
+      setConnected(false);
+      setConnectNote('연결이 끊겼다 — 재연결 중…');
+      const retry = async () => {
+        let delay = 500;
+        while (!cancelled) {
+          try {
+            await mux.connect();
+            window.location.reload();
+            return;
+          } catch {
+            await new Promise((r) => setTimeout(r, delay));
+            delay = Math.min(delay * 2, 5000);
+          }
+        }
+      };
+      void retry();
+    });
+
+    return () => { cancelled = true; unsubscribe(); mux.disconnect(); };
   }, []);
 
   useEffect(() => {
@@ -1639,7 +1675,7 @@ function App() {
   if (!connected || !muxRef.current) {
     return (
       <div style={{ color: 'var(--text-soft)', padding: 40, fontFamily: 'monospace' }}>
-        connecting to ttym server...
+        {connectNote}
       </div>
     );
   }
