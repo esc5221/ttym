@@ -255,17 +255,24 @@ describe('buildSessionEnv — parent agent markers', () => {
       process.env.CLAUDE_CODE_MESSAGING_SOCKET = '/tmp/sock';
       process.env.AI_AGENT = 'claude-code_agent';
       process.env.TRACEPARENT = '00-abc';
+      // 고정 목록 시절 새어나간 신종들 — 접두사 스크럽이 잡아야 한다.
+      process.env.CLAUDE_EFFORT = 'high';
+      process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = '65';
+      process.env.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY = '1';
       process.env.CLAUDE_CONFIG_DIR = '/Users/x/.claude-alt'; // 사용자 의도 설정은 보존
+      process.env.CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; // 명시적 opt-in도 보존
 
       const env = buildSessionEnv({ TTYM_SESSION_ID: '7', TTYM_PORT: '7691' });
       for (const key of [
         'CLAUDECODE', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_SESSION_ID',
         'CLAUDE_JOB_DIR', 'CLAUDE_PID', 'CLAUDE_CODE_MESSAGING_SOCKET',
         'AI_AGENT', 'TRACEPARENT',
+        'CLAUDE_EFFORT', 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE', 'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY',
       ]) {
         expect(env[key], key).toBeUndefined();
       }
       expect(env.CLAUDE_CONFIG_DIR).toBe('/Users/x/.claude-alt');
+      expect(env.CLAUDE_CODE_FORCE_SESSION_PERSISTENCE).toBe('1');
       expect(env.TTYM_SESSION_ID).toBe('7');
       expect(env.TTYM_PORT).toBe('7691');
     } finally {

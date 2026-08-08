@@ -97,23 +97,25 @@ function getSyncBlockTimeoutMs(): number {
  * measured on a live holder. TTYM_* is deliberately not scrubbed — that is
  * our own contract, re-stamped per session below.
  */
-const PARENT_AGENT_MARKERS = [
-  'CLAUDECODE',
-  'CLAUDE_CODE_SESSION_ID',
-  'CLAUDE_CODE_CHILD_SESSION',
-  'CLAUDE_CODE_BRIDGE_SESSION_ID',
-  'CLAUDE_BG_AUTH_SNAPSHOT_PATH',
-  'CLAUDE_PID',
-  'CLAUDE_JOB_DIR',
-  'CLAUDE_CODE_EXECPATH',
-  'CLAUDE_CODE_MESSAGING_SOCKET',
-  'AI_AGENT',
-  'TRACEPARENT',
-];
+// Agent-runtime env is scrubbed by prefix, not by list. The list version went
+// stale within one harness release: CLAUDE_EFFORT, CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+// and CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY appeared and slipped straight into
+// sessions — a claude launched in a pane silently ran with someone else's
+// effort and autocompact settings. Job-injected names churn every release;
+// user-intent names are rare and stable, so those are the exceptions.
+const PARENT_AGENT_MARKERS = ['AI_AGENT', 'TRACEPARENT'];
+const AGENT_ENV_PREFIX = 'CLAUDE';
+const AGENT_ENV_KEEP = new Set([
+  'CLAUDE_CONFIG_DIR', // points claude at an alternate config dir — user intent
+  'CLAUDE_CODE_FORCE_SESSION_PERSISTENCE', // explicit opt-in, never fossil
+]);
 
 export function buildSessionEnv(extraEnv?: Record<string, string>): Record<string, string> {
   const env = { ...process.env, ...(extraEnv ?? {}) } as Record<string, string>;
   for (const key of PARENT_AGENT_MARKERS) delete env[key];
+  for (const key of Object.keys(env)) {
+    if (key.startsWith(AGENT_ENV_PREFIX) && !AGENT_ENV_KEEP.has(key)) delete env[key];
+  }
   // ttym sessions should behave like real terminals, not inherit global no-color mode.
   delete env.NO_COLOR;
   // Codex parent sessions can export GIT_PAGER=cat, which disables interactive
