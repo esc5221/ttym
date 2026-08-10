@@ -32,6 +32,7 @@ const enc = (sid, cmd, obj) => {
 };
 
 let serverProc = null;
+const createdSessions = [];
 let browser = null;
 let failures = 0;
 
@@ -87,6 +88,22 @@ async function createMarkerSession() {
   return sid;
 }
 
+async function createMarkerSession2() {
+  const ws = await wsOnce();
+  const sid = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('CREATE2 timed out')), 10000);
+    ws.on('message', (buf) => {
+      if (buf[2] === CMD.CREATE) { clearTimeout(timer); resolve(buf.readUInt16LE(0)); }
+    });
+    ws.send(enc(0, CMD.CREATE, {
+      cmd: ['/bin/sh', '-lc', "printf 'E2E-SECOND-WS\\n'; stty -echo; exec cat"],
+      cols: 80, rows: 24,
+    }));
+  });
+  ws.close();
+  return sid;
+}
+
 async function destroySession(sid) {
   try {
     const ws = await wsOnce();
@@ -114,6 +131,7 @@ try {
   startServer();
   await waitForServer();
   const sid = await createMarkerSession();
+  createdSessions.push(sid);
 
   const wsRes = await fetch(`http://127.0.0.1:${PORT}/api/workspaces`, {
     method: 'POST',
@@ -124,6 +142,18 @@ try {
     }),
   });
   if (wsRes.status !== 201) throw new Error(`workspace create failed: ${wsRes.status}`);
+
+  const sid2 = await createMarkerSession2();
+  createdSessions.push(sid2);
+  const ws2Res = await fetch(`http://127.0.0.1:${PORT}/api/workspaces`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: 'e2e-ws2', project: 'default', name: 'e2e2',
+      layout: { type: 'pane', sessionId: sid2 }, members: [],
+    }),
+  });
+  if (ws2Res.status !== 201) throw new Error(`workspace2 create failed: ${ws2Res.status}`);
 
   // WebGL을 꺼서 DOM 렌더러로 강제 — 화면 텍스트를 innerText로 검증 가능.
   browser = await chromium.launch({ headless: true, args: ['--disable-webgl', '--disable-gpu'] });
@@ -148,12 +178,44 @@ try {
   await page.reload();
   await expectMarker(page, '서버 재시작 후 새로고침도 화면이 그려진다', 8000);
 
-  await destroySession(sid);
+  // P2: 다른 workspace로 넘어가 pane이 detach된 사이의 출력이, 돌아왔을 때
+  // 스냅샷 없이(버퍼 보존 + delta) 화면에 있어야 한다. 세션은 cat이라 이
+  // 출력의 유일한 출처는 숨겨진 동안의 echo다.
+  await page.goto(`http://127.0.0.1:${PORT}/#w/e2e-ws`);
+  await expectMarker(page, 'P2 사전: 첫 workspace 재표시', 5000);
+  await page.goto(`http://127.0.0.1:${PORT}/#w/e2e-ws2`);
+  try {
+    await page.waitForFunction(() => document.body.innerText.includes('E2E-SECOND-WS'), null, { timeout: 8000 });
+  } catch (e) {
+    const body = await page.evaluate(() => document.body.innerText.slice(0, 600));
+    console.log('  [debug] ws2 본문:', JSON.stringify(body));
+    throw e;
+  }
+  await fetch(`http://127.0.0.1:${PORT}/api/sessions/${sid}/send`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ data: 'P2-HIDDEN-OUT\n' }),
+  });
+  await new Promise((r) => setTimeout(r, 700));
+  await page.goto(`http://127.0.0.1:${PORT}/#w/e2e-ws`);
+  try {
+    await page.waitForFunction(
+      (m) => document.body.innerText.includes(m) && document.body.innerText.includes('P2-HIDDEN-OUT'),
+      MARKER, { timeout: 5000 },
+    );
+    console.log('  PASS  숨겨진 동안의 출력이 복귀한 pane에 (버퍼 보존과 함께) 보인다');
+  } catch {
+    failures++;
+    const has = await page.evaluate(() => document.body.innerText.includes('P2-HIDDEN-OUT'));
+    console.log(`  FAIL  복귀 pane 상태 — 기존버퍼:${!has ? '?' : 'ok'} hidden출력:${has}`);
+  }
+
 } catch (error) {
   failures++;
   console.log(`  FAIL  ${error.message}`);
 } finally {
   try { await browser?.close(); } catch {}
+  // 실패한 런이 holder를 유출하지 않도록 정리는 무조건 실행한다.
+  for (const s of createdSessions) await destroySession(s);
   await stopServer();
   rmSync(HOME, { recursive: true, force: true });
 }

@@ -3,7 +3,7 @@ import { TerminalMux } from './mux.js';
 import { CMD, decode, encode, encodeData, encodeSnapshot } from './protocol.js';
 
 function toArrayBuffer(data: Uint8Array): ArrayBuffer {
-  return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
 }
 
 class FakeWebSocket {
@@ -133,16 +133,55 @@ describe('TerminalMux', () => {
     }))));
     await attachPromise;
 
-    // A resync snapshot rendered at seq 41 arrives. Before the watermark
-    // existed the client kept fromSeq=3, and the next resumeView could only
-    // fall back to yet another snapshot.
+    // A resync snapshot rendered at seq 41 arrives. The watermark does NOT
+    // move on receipt — a receipt-time ledger can claim bytes the page never
+    // parsed. It moves when the consumer acks after the repaint.
     socket.emitMessage(encodeSnapshot(9, 41, new TextEncoder().encode('fresh screen')));
-    expect(onSnapshot).toHaveBeenCalledWith('fresh screen');
+    expect(onSnapshot).toHaveBeenCalledWith('fresh screen', 41);
 
+    mux.resumeView(9);
+    const before = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
+    expect(JSON.parse(new TextDecoder().decode(before!.payload))).toEqual({ fromSeq: 0 });
+
+    mux.ack(9, 41); // 소비자(호스트)가 리페인트 파싱을 마친 시점
     mux.resumeView(9);
     const resume = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
     expect(resume?.cmd).toBe(CMD.RESUME_VIEW);
     expect(JSON.parse(new TextDecoder().decode(resume!.payload))).toEqual({ fromSeq: 41 });
+  });
+
+  it('keeps the watermark across detach, drops it on forgetSeq', async () => {
+    const mux = new TerminalMux('ws://example.test');
+    const connected = mux.connect();
+    const socket = FakeWebSocket.latest();
+    socket.open();
+    await connected;
+
+    const attachPromise = mux.attachSession(9, { onData: vi.fn() }, { cols: 80, rows: 24 });
+    socket.emitMessage(encode(9, CMD.ATTACH, new TextEncoder().encode(JSON.stringify({
+      ok: true, id: 9, pid: 1, cmd: ['/bin/sh'], cols: 80, rows: 24,
+      status: 'attached', lastSeq: 3, createdAt: 0, detachedAt: null,
+    }))));
+    await attachPromise;
+    mux.ack(9, 55);
+
+    // detach해도 워터마크는 산다 — xterm 버퍼가 host에 살아있으니 재부착은
+    // delta로 이어진다.
+    mux.detachSession(9);
+    const attach2 = mux.attachSession(9, { onData: vi.fn() }, { cols: 80, rows: 24 });
+    const sent = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
+    expect(JSON.parse(new TextDecoder().decode(sent!.payload)).fromSeq).toBe(55);
+    socket.emitMessage(encode(9, CMD.ATTACH, new TextEncoder().encode(JSON.stringify({ ok: true, id: 9 }))));
+    await attach2;
+
+    // 버퍼가 죽으면(host dispose) 워터마크도 죽는다 — 백지에 delta 금지.
+    mux.detachSession(9);
+    mux.forgetSeq(9);
+    const attach3 = mux.attachSession(9, { onData: vi.fn() }, { cols: 80, rows: 24 });
+    const sent3 = decode(toArrayBuffer(socket.sent[socket.sent.length - 1]));
+    expect(JSON.parse(new TextDecoder().decode(sent3!.payload)).fromSeq).toBe(0);
+    socket.emitMessage(encode(9, CMD.ATTACH, new TextEncoder().encode(JSON.stringify({ ok: true, id: 9 }))));
+    await attach3;
   });
 
   it('ignores watermarks a previous page life left in sessionStorage — a fresh page must snapshot', async () => {

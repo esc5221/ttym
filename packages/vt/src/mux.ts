@@ -2,7 +2,7 @@ import { CMD, encode, decode } from './protocol';
 
 type DataCallback = (data: Uint8Array, seq?: number) => void;
 type ExitCallback = () => void;
-type SnapshotCallback = (data: string) => void;
+type SnapshotCallback = (data: string, seq?: number) => void;
 
 interface SessionCallbacks {
   onData: DataCallback;
@@ -174,7 +174,10 @@ export class TerminalMux {
       this.pendingList = null;
     }
     this.sessions.clear();
-    this._lastSeqs.clear();
+    // Watermarks survive a dropped connection: the buffers they describe are
+    // still alive in their hosts, so a reconnect can resync by delta. If the
+    // server rebooted meanwhile, its boot-scoped seq base demotes our stale
+    // values to the snapshot path — no trust required.
     this.ws = null;
   }
 
@@ -187,19 +190,19 @@ export class TerminalMux {
 
     switch (cmd) {
       case CMD.DATA:
-        // The ACK is the consumer's job, sent after xterm has parsed the
-        // bytes — server backpressure then tracks digestion, not delivery.
-        if (decoded.seq !== undefined) this._lastSeqs.set(sessionId, decoded.seq);
+        // The watermark advances in ack(), after xterm has parsed the bytes
+        // — not here at receipt. A receipt-time watermark claims bytes the
+        // page may never parse (queued writes are dropped on unmount), and a
+        // resync from such a claim replays a hole onto the screen.
         this.sessions.get(sessionId)?.onData(payload, decoded.seq);
         break;
 
       case CMD.SNAPSHOT: {
-        // The snapshot replaces everything up to its watermark; without this
-        // the next resumeView would carry a stale fromSeq and force yet
-        // another snapshot — resyncs chaining into resyncs.
-        if (decoded.seq !== undefined) this._lastSeqs.set(sessionId, decoded.seq);
+        // The snapshot's watermark is committed by the consumer's ack after
+        // the repaint actually parses — same rule as DATA. The seq rides
+        // along so the consumer can ack it.
         const snapStr = this.decoder.decode(payload);
-        this.sessions.get(sessionId)?.onSnapshot?.(snapStr);
+        this.sessions.get(sessionId)?.onSnapshot?.(snapStr, decoded.seq);
         break;
       }
 
@@ -233,7 +236,9 @@ export class TerminalMux {
         if (meta.ok === false) {
           pendingAttach.reject(new Error(meta.error ?? 'Attach failed'));
         } else {
-          if (typeof meta.lastSeq === 'number') this._lastSeqs.set(sessionId, meta.lastSeq);
+          // meta.lastSeq is the server's head, not what this page has parsed
+          // — adopting it here is exactly the "ledger without the screen"
+          // bug. The watermark moves only through ack().
           pendingAttach.resolve(meta as SessionInfo);
         }
         break;
@@ -378,7 +383,9 @@ export class TerminalMux {
   detachSession(sessionId: number) {
     this.sendRaw(encode(sessionId, CMD.DETACH));
     this.sessions.delete(sessionId);
-    this._lastSeqs.delete(sessionId);
+    // The watermark survives detach on purpose: the host keeps the xterm
+    // buffer, so a later re-attach replays delta instead of flashing a
+    // snapshot. Callers that destroy the buffer call forgetSeq().
   }
 
   // ───── hidden 탭 ─────
@@ -407,9 +414,23 @@ export class TerminalMux {
     return () => this.workspaceListeners.delete(listener);
   }
 
-  /** Acknowledge parsed output through `seq`. Drives server-side backpressure. */
+  /**
+   * Acknowledge parsed output through `seq`. Drives server-side backpressure
+   * AND advances the watermark — this is the only place it moves, so the
+   * watermark can never claim bytes the terminal has not actually rendered.
+   */
   ack(sessionId: number, seq: number) {
+    this._lastSeqs.set(sessionId, seq);
     this.sendRaw(encode(sessionId, CMD.ACK, this.encoder.encode(JSON.stringify({ seq }))));
+  }
+
+  /**
+   * Drop a session's watermark. Must be called when the terminal buffer that
+   * earned it is destroyed — watermark lifetime IS buffer lifetime; a
+   * watermark outliving its buffer replays delta onto a blank screen.
+   */
+  forgetSeq(sessionId: number) {
+    this._lastSeqs.delete(sessionId);
   }
 
   pauseView(sessionId: number) {

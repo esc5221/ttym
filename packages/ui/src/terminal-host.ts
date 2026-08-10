@@ -226,7 +226,7 @@ export class TerminalHost {
   private doAttach() {
     this.mux.attachSession(this.sessionId, {
       onData: (data, seq) => this.handleData(data, seq),
-      onSnapshot: (snap) => this.handleSnapshot(snap),
+      onSnapshot: (snap, seq) => this.handleSnapshot(snap, seq),
       onExit: () => {
         this.cancelPendingWrites();
         this.onAction({ kind: 'session-exit', sessionId: this.sessionId });
@@ -264,6 +264,10 @@ export class TerminalHost {
   resumeView() {
     if (!this.connected || !this.viewPaused) return;
     this.viewPaused = false;
+    // Unparsed queued bytes sit above the acked watermark the resume will
+    // replay from — parsing them AND the replay would paint them twice.
+    // Drop them; the replay re-delivers the same range.
+    this.cancelPendingWrites();
     this.mux.resumeView(this.sessionId);
   }
 
@@ -288,6 +292,9 @@ export class TerminalHost {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    // The buffer dies here, so the watermark it earned dies with it — a
+    // fresh host for this session must snapshot, not resume a ghost ledger.
+    this.mux.forgetSeq(this.sessionId);
     this.unmount();
     this.cancelPendingWrites();
     this.webgl?.dispose();
@@ -383,7 +390,7 @@ export class TerminalHost {
     }
   }
 
-  private handleSnapshot(snapStr: string) {
+  private handleSnapshot(snapStr: string, seq?: number) {
     if (this.disposed) return;
     // Queued bytes predate the snapshot — it already contains them.
     this.cancelPendingWrites();
@@ -393,7 +400,11 @@ export class TerminalHost {
     // already sitting in xterm's own write buffer. The 2026 wrap makes the
     // repaint atomic even if a future xterm splits the chunk (supported
     // since xterm 6; harmless before).
-    this.term.write('\x1bc\x1b[?2026h' + snapStr + '\x1b[?2026l');
+    // The ack after the parse commits the snapshot's watermark — the same
+    // parsed-not-received rule DATA follows.
+    this.term.write('\x1bc\x1b[?2026h' + snapStr + '\x1b[?2026l', () => {
+      if (seq !== undefined && !this.disposed) this.mux.ack(this.sessionId, seq);
+    });
   }
 
   private cancelPendingWrites() {

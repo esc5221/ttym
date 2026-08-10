@@ -753,6 +753,46 @@ fn pty_exit(
 }
 
 fn format_cmd_json(cmd: &[String]) -> String {
-    let parts: Vec<String> = cmd.iter().map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))).collect();
+    // Full JSON string escaping. The backslash-and-quote-only version let a
+    // control character in argv (a newline in an `sh -lc` script is enough)
+    // write an unparseable manifest — the session then failed to create AND
+    // failed to recover, since both paths read this file back as JSON.
+    let parts: Vec<String> = cmd
+        .iter()
+        .map(|s| {
+            let mut out = String::with_capacity(s.len() + 2);
+            out.push('"');
+            for ch in s.chars() {
+                match ch {
+                    '\\' => out.push_str("\\\\"),
+                    '"' => out.push_str("\\\""),
+                    '\n' => out.push_str("\\n"),
+                    '\r' => out.push_str("\\r"),
+                    '\t' => out.push_str("\\t"),
+                    c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+                    c => out.push(c),
+                }
+            }
+            out.push('"');
+            out
+        })
+        .collect();
     format!("[{}]", parts.join(","))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_cmd_json;
+
+    #[test]
+    fn cmd_json_escapes_control_characters() {
+        let cmd = vec![
+            "a\nb".to_string(),
+            "t\tr\r".to_string(),
+            "q\"s\\".to_string(),
+            "\u{1}".to_string(),
+        ];
+        let json = format_cmd_json(&cmd);
+        assert_eq!(json, r#"["a\nb","t\tr\r","q\"s\\","\u0001"]"#);
+    }
 }
