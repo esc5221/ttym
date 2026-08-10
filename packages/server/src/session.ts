@@ -44,6 +44,10 @@ export interface Viewer {
 
 const DEFAULT_RING_BYTES = 1024 * 1024;
 
+function randomSeqBase(): number {
+  return 1_000_000 + Math.floor(Math.random() * 99_000_000);
+}
+
 function ringBytes(): number {
   const raw = Number(process.env.TTYM_RING_BYTES);
   if (Number.isFinite(raw) && raw >= 64 * 1024) return Math.trunc(raw);
@@ -300,7 +304,13 @@ export class Session {
     // Layer 3. Sized so a tab hidden through a normal burst of agent output
     // still resyncs by delta replay instead of a snapshot; the sync filter can
     // emit a single 512KB block, which the old 128KB ring could not even hold.
-    this.ring = new OutputRing(ringBytes());
+    // The sequence base is random per boot: seqs restart on recovery, and a
+    // client watermark from a previous boot that happens to land inside this
+    // boot's numeric range would replay someone else's delta onto the wrong
+    // screen. A random base makes cross-boot collision practically impossible
+    // — stale watermarks fall outside [base, lastSeq] and take the snapshot
+    // path. Base stays far under u32 wire range (seq is u32 on the wire).
+    this.ring = new OutputRing(ringBytes(), randomSeqBase());
   }
 
   /** Create a new session: spawn holder, connect */
@@ -565,11 +575,15 @@ export class Session {
         this._appliedOffset += data.length;
 
         // Layer 2: headless xterm
-        // When no viewers are attached, skip sync-filter + ring.push + broadcast.
-        // term.write still runs so snapshot() stays current for the next attach.
-        const broadcast = this.viewers.size > 0;
+        // The ring and sync filter run whether anyone is watching or not —
+        // seq is the screen's version number, and skipping the ring while
+        // unwatched made the screen change without the version moving: a
+        // viewer re-attaching at its old fromSeq was told "you're current"
+        // over a screen that wasn't. Only the viewer callbacks are gated,
+        // and the gate is read at parse time so a viewer that attached while
+        // this chunk sat in xterm's write queue still receives it.
         this.term.write(data, () => {
-          if (broadcast) this.processTerminalOutput(data, true);
+          this.processTerminalOutput(data, this.viewers.size > 0);
         });
         this._dirty = true;
         this._lastDirtyAt = Date.now();

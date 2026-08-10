@@ -79,7 +79,19 @@ describe('Session (holder-backed)', () => {
 
     // Output goes into headless xterm + ring regardless of viewers
     await waitFor(() => session.snapshot().includes('hello') ? true : undefined);
-    expect(session.ring.nextSeq).toBeGreaterThan(1);
+    // 부트 스코프 랜덤 베이스: 이전 부트의 seq와 수치가 겹칠 수 없게.
+    expect(session.ring.baseSeq).toBeGreaterThanOrEqual(1_000_000);
+    await waitFor(() => session.ring.nextSeq > session.ring.baseSeq ? true : undefined);
+
+    // viewer가 0명인 동안의 라이브 출력도 ring에 쌓인다 — seq는 화면의 버전
+    // 번호라서, 이걸 건너뛰면 화면은 변하는데 버전은 안 변해 재부착한
+    // 클라이언트가 낡은 화면을 "최신"으로 믿게 된다. (예전엔 hello가 CREATE
+    // 덤프에 실리느냐 라이브 프레임으로 오느냐의 타이밍 복권이었고, 그게
+    // 이 테스트의 플레이크였다.)
+    const seqBefore = session.ring.nextSeq;
+    session.write(Buffer.from('UNWATCHED-LINE\n'));
+    await waitFor(() => session.snapshot().includes('UNWATCHED-LINE') ? true : undefined);
+    await waitFor(() => session.ring.nextSeq > seqBefore ? true : undefined);
   });
 
   it('broadcasts live output to viewers', async () => {

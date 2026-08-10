@@ -981,6 +981,24 @@ export async function createServer(port: number): Promise<TtymServer> {
     }
 
     /**
+     * A resync starts the viewer's stream accounting over. Whatever the
+     * batcher believed before — a paused view, a backpressure stall with its
+     * drain timer, batched chunks the resync is about to supersede, an ack
+     * window for frames now irrelevant — kept ruling AFTER the resync, and a
+     * re-attached viewer could sit behind a stale pausedView flag dropping
+     * every live byte with no signal that would ever clear it.
+     */
+    function resetBatcherForResync(batcher: SessionBatcher) {
+      if (batcher.timer) { clearTimeout(batcher.timer); batcher.timer = null; }
+      if (batcher.drainTimer) { clearInterval(batcher.drainTimer); batcher.drainTimer = null; }
+      batcher.pending = [];
+      batcher.pendingBytes = 0;
+      batcher.sentEntries = [];
+      batcher.unackedBytes = 0;
+      batcher.pausedForBackpressure = false;
+    }
+
+    /**
      * Resync a viewer at `fromSeq`: delta replay when it is small and honest,
      * snapshot otherwise. Three ways a delta can lie or hurt, all measured on
      * production before this existed:
@@ -995,7 +1013,7 @@ export async function createServer(port: number): Promise<TtymServer> {
      *    seq it contains.
      */
     function sendResync(sessionId: number, session: Session, batcher: SessionBatcher, fromSeq: number) {
-      if (!session.shouldForceSnapshotReplay() && fromSeq > 0
+      if (!session.shouldForceSnapshotReplay() && !session.recoveryGap && fromSeq > 0
           && fromSeq <= session.lastSeq && session.ring.canReplaySince(fromSeq)) {
         const chunks = session.ring.since(fromSeq);
         let total = 0;
@@ -1168,10 +1186,15 @@ export async function createServer(port: number): Promise<TtymServer> {
             log(`CREATE session=${session.id} pid=${session.pid} cmd=${opts.cmd.join(' ')}`);
             safeSend(ws, encode(session.id, CMD.CREATE, jsonPayload({ requestId, ok: true })));
             wireSession(session.id);
-            // Send initial snapshot (holder may have buffered output before viewer was added)
+            // Send initial snapshot (holder may have buffered output before
+            // viewer was added). Booked like every other snapshot — without
+            // noteSnapshotSent the batcher's lastSentSeq stayed 0 and the
+            // client's ack of this very watermark read as a claim about
+            // frames never sent.
             const snap = session.snapshot();
             if (snap.length > 0) {
               safeSend(ws, encodeSnapshot(session.id, session.lastSeq, Buffer.from(snap)));
+              noteSnapshotSent(getBatcher(session.id), session.lastSeq);
             }
           }).catch((error) => {
             console.error('Failed to create session:', error);
@@ -1199,7 +1222,12 @@ export async function createServer(port: number): Promise<TtymServer> {
           log(`ATTACH session=${sessionId} viewer=${viewerId.slice(0, 8)} mode=${mode} fromSeq=${fromSeq}`);
           safeSend(ws, encode(sessionId, CMD.ATTACH, jsonPayload({ ok: true, ...session.info() })));
 
-          sendResync(sessionId, session, getBatcher(sessionId), fromSeq);
+          {
+            const batcher = getBatcher(sessionId);
+            resetBatcherForResync(batcher);
+            batcher.pausedView = false; // attaching IS viewing
+            sendResync(sessionId, session, batcher, fromSeq);
+          }
 
           wireSession(sessionId, mode);
           break;
@@ -1211,6 +1239,10 @@ export async function createServer(port: number): Promise<TtymServer> {
             session.removeViewer(viewerId);
             cleanupBatcher(sessionId);
             clientSessions.delete(sessionId);
+            // A departed viewer's ack floor must not keep the ring from
+            // trimming for everyone else.
+            viewerAcks.get(viewerId)?.delete(sessionId);
+            minAckTrim(manager, sessionId);
             log(`DETACH session=${sessionId} viewer=${viewerId.slice(0, 8)}`);
           }
           safeSend(ws, encode(sessionId, CMD.DETACH, jsonPayload({ ok: true })));
@@ -1228,11 +1260,20 @@ export async function createServer(port: number): Promise<TtymServer> {
 
         case CMD.ACK: {
           const ackMeta = parseJson<{ seq: number }>(payload);
-          if (ackMeta?.seq) {
-            updateViewerAck(viewerId, sessionId, ackMeta.seq);
-            handleViewerAck(sessionId, ackMeta.seq);
-            minAckTrim(manager, sessionId);
-          }
+          const seq = ackMeta?.seq;
+          // An ack is a claim ("I parsed through seq") that feeds directly
+          // into ring truncation — so it is validated like one: integral,
+          // monotonic for this viewer, and no further than what this viewer
+          // was actually sent. One bogus future ack used to flush the entire
+          // ring for every viewer.
+          if (!Number.isInteger(seq) || seq! <= 0) break;
+          const ackBatcher = batchers.get(sessionId);
+          if (!ackBatcher || seq! > ackBatcher.lastSentSeq) break;
+          const prevAck = viewerAcks.get(viewerId)?.get(sessionId) ?? 0;
+          if (seq! < prevAck) break;
+          updateViewerAck(viewerId, sessionId, seq!);
+          handleViewerAck(sessionId, seq!);
+          minAckTrim(manager, sessionId);
           break;
         }
 
@@ -1252,6 +1293,7 @@ export async function createServer(port: number): Promise<TtymServer> {
           const meta = parseJson<{ fromSeq?: number }>(payload);
           if (session && !session.isDead) {
             const batcher = getBatcher(sessionId);
+            resetBatcherForResync(batcher);
             batcher.pausedView = false;
 
             const fromSeq = meta?.fromSeq ?? 0;
@@ -1311,7 +1353,9 @@ export async function createServer(port: number): Promise<TtymServer> {
     ws.on('close', () => {
       log(`WS close viewer=${viewerId.slice(0, 8)} - detaching ${clientSessions.size} sessions`);
       manager.detachViewer(viewerId, clientSessions);
+      const ackedSessions = [...(viewerAcks.get(viewerId)?.keys() ?? [])];
       removeViewerAcks(viewerId);
+      for (const sid of ackedSessions) minAckTrim(manager, sid);
       for (const [, batcher] of batchers) {
         if (batcher.timer) clearTimeout(batcher.timer);
         if (batcher.drainTimer) clearInterval(batcher.drainTimer);

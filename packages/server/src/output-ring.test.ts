@@ -53,3 +53,16 @@ describe('OutputRing', () => {
     expect(ring.baseSeq).toBe(3);
   });
 });
+
+describe('OutputRing — boot-scoped base', () => {
+  it('starts numbering at the given base and refuses replay below it', () => {
+    const ring = new OutputRing(1024, 5000);
+    expect(ring.nextSeq).toBe(5000);
+    expect(ring.baseSeq).toBe(5000);
+    // 이전 부트의 워터마크(작은 seq)는 재생 불가로 판정돼 스냅샷 경로로 간다.
+    expect(ring.canReplaySince(10)).toBe(false);
+    const seq = ring.push(Buffer.from('x'));
+    expect(seq).toBe(5000);
+    expect(ring.since(4999).length).toBe(1);
+  });
+});

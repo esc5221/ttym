@@ -10,10 +10,13 @@ export interface Chunk {
 export class OutputRing {
   private chunks: Chunk[] = [];
   private used = 0;
-  private _nextSeq = 1;
-  private _baseSeq = 1;
+  private _nextSeq: number;
+  private _baseSeq: number;
 
-  constructor(private readonly maxBytes: number = 128 * 1024) {}
+  constructor(private readonly maxBytes: number = 128 * 1024, baseSeq = 1) {
+    this._nextSeq = baseSeq;
+    this._baseSeq = baseSeq;
+  }
 
   get nextSeq() { return this._nextSeq; }
   get baseSeq() { return this._baseSeq; }

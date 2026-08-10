@@ -359,6 +359,109 @@ describe('createServer', () => {
     expect(resync.cmd).toBe(CMD.SNAPSHOT);
   }, 30_000);
 
+  it('a paused-then-reattached viewer keeps receiving live output', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24,
+    }))));
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    await new Promise((r) => setTimeout(r, 200));
+
+    // PAUSE 후 DETACH 없이 재-ATTACH: batcher가 재사용되는 경로다. 리셋이
+    // 없으면 pausedView=true가 살아남아 라이브 출력이 전부 버려지고, 그걸
+    // 풀어줄 신호는 영원히 오지 않는다.
+    ws1.send(encode(sid, CMD.PAUSE_VIEW));
+    await new Promise((r) => setTimeout(r, 50));
+    ws1.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: 0, cols: 80, rows: 24 }))));
+    await ws1.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+    await ws1.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid);
+
+    ws1.send(encode(sid, CMD.DATA, Buffer.from('LIVE-AFTER-REATTACH\n')));
+    const echoed = await ws1.next((f) => f.cmd === CMD.DATA && f.sessionId === sid
+      && Buffer.from(f.payload).toString('binary').includes('LIVE-AFTER-REATTACH'));
+    expect(echoed.seq).toBeGreaterThan(0);
+  });
+
+  it('a bogus future ACK cannot flush the ring for everyone', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24,
+    }))));
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    await new Promise((r) => setTimeout(r, 200));
+
+    ws1.send(encode(sid, CMD.DATA, Buffer.from('CHUNK-A\n')));
+    const a = await ws1.next((f) => f.cmd === CMD.DATA && f.sessionId === sid
+      && Buffer.from(f.payload).toString('binary').includes('CHUNK-A'));
+    ws1.send(encode(sid, CMD.DATA, Buffer.from('CHUNK-B\n')));
+    await ws1.next((f) => f.cmd === CMD.DATA && f.sessionId === sid
+      && Buffer.from(f.payload).toString('binary').includes('CHUNK-B'));
+
+    // ack은 "여기까지 파싱했다"는 주장이고 ring 절단으로 직결된다 — 받은 적
+    // 없는 미래 seq 주장은 기각되어야 한다. 예전엔 이 한 방이 ring을 통째로
+    // 비워 다른 모든 viewer의 delta 재생을 파괴했다.
+    ws1.send(encode(sid, CMD.ACK, Buffer.from(JSON.stringify({ seq: a.seq! + 10_000_000 }))));
+    await new Promise((r) => setTimeout(r, 100));
+
+    const ws2 = await openClient(port);
+    clients.push(ws2);
+    ws2.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: a.seq, cols: 80, rows: 24 }))));
+    await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+    const resync = await ws2.next((f) => (f.cmd === CMD.SNAPSHOT || f.cmd === CMD.DATA) && f.sessionId === sid);
+    expect(resync.cmd).toBe(CMD.DATA);
+    expect(Buffer.from(resync.payload).toString('binary')).toContain('CHUNK-B');
+  });
+
+  it('DETACH clears the departed viewer ack floor so the ring can trim', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24,
+    }))));
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const sid = created.sessionId;
+    await new Promise((r) => setTimeout(r, 200));
+
+    ws1.send(encode(sid, CMD.DATA, Buffer.from('ONE\n')));
+    const one = await ws1.next((f) => f.cmd === CMD.DATA && f.sessionId === sid
+      && Buffer.from(f.payload).toString('binary').includes('ONE'));
+    ws1.send(encode(sid, CMD.DATA, Buffer.from('TWO\n')));
+    const two = await ws1.next((f) => f.cmd === CMD.DATA && f.sessionId === sid
+      && Buffer.from(f.payload).toString('binary').includes('TWO'));
+
+    // ws1은 ONE까지만 소화했다고 주장 → ring은 TWO를 붙들고 있어야 한다.
+    ws1.send(encode(sid, CMD.ACK, Buffer.from(JSON.stringify({ seq: one.seq }))));
+    await new Promise((r) => setTimeout(r, 100));
+    const ring = server!.manager.get(sid)!.ring;
+    expect(ring.baseSeq).toBeLessThanOrEqual(two.seq!);
+
+    // ws2가 TWO까지 ack해도 ws1의 낮은 floor가 trim을 막는다.
+    const ws2 = await openClient(port);
+    clients.push(ws2);
+    ws2.send(encode(sid, CMD.ATTACH, Buffer.from(JSON.stringify({ fromSeq: 0, cols: 80, rows: 24 }))));
+    await ws2.next((f) => f.cmd === CMD.ATTACH && f.sessionId === sid);
+    await ws2.next((f) => f.cmd === CMD.SNAPSHOT && f.sessionId === sid);
+    ws2.send(encode(sid, CMD.ACK, Buffer.from(JSON.stringify({ seq: two.seq }))));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(ring.baseSeq).toBeLessThanOrEqual(two.seq!);
+
+    // ws1이 떠나면 그 floor도 함께 사라져야 ring이 전진한다.
+    ws1.send(encode(sid, CMD.DETACH));
+    await ws1.next((f) => f.cmd === CMD.DETACH && f.sessionId === sid);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(ring.baseSeq).toBeGreaterThan(two.seq!);
+  });
+
   it('stamps snapshots with a watermark, and resumeView from it replays delta — not another snapshot', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);
