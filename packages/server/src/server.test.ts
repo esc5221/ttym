@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
-import { createServer, TtymServer } from './server.js';
+import { createServer, agentIsActive, AGENT_ACTIVE_TTL_MS, TtymServer } from './server.js';
 import { CMD, decode, encode, toBuffer } from './protocol.js';
 import { rmSync } from 'node:fs';
 
@@ -792,4 +792,26 @@ describe('meta ownership over HTTP', () => {
     expect(result.interaction.status).toBe('completed');
     expect(result.interaction.transcript).toContain('ping');
   }, 15_000);
+});
+
+describe('agentIsActive — liveness rule for the tab dot', () => {
+  const NOW = 1_800_000_000_000;
+
+  it('a fresh activity stamp keeps the flag alive', () => {
+    expect(agentIsActive({ claudeActive: true, agentActiveAt: NOW - 1000 }, NOW)).toBe(true);
+  });
+
+  it('an aged-out stamp reads as idle even though the flag is still true', () => {
+    // Stop curl 유실(서버 재시작 창 등)의 잔재 — 5일짜리 점멸 사고의 재발 방지.
+    expect(agentIsActive({ claudeActive: true, agentActiveAt: NOW - AGENT_ACTIVE_TTL_MS - 1 }, NOW)).toBe(false);
+  });
+
+  it('a flag with no stamp at all (pre-liveness fossil) reads as idle', () => {
+    expect(agentIsActive({ claudeActive: true }, NOW)).toBe(false);
+  });
+
+  it('no flag means idle regardless of stamp', () => {
+    expect(agentIsActive({ agentActiveAt: NOW }, NOW)).toBe(false);
+    expect(agentIsActive({ codexActive: true, agentActiveAt: NOW - 1 }, NOW)).toBe(true);
+  });
 });

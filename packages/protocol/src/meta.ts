@@ -18,7 +18,7 @@
  * to them breaks nothing but that user's display.
  */
 
-const RUNTIME_EXACT = new Set(['seq', 'stopSeq', 'stopAt']);
+const RUNTIME_EXACT = new Set(['seq', 'stopSeq', 'stopAt', 'agentActiveAt']);
 const RUNTIME_PREFIXES = ['claude', 'codex'];
 
 export function isRuntimeMetaKey(key: string): boolean {

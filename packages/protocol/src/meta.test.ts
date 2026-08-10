@@ -19,6 +19,7 @@ describe('meta ownership', () => {
   });
 
   it('names the offending keys in a mixed patch', () => {
+    expect(isRuntimeMetaKey('agentActiveAt')).toBe(true);
     expect(runtimeMetaKeys({ note: 'x', stopSeq: '3', claudeActive: true }))
       .toEqual(['stopSeq', 'claudeActive']);
   });

@@ -56,6 +56,21 @@ const MIME_TYPES: Record<string, string> = {
   '.woff2': 'font/woff2',
 };
 
+/**
+ * An agent-active flag with no expiry is a defect: it is set and cleared by
+ * single hook curls, and one lost Stop (server restart window, crash) left a
+ * tab dot pulsing for five days. The activity hook re-stamps agentActiveAt on
+ * every write, so a genuinely running turn stays fresh; a flag whose stamp
+ * has aged out — or that has no stamp at all (fossils from before this
+ * existed) — reads as idle.
+ */
+export const AGENT_ACTIVE_TTL_MS = 15 * 60_000;
+export function agentIsActive(meta: Record<string, unknown>, now = Date.now()): boolean {
+  if (meta.claudeActive !== true && meta.codexActive !== true) return false;
+  const stamp = meta.agentActiveAt;
+  return typeof stamp === 'number' && now - stamp < AGENT_ACTIVE_TTL_MS;
+}
+
 function safeSend(ws: WebSocket, data: Uint8Array): boolean {
   if (ws.readyState !== WebSocket.OPEN) return false;
   try { ws.send(data); return true; } catch { return false; }
@@ -381,6 +396,11 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
           json(400, { error: 'body must be an object of runtime keys only' });
           return;
         }
+        // Server stamps liveness itself — hooks only say "active", the clock
+        // that decides how long that claim holds is not theirs to set.
+        if (patch.claudeActive === true || patch.codexActive === true) {
+          patch.agentActiveAt = Date.now();
+        }
         const merged = await manager.setMeta(id, patch);
         log(`AGENT META session=${id} keys=${Object.keys(patch).join(',')}`);
         onAgentMeta?.(id, merged as Record<string, unknown>);
@@ -473,7 +493,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         agent: {
           kind: agentKind,
           externalSessionId: meta.claudeSessionId ?? meta.codexSessionId ?? null,
-          active: meta.claudeActive === true || meta.codexActive === true,
+          active: agentIsActive(meta),
           activeInteractionId: interactions.pending(id)?.id ?? null,
         },
       });
@@ -823,6 +843,22 @@ export async function createServer(port: number): Promise<TtymServer> {
   // the next one carries the entire state again.
   // Agent state pushes the moment a hook writes it — the last poll the web
   // client ran (3s runtime sweep) dies with this.
+  const lastAnnouncedActive = new Map<number, boolean>();
+
+  // Expiry has no natural push moment — nothing "happens" when a stamp ages
+  // out, so a dot already on screen would pulse until the next unrelated
+  // event. The sweeper turns expiry into an event: any session last announced
+  // as active whose stamp has gone stale gets one idle broadcast.
+  const agentExpirySweep = setInterval(() => {
+    for (const info of manager.list()) {
+      if (lastAnnouncedActive.get(info.id) !== true) continue;
+      manager.getMeta(info.id).then((meta) => {
+        if (!agentIsActive(meta)) broadcastAgentState(info.id, meta);
+      }).catch(() => {});
+    }
+  }, 60_000);
+  agentExpirySweep.unref();
+
   function broadcastAgentState(sessionId: number, meta: Record<string, unknown>) {
     const kind = meta.claudeSessionId || meta.claudeLastSessionId
       ? 'claude-code'
@@ -830,8 +866,9 @@ export async function createServer(port: number): Promise<TtymServer> {
     const event = {
       sessionId,
       kind,
-      active: meta.claudeActive === true || meta.codexActive === true,
+      active: agentIsActive(meta),
     };
+    lastAnnouncedActive.set(sessionId, event.active);
     const frame = encode(0, CMD.AGENT, jsonPayload(event));
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) {
@@ -1299,6 +1336,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     wss,
     httpServer,
     close: async () => {
+      clearInterval(agentExpirySweep);
       unsubscribeWorkspaceChanges();
       if (gcTimer) clearInterval(gcTimer);
       fileBridge?.stop?.();
