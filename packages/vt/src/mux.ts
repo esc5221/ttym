@@ -154,6 +154,12 @@ export class TerminalMux {
       ws.onmessage = null;
       ws.onerror = null;
       ws.onclose = null;
+      // A replaced socket must actually die. Detaching the handlers alone
+      // left a CONNECTING socket to finish its dial in the background — an
+      // orphan connection the server counts as a viewer and nobody drives.
+      if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+        try { ws.close(); } catch {}
+      }
     }
     // reject pending creates
     for (const p of this.pendingCreates) {

@@ -214,6 +214,21 @@ describe('TerminalMux', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket);
   });
 
+  it('replacing a mid-dial connection closes the orphan socket', async () => {
+    const mux = new TerminalMux('ws://example.test');
+    void mux.connect().catch(() => {});
+    const socket1 = FakeWebSocket.latest();
+    expect(socket1.readyState).toBe(FakeWebSocket.CONNECTING);
+
+    // 다이얼 중 재연결: 예전엔 핸들러만 떼고 소켓을 안 닫아, 뒤늦게 열린
+    // 고아 연결이 서버에 viewer로 남았다.
+    const connected = mux.connect();
+    expect(socket1.readyState).toBe(FakeWebSocket.CLOSED);
+    const socket2 = FakeWebSocket.latest();
+    socket2.open();
+    await connected;
+  });
+
   it('fires onDisconnect only for a connection that actually opened', async () => {
     const mux = new TerminalMux('ws://example.test');
     const dropped = vi.fn();

@@ -209,6 +209,16 @@ try {
     console.log(`  FAIL  복귀 pane 상태 — 기존버퍼:${!has ? '?' : 'ok'} hidden출력:${has}`);
   }
 
+  // P4: 보고 있는 중에 서버가 죽었다 살아나면, 손대지 않아도 화면이
+  // 돌아와야 한다 (onDisconnect → 백오프 재접속 → 리로드 → 스냅샷).
+  await page.goto(`http://127.0.0.1:${PORT}/#w/e2e-ws`);
+  await expectMarker(page, 'P4 사전: 관측 중 화면 정상', 5000);
+  await stopServer();
+  await new Promise((r) => setTimeout(r, 1500));
+  startServer();
+  await waitForServer();
+  await expectMarker(page, '서버가 죽었다 살아나면 자동 재연결로 화면이 돌아온다', 15000);
+
 } catch (error) {
   failures++;
   console.log(`  FAIL  ${error.message}`);

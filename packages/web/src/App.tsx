@@ -1450,8 +1450,10 @@ function App() {
     };
     void attempt(500);
 
-    // 접속 후 끊기면 조용히 재접속하고 리로드한다 — seq 보존 덕에 리로드는
-    // 이제 delta 재생으로 싸다.
+    // 접속 후 끊기면 조용히 재접속하고 리로드한다. 리로드는 스냅샷 경로라
+    // 공짜는 아니지만(워터마크는 페이지와 함께 죽는 게 정직하다), 1000줄
+    // 캡 + 스태거로 부담이 작고, 재연결 후의 host 상태 복원 문제를 통째로
+    // 피한다. 리로드 없는 재연결은 host 리셋 훅이 생기면 그때.
     const unsubscribe = mux.onDisconnect(() => {
       if (cancelled) return;
       setConnected(false);
