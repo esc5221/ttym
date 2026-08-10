@@ -45,10 +45,13 @@ const registry = new Map<number, TerminalHost>();
 // queue spaces attaches 40ms apart — imperceptible per pane, and the page
 // stays interactive through a cold reload of a fat workspace.
 let activationChain: Promise<void> = Promise.resolve();
-function queueActivation(run: () => void) {
+function queueActivation(run: () => boolean) {
   activationChain = activationChain.then(() => {
-    run();
-    return new Promise((resolveDelay) => setTimeout(resolveDelay, 40));
+    // A canceled entry (host disconnected or disposed while waiting its
+    // turn) reports false and costs the queue nothing — earlier it still
+    // burned its 40ms slot and delayed every pane behind it.
+    if (!run()) return;
+    return new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 40));
   });
 }
 
@@ -124,8 +127,17 @@ export class TerminalHost {
   private opts: HostOptions;
   private disposed = false;
   private opened = false;
-  private connected = false;
-  private viewPaused = false;
+  /**
+   * The stream's lifecycle, explicit. The boolean pair this replaces had a
+   * lethal gap: `connected` was set before ATTACH resolved, and a failed
+   * ATTACH left it true forever — activate() early-returned on every later
+   * try, so one timeout turned into a permanently blank pane.
+   *
+   *   idle → queued → attaching → attached ⇄ paused
+   */
+  private stream: 'idle' | 'queued' | 'attaching' | 'attached' | 'paused' = 'idle';
+  private attachRetries = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private mounted = false;
   private inputDisposables: IDisposable[] = [];
   private onAction: ActionHandler = () => {};
@@ -207,7 +219,7 @@ export class TerminalHost {
    * subscription.
    */
   activate() {
-    if (this.disposed || this.connected) return;
+    if (this.disposed || this.stream !== 'idle') return;
     if (!this.opened) {
       this.opened = true;
       this.wrapper.style.visibility = 'hidden';
@@ -216,14 +228,16 @@ export class TerminalHost {
       try { this.fit.fit(); } catch {}
       requestAnimationFrame(() => { if (!this.disposed) this.wrapper.style.visibility = 'visible'; });
     }
-    this.connected = true;
+    this.stream = 'queued';
     queueActivation(() => {
-      if (this.disposed || !this.connected) return;
+      if (this.disposed || this.stream !== 'queued') return false;
       this.doAttach();
+      return true;
     });
   }
 
   private doAttach() {
+    this.stream = 'attaching';
     this.mux.attachSession(this.sessionId, {
       onData: (data, seq) => this.handleData(data, seq),
       onSnapshot: (snap, seq) => this.handleSnapshot(snap, seq),
@@ -236,34 +250,55 @@ export class TerminalHost {
       rows: this.term.rows,
       mode: this.opts.mode,
     }).then(() => {
-      if (this.disposed || !this.connected) { this.mux.detachSession(this.sessionId); return; }
+      if (this.disposed || this.stream !== 'attaching') { this.mux.detachSession(this.sessionId); return; }
+      this.stream = 'attached';
+      this.attachRetries = 0;
       this.wireInput();
     }).catch(() => {
-      if (!this.disposed) this.term.write('\r\n\x1b[31m[failed to attach session]\x1b[0m\r\n');
+      if (this.disposed || this.stream !== 'attaching') return;
+      // Transient failure (timeout, reconnect race) — back to idle and retry
+      // with backoff. idle also means the next syncViewState re-activates
+      // naturally, so the pane recovers even after the retries run out.
+      this.stream = 'idle';
+      if (this.attachRetries < 3) {
+        const delay = 500 * 2 ** this.attachRetries;
+        this.attachRetries += 1;
+        this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
+          if (!this.disposed && this.stream === 'idle' && this.mounted) this.activate();
+        }, delay);
+      } else {
+        this.term.write('\r\n\x1b[31m[failed to attach session]\x1b[0m\r\n');
+      }
     });
   }
 
   /** Detach from the stream without touching the terminal or its buffer. */
   disconnect() {
-    if (!this.connected) return;
-    this.connected = false;
-    this.viewPaused = false;
+    if (this.stream === 'idle') return;
+    const hadServerSideAttach = this.stream === 'attached' || this.stream === 'paused';
+    // 'queued' dies in the queue check; 'attaching' dies in its own then().
+    this.stream = 'idle';
+    if (this.retryTimer !== null) { clearTimeout(this.retryTimer); this.retryTimer = null; }
+    this.attachRetries = 0;
     for (const d of this.inputDisposables) d.dispose();
     this.inputDisposables = [];
-    this.mux.detachSession(this.sessionId);
+    if (hadServerSideAttach) this.mux.detachSession(this.sessionId);
   }
 
   /** Out of viewport (or tab hidden): stop the stream, keep everything else. */
   pauseView() {
-    if (!this.connected || this.viewPaused) return;
-    this.viewPaused = true;
+    // Only an attached stream can pause — a PAUSE/RESUME fired before ATTACH
+    // made the server resync a viewer that had no callbacks registered yet.
+    if (this.stream !== 'attached') return;
+    this.stream = 'paused';
     this.mux.pauseView(this.sessionId);
   }
 
   /** Back in view: resume from the last seq — delta replay, or one snapshot. */
   resumeView() {
-    if (!this.connected || !this.viewPaused) return;
-    this.viewPaused = false;
+    if (this.stream !== 'paused') return;
+    this.stream = 'attached';
     // Unparsed queued bytes sit above the acked watermark the resume will
     // replay from — parsing them AND the replay would paint them twice.
     // Drop them; the replay re-delivers the same range.
