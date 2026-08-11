@@ -41,6 +41,120 @@ const CMD_REPLAY: u8 = 0x11;
 /// it is a legacy server and promote it.
 const LEASE_CLAIM_TIMEOUT: Duration = Duration::from_millis(1500);
 
+// ───── Lexical anchors ─────
+//
+// The ring truncates at arbitrary bytes. When the server asks for a range that
+// fell out (gap), the surviving tail can begin mid-UTF-8 or mid-escape — an
+// OSC payload cut open swallows everything until a terminator and the damage
+// spreads across rows. A suffix scan cannot fix this: bytes inside an OSC look
+// like plaintext, and only something that watched the stream from byte 0 knows
+// the lexer state. The holder is that something. It tracks a small UTF-8 +
+// ECMA-48 lexer and records "ground" offsets on a coarse grid; gap replies
+// start at the first ground offset still inside the ring, and if none exists
+// the tail is withheld rather than served as a fake continuation.
+
+#[derive(Clone, Copy, PartialEq)]
+enum LexState {
+    Ground,
+    Esc,
+    EscInter,
+    Csi,
+    StringBody,
+    StringEsc,
+    Utf8(u8),
+}
+
+const ANCHOR_GRAIN: u64 = 4096;
+const ANCHOR_CAP: usize = 512; // 512 × 4KB = 2MB of coverage, double the ring
+
+struct AnchorTracker {
+    state: LexState,
+    anchors: std::collections::VecDeque<u64>,
+    last_anchor: u64,
+}
+
+impl AnchorTracker {
+    fn new() -> Self {
+        let mut anchors = std::collections::VecDeque::new();
+        anchors.push_back(0); // byte 0 is ground by definition
+        AnchorTracker { state: LexState::Ground, anchors, last_anchor: 0 }
+    }
+
+    fn step(state: LexState, b: u8) -> LexState {
+        use LexState::*;
+        match state {
+            Utf8(n) => {
+                if (0x80..=0xBF).contains(&b) {
+                    if n <= 1 { Ground } else { Utf8(n - 1) }
+                } else {
+                    // Broken continuation: reprocess this byte from ground.
+                    Self::step(Ground, b)
+                }
+            }
+            Ground => match b {
+                0x1b => Esc,
+                0xC2..=0xDF => Utf8(1),
+                0xE0..=0xEF => Utf8(2),
+                0xF0..=0xF4 => Utf8(3),
+                _ => Ground, // C0, ASCII, stray continuation — all self-contained
+            },
+            Esc => match b {
+                b'[' => Csi,
+                b']' | b'P' | b'X' | b'^' | b'_' => StringBody, // OSC/DCS/SOS/PM/APC
+                0x20..=0x2F => EscInter,
+                _ => Ground, // two-byte escape (ESC c, ESC 7, …)
+            },
+            EscInter => match b {
+                0x20..=0x2F => EscInter,
+                _ => Ground, // final byte of e.g. ESC ( B
+            },
+            Csi => match b {
+                0x40..=0x7E => Ground, // final byte
+                0x1b => Esc,           // aborted sequence
+                _ => Csi,              // params / intermediates
+            },
+            StringBody => match b {
+                0x07 => Ground, // BEL terminator (xterm OSC)
+                0x1b => StringEsc,
+                _ => StringBody,
+            },
+            StringEsc => match b {
+                b'\\' => Ground,     // ST
+                _ => StringBody,       // ESC that wasn't ST — still inside the string
+            },
+        }
+    }
+
+    /// Feed bytes that begin at absolute stream offset `start`.
+    fn feed(&mut self, data: &[u8], start: u64) {
+        for (i, &b) in data.iter().enumerate() {
+            self.state = Self::step(self.state, b);
+            if self.state == LexState::Ground {
+                let boundary = start + i as u64 + 1;
+                if boundary - self.last_anchor >= ANCHOR_GRAIN {
+                    if self.anchors.len() >= ANCHOR_CAP {
+                        self.anchors.pop_front();
+                    }
+                    self.anchors.push_back(boundary);
+                    self.last_anchor = boundary;
+                }
+            }
+        }
+    }
+
+    fn prune_below(&mut self, base: u64) {
+        while let Some(&front) = self.anchors.front() {
+            if front >= base { break; }
+            self.anchors.pop_front();
+        }
+    }
+
+    /// First ground offset at or after `base`, if any survives.
+    fn first_at_or_after(&self, base: u64) -> Option<u64> {
+        self.anchors.iter().find(|&&a| a >= base).copied()
+    }
+}
+
 // ───── Ring buffer ─────
 
 struct Ring {
@@ -355,6 +469,7 @@ fn main() {
 
     // ── State ──
     let mut ring = Ring::new(config.ring_size);
+    let mut tracker = AnchorTracker::new();
     let mut seq: u32 = 1;
     let mut cols = config.cols;
     let mut rows = config.rows;
@@ -451,7 +566,10 @@ fn main() {
                 let rn = unsafe { libc::read(master_fd, read_buf.as_mut_ptr() as *mut _, read_buf.len()) };
                 if rn > 0 {
                     let data = &read_buf[..rn as usize];
+                    let start = ring.written;
                     ring.push(data);
+                    tracker.feed(data, start);
+                    tracker.prune_below(ring.base_offset());
                     if let Some(ref mut c) = client {
                         let payload = data_out_payload(seq, data);
                         if let Err(err) = write_frame(c, CMD_DATA_OUT, &payload) {
@@ -652,7 +770,18 @@ fn main() {
                     }
                 }
                 CMD_DUMP_REQ => {
-                    let data = ring.dump();
+                    // A full dump from an overflowed ring has the same
+                    // arbitrary-cut head as a gap replay — trim to the first
+                    // safe offset. A never-overflowed ring starts at byte 0,
+                    // which is ground by definition.
+                    let data = if ring.base_offset() > 0 {
+                        match tracker.first_at_or_after(ring.base_offset()) {
+                            Some(safe) if safe < ring.written => ring.since(safe).0,
+                            _ => Vec::new(),
+                        }
+                    } else {
+                        ring.dump()
+                    };
                     if let Some(ref mut c) = client {
                         let _ = write_frame(c, CMD_DUMP_RESP, &data);
                     }
@@ -667,9 +796,29 @@ fn main() {
                     let want = if payload.len() >= 8 {
                         u64::from_le_bytes(payload[..8].try_into().unwrap())
                     } else { 0 };
-                    let (data, gap) = ring.since(want);
+                    let (mut data, gap) = ring.since(want);
+                    let mut base = ring.base_offset();
+                    if gap {
+                        // The surviving tail must start at a lexically safe
+                        // offset — otherwise it is not a screen, it is noise
+                        // that can corrupt rows far past the cut.
+                        match tracker.first_at_or_after(base) {
+                            Some(safe) if safe < ring.written => {
+                                let (safe_data, _) = ring.since(safe);
+                                data = safe_data;
+                                base = safe;
+                            }
+                            _ => {
+                                // No ground offset survives in the ring (e.g.
+                                // one giant string sequence). Withholding the
+                                // tail is honest; serving it is fabrication.
+                                data = Vec::new();
+                                base = ring.written;
+                            }
+                        }
+                    }
                     let mut resp = Vec::with_capacity(17 + data.len());
-                    resp.extend_from_slice(&ring.base_offset().to_le_bytes());
+                    resp.extend_from_slice(&base.to_le_bytes());
                     resp.extend_from_slice(&ring.written.to_le_bytes());
                     resp.push(if gap { 1 } else { 0 });
                     resp.extend_from_slice(&data);
@@ -783,6 +932,55 @@ fn format_cmd_json(cmd: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::format_cmd_json;
+    use super::{AnchorTracker, Ring};
+
+
+    #[test]
+    fn anchors_skip_mid_osc() {
+        let mut t = AnchorTracker::new();
+        // 8KB 평문 → OSC 열고 8KB payload(미종결) — payload 안엔 앵커가 없어야 한다.
+        let plain = vec![b'x'; 8192];
+        t.feed(&plain, 0);
+        let mut osc = b"\x1b]8;;http://e".to_vec();
+        osc.extend(vec![b'p'; 8192]);
+        t.feed(&osc, 8192);
+        let last = *t.anchors.back().unwrap();
+        assert!(last <= 8192, "anchor {} inside unterminated OSC", last);
+        // 종결(BEL) 후 평문이 흐르면 다시 기록된다.
+        let mut tail = vec![0x07u8];
+        tail.extend(vec![b'y'; 8192]);
+        t.feed(&tail, 8192 + osc.len() as u64);
+        assert!(*t.anchors.back().unwrap() > 8192);
+    }
+
+    #[test]
+    fn anchors_skip_mid_utf8() {
+        let mut t = AnchorTracker::new();
+        // 경계 직전 바이트가 한글 리딩바이트로 끝나게: 4095 ASCII + 3바이트 문자
+        let mut data = vec![b'a'; ANCHOR_GRAIN_TEST - 1];
+        data.extend_from_slice("한".as_bytes()); // E1.. 3바이트
+        t.feed(&data, 0);
+        for &a in &t.anchors {
+            // 문자 중간(4096, 4097)엔 앵커가 없어야 한다
+            assert!(a != ANCHOR_GRAIN_TEST as u64 && a != ANCHOR_GRAIN_TEST as u64 + 1);
+        }
+    }
+
+    const ANCHOR_GRAIN_TEST: usize = 4096;
+
+    #[test]
+    fn no_anchor_in_ring_means_none() {
+        let mut t = AnchorTracker::new();
+        let mut ring = Ring::new(1024);
+        // 4KB짜리 미종결 OSC가 ring(1KB)을 완전히 덮으면 안전 오프셋이 없다.
+        let mut osc = b"\x1b]0;".to_vec();
+        osc.extend(vec![b'q'; 4096]);
+        let start = ring.written;
+        ring.push(&osc);
+        t.feed(&osc, start);
+        t.prune_below(ring.base_offset());
+        assert_eq!(t.first_at_or_after(ring.base_offset()), None);
+    }
 
     #[test]
     fn cmd_json_escapes_control_characters() {

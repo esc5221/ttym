@@ -16,6 +16,8 @@ export interface InteractionView {
   prompt: string;
   status: InteractionStatus;
   transcript: string | null;
+  /** Screen quality at extraction time — 'degraded' means approximate. */
+  integrity?: 'healthy' | 'degraded';
   createdAt: number;
   completedAt: number | null;
 }
@@ -82,6 +84,9 @@ export class InteractionStore {
     const rec = this.pendingBySession.get(session.id);
     if (!rec) return null;
     if (rec.marker) rec.transcript = session.transcriptSince(rec.marker);
+    // Extraction quality rides along: a transcript read off a degraded screen
+    // must not be indistinguishable from a faithful one.
+    rec.integrity = session.integrity;
     return this.settle(rec, status);
   }
 

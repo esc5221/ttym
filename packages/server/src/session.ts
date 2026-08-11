@@ -230,6 +230,15 @@ export class Session {
   private _generation = '';
   private _appliedOffset = 0;
   private _recoveryGap = false;
+  /**
+   * Screen quality. 'degraded' after a gap recovery: the tail the holder
+   * served is lexically safe (new holders) but the middle is missing, so the
+   * rendered screen is not a faithful continuation. Only a full repaint the
+   * stream itself performs (RIS) earns 'healthy' back — a checkpoint write
+   * cannot, because checkpointing a degraded screen just launders it into
+   * the next recovery's trusted base.
+   */
+  private _integrity: 'healthy' | 'degraded' = 'healthy';
   private _exitCode: number | null = null;
   private supportsReplay = false;
   private readonly syncFilter = new SyncBlockFilter();
@@ -256,6 +265,7 @@ export class Session {
   get appliedOffset(): number { return this._appliedOffset; }
   /** True when recovery could not reach back to the checkpoint. */
   get recoveryGap(): boolean { return this._recoveryGap; }
+  get integrity(): 'healthy' | 'degraded' { return this._integrity; }
   /** Exit code once the PTY has died; -1 unknown, -2 lease lost. */
   get exitCode(): number | null { return this._exitCode; }
 
@@ -491,6 +501,7 @@ export class Session {
               const gap = frame.payload[16] === 1;
               const data = Buffer.from(frame.payload.subarray(17));
               this._recoveryGap = gap;
+              if (gap) this._integrity = 'degraded';
               this._appliedOffset = end;
               this.debug(`got REPLAY base=${base} end=${end} gap=${gap} bytes=${data.length}`);
               const finalize = () => {
@@ -573,6 +584,16 @@ export class Session {
         // has been advanced. The holder counts the same bytes, so starting from
         // the offset it reported in STATE keeps the two in step.
         this._appliedOffset += data.length;
+
+        // A degraded screen heals only when the stream itself repaints from
+        // scratch. RIS (ESC c) is that moment. The scan is naive — an ESC c
+        // inside a string sequence would also match — but a false positive
+        // merely ends the degraded state early, and real RIS mid-string does
+        // not occur in practice.
+        if (this._integrity === 'degraded' && data.includes('\x1bc')) {
+          this._integrity = 'healthy';
+          this.debug('integrity healed by RIS');
+        }
 
         // Layer 2: headless xterm
         // The ring and sync filter run whether anyone is watching or not —

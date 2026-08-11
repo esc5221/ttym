@@ -484,6 +484,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
           appliedOffset: session.appliedOffset,
           generation: session.generation,
           recoveryGap: session.recoveryGap,
+          integrity: session.integrity,
         },
         process: {
           pid: session.childPid,
@@ -1013,7 +1014,7 @@ export async function createServer(port: number): Promise<TtymServer> {
      *    seq it contains.
      */
     function sendResync(sessionId: number, session: Session, batcher: SessionBatcher, fromSeq: number) {
-      if (!session.shouldForceSnapshotReplay() && !session.recoveryGap && fromSeq > 0
+      if (!session.shouldForceSnapshotReplay() && session.integrity === 'healthy' && fromSeq > 0
           && fromSeq <= session.lastSeq && session.ring.canReplaySince(fromSeq)) {
         const chunks = session.ring.since(fromSeq);
         let total = 0;

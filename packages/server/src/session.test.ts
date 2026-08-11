@@ -94,6 +94,29 @@ describe('Session (holder-backed)', () => {
     await waitFor(() => session.ring.nextSeq > seqBefore ? true : undefined);
   });
 
+  it('degraded integrity heals only on a stream-level RIS', async () => {
+    mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
+    const session = await Session.create(
+      7, ['/bin/sh', '-lc', 'stty -echo; exec cat'],
+      80, 24, TEST_RUNTIME_DIR,
+    );
+    sessions.push(session);
+    await new Promise((r) => setTimeout(r, 200));
+
+    // gap 복구가 남긴 상태를 재현한다.
+    (session as unknown as { _integrity: string })._integrity = 'degraded';
+    expect(session.integrity).toBe('degraded');
+
+    // 일반 출력으로는 낫지 않는다 — 화면의 중간이 비어있다는 사실은 그대로다.
+    session.write(Buffer.from('plain output\n'));
+    await waitFor(() => session.snapshot().includes('plain output') ? true : undefined);
+    expect(session.integrity).toBe('degraded');
+
+    // 스트림이 스스로 전체 재도색(RIS)을 하면 그때 낫는다.
+    session.write(Buffer.from('\x1bc\n')); // 개행: canonical 모드에서 cat이 내보내게
+    await waitFor(() => session.integrity === 'healthy' ? true : undefined);
+  });
+
   it('broadcasts live output to viewers', async () => {
     mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
     const session = await Session.create(

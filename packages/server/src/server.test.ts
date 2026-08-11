@@ -359,6 +359,20 @@ describe('createServer', () => {
     expect(resync.cmd).toBe(CMD.SNAPSHOT);
   }, 30_000);
 
+  it('exposes screen integrity on the runtime view', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const ws1 = await openClient(port);
+    clients.push(ws1);
+    ws1.send(encode(0, CMD.CREATE, Buffer.from(JSON.stringify({
+      cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24,
+    }))));
+    const created = await ws1.next((f) => f.cmd === CMD.CREATE);
+    const runtime = await (await fetch(`http://127.0.0.1:${port}/api/sessions/${created.sessionId}/runtime`)).json() as {
+      terminal: { integrity: string };
+    };
+    expect(runtime.terminal.integrity).toBe('healthy');
+  });
+
   it('a paused-then-reattached viewer keeps receiving live output', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);

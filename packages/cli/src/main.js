@@ -1403,6 +1403,11 @@ async function cmdWorkspace() {
     const interaction = response?.interaction ?? null;
     const completed = interaction?.status === 'completed';
 
+    // A transcript read off a degraded screen (gap recovery, not yet
+    // repainted) is approximate — say so instead of letting it pass as exact.
+    if (interaction?.integrity === 'degraded') {
+      process.stderr.write('warning: screen integrity is degraded — transcript may be approximate\n');
+    }
     // `--raw` predates transcripts and meant "the screen with its escapes".
     // Keep that meaning, and fall back to it when the marked rows are gone.
     let output = interaction?.transcript ?? null;

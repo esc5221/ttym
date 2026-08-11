@@ -21,6 +21,7 @@ export interface SessionSnapshot {
   generation?: string;
   /** Stream offset the screen has been advanced through. */
   appliedThroughOffset?: number;
+  integrity?: 'healthy' | 'degraded';
   /** Per-row soft-wrap bits, base64. Stored so a resize can reflow later. */
   wrapFlags?: string;
 }
@@ -307,6 +308,9 @@ export class SessionManager {
       cwd,
       createdAt: session.createdAt,
       savedAt: Date.now(),
+      // A degraded screen may be checkpointed (offset continuity is still
+      // real) but must never become the next recovery's trusted base.
+      integrity: session.integrity,
       screen: session.snapshot(),
       meta: { ...meta, cwd: cwd ?? meta.cwd },
     };
@@ -462,6 +466,7 @@ export class SessionManager {
       const raw = await readFile(resolve(this.runtimeDir, `snapshot-${id}.json`), 'utf8');
       const snap = JSON.parse(raw) as SessionSnapshot;
       if (!snap.screen || typeof snap.appliedThroughOffset !== 'number') return undefined;
+      if (snap.integrity === 'degraded') return undefined;
       return { generation: snap.generation ?? '', offset: snap.appliedThroughOffset, screen: snap.screen };
     } catch {
       return undefined;
