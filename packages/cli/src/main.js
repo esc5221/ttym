@@ -1506,6 +1506,14 @@ const AGENTS = {
         matcher: '',
         command: resolve(__dirname, '..', 'scripts', 'ttym-claude-hook.sh'),
       },
+      // Turn start. Without it, claudeActive was set once at SessionStart and
+      // cleared by the first Stop — the liveness stamp then never refreshed
+      // and agent activity was invisible from the second turn on.
+      {
+        event: 'UserPromptSubmit',
+        matcher: '',
+        command: resolve(__dirname, '..', 'scripts', 'ttym-claude-activity-hook.sh'),
+      },
       {
         event: 'Stop',
         matcher: '',

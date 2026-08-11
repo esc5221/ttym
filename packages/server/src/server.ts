@@ -9,6 +9,7 @@ import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
 import { sweepRuntimeDir } from './run-gc.js';
 import { ConfigStore } from './config-file.js';
+import { agentKindOf } from './agent-providers.js';
 import { getHomeDir, type Session } from './session.js';
 import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
 import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
@@ -473,9 +474,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     const session = manager.get(id);
     if (!session) { json(404, { error: 'not found' }); return true; }
     manager.getMeta(id).then((meta) => {
-      const agentKind = meta.claudeSessionId || meta.claudeLastSessionId
-        ? 'claude-code'
-        : meta.codexSessionId || meta.codexLastSessionId ? 'codex' : null;
+      const agentKind = agentKindOf(meta);
       json(200, {
         terminal: {
           cols: session.cols,
@@ -861,9 +860,7 @@ export async function createServer(port: number): Promise<TtymServer> {
   agentExpirySweep.unref();
 
   function broadcastAgentState(sessionId: number, meta: Record<string, unknown>) {
-    const kind = meta.claudeSessionId || meta.claudeLastSessionId
-      ? 'claude-code'
-      : meta.codexSessionId || meta.codexLastSessionId ? 'codex' : null;
+    const kind = agentKindOf(meta);
     const event = {
       sessionId,
       kind,
