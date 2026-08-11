@@ -1555,8 +1555,10 @@ function App() {
     return () => window.removeEventListener('keydown', handler, true);
   }, []);
 
-  // ⌘1 = 홈, ⌘2.. = workspace 탭
+  // ⌘1 = 홈, ⌘2.. = workspace 탭 — desktop 전용. 브라우저에서 ⌘숫자는
+  // 크롬 탭 전환의 영토라, 가로채면 사용자의 손버릇과 싸우게 된다.
   useEffect(() => {
+    if (!IS_NATIVE) return;
     const handler = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || !/^[1-9]$/.test(e.key)) return;
       const at = Number(e.key) - 1;
@@ -1664,7 +1666,7 @@ function App() {
               key={ws.id}
               onClick={() => navigate({ page: 'workspace', id: ws.id })}
               style={{ ...tabStyle, ...(active ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}
-              title={`${workspaceDisplayLabel(ws)} · ⌘${i + 2} · 더블클릭: 이름 변경`}
+              title={`${workspaceDisplayLabel(ws)}${IS_NATIVE ? ` · ⌘${i + 2}` : ''} · 더블클릭: 이름 변경`}
               onDoubleClick={() => { setRenamingId(ws.id); setRenameDraft(ws.name); }}
             >
               {dotColor ? (
