@@ -1,4 +1,5 @@
 import type { Session, TerminalMarker } from './session.js';
+import { agentKindOf, claudeStructuredTranscript } from './agent-providers.js';
 
 /**
  * One prompt and the output it produced.
@@ -16,6 +17,8 @@ export interface InteractionView {
   prompt: string;
   status: InteractionStatus;
   transcript: string | null;
+  /** Where the transcript came from: the agent's own record, or the screen. */
+  transcriptSource?: 'structured' | 'screen';
   /** Screen quality at extraction time — 'degraded' means approximate. */
   integrity?: 'healthy' | 'degraded';
   createdAt: number;
@@ -80,10 +83,36 @@ export class InteractionStore {
    * StopFailure or SessionEnd to 'failed'. Both end the wait — an agent that
    * died is not going to answer, and blocking until timeout would be a lie.
    */
-  finish(session: Session, status: 'completed' | 'failed' = 'completed'): InteractionView | null {
+  async finish(
+    session: Session,
+    status: 'completed' | 'failed' = 'completed',
+    meta?: Record<string, unknown>,
+  ): Promise<InteractionView | null> {
     const rec = this.pendingBySession.get(session.id);
     if (!rec) return null;
-    if (rec.marker) rec.transcript = session.transcriptSince(rec.marker);
+
+    // The agent's own record first — the screen is a rendering, and its tail
+    // carries whatever the TUI painted after the answer. Screen extraction
+    // stays as the fallback, and says so.
+    let structured: string | null = null;
+    // The Stop hook clears claudeSessionId into claudeLastSessionId BEFORE
+    // reporting the stop — by the time we run, the live id has already moved.
+    const claudeSid = (meta?.claudeSessionId ?? meta?.claudeLastSessionId) as unknown;
+    if (status === 'completed' && meta && agentKindOf(meta) === 'claude-code'
+        && typeof claudeSid === 'string' && typeof meta.cwd === 'string') {
+      structured = await claudeStructuredTranscript({
+        cwd: meta.cwd,
+        claudeSessionId: claudeSid,
+        sinceMs: rec.createdAt,
+      }).catch(() => null);
+    }
+    if (structured !== null) {
+      rec.transcript = structured;
+      rec.transcriptSource = 'structured';
+    } else if (rec.marker) {
+      rec.transcript = session.transcriptSince(rec.marker);
+      if (rec.transcript !== null) rec.transcriptSource = 'screen';
+    }
     // Extraction quality rides along: a transcript read off a degraded screen
     // must not be indistinguishable from a faithful one.
     rec.integrity = session.integrity;

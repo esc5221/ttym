@@ -26,7 +26,7 @@ describe('InteractionStore', () => {
     expect(started.status).toBe('pending');
     expect(started.transcript).toBeNull();
 
-    const finished = store.finish(session);
+    const finished = await store.finish(session);
     expect(finished?.status).toBe('completed');
     expect(finished?.transcript).toBe('the answer');
     expect(store.get(started.id)?.transcript).toBe('the answer');
@@ -83,12 +83,12 @@ describe('InteractionStore', () => {
     expect(store.pending(5)?.id).toBe(second.id);
   });
 
-  it('carries a null transcript when the marked rows scrolled away', () => {
+  it('carries a null transcript when the marked rows scrolled away', async () => {
     const store = new InteractionStore();
     const session = fakeSession(6, null);
 
     const started = store.start(session, 'q');
-    const finished = store.finish(session);
+    const finished = await store.finish(session);
 
     expect(finished?.status).toBe('completed');
     expect(finished?.transcript).toBeNull();

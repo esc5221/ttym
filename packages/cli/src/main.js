@@ -1420,7 +1420,13 @@ async function cmdWorkspace() {
       workspace: `${workspace.project}/${workspace.name}`,
       member: member.name,
       sessionId: member.sessionId,
-      interaction: interaction ? { id: interaction.id, status: interaction.status } : null,
+      interaction: interaction ? {
+        id: interaction.id,
+        status: interaction.status,
+        // 추출 품질은 숨기지 않는다 — 어디서 온 답인지, 화면이 온전했는지.
+        transcriptSource: interaction.transcriptSource ?? null,
+        integrity: interaction.integrity ?? null,
+      } : null,
       completed,
       screen: output,
     };
@@ -2090,7 +2096,13 @@ async function cmdAwaitAddr() {
   if (hasFlag('--json')) {
     return printOutput({
       target: target.label,
-      interaction: interaction ? { id: interaction.id, status: interaction.status } : null,
+      interaction: interaction ? {
+        id: interaction.id,
+        status: interaction.status,
+        // 추출 품질은 숨기지 않는다 — 어디서 온 답인지, 화면이 온전했는지.
+        transcriptSource: interaction.transcriptSource ?? null,
+        integrity: interaction.integrity ?? null,
+      } : null,
       completed: interaction?.status === 'completed',
       output,
     }, true);

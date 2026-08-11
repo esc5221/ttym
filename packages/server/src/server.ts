@@ -355,8 +355,16 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       session.write(Buffer.from(prompt));
       // Interactive TUIs read Enter as CR; a shell wants LF. Neither is right
       // for both, so the caller says which, defaulting to the agent case.
-      if (submit === 'cr') session.write(Buffer.from([0x0d]));
-      else if (submit === 'lf') session.write(Buffer.from([0x0a]));
+      // The CR waits a beat: two back-to-back writes can land in one PTY
+      // read, and a TUI's paste heuristics then swallow the CR as a pasted
+      // newline instead of a submit — the prompt sits in the input box
+      // forever. Longer prompts widen the paste window, which is why this
+      // was a timing lottery. A shell's LF has no such heuristics.
+      if (submit === 'cr') {
+        setTimeout(() => { if (!session.isDead) session.write(Buffer.from([0x0d])); }, 75);
+      } else if (submit === 'lf') {
+        session.write(Buffer.from([0x0a]));
+      }
       log(`HTTP INTERACTION session=${id} id=${interaction.id} len=${prompt.length}`);
 
       const settled = await interactions.wait(interaction.id, timeoutMs);
@@ -429,9 +437,11 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         if (parsed.event === 'StopFailure' || parsed.event === 'SessionEnd') outcome = 'failed';
         if (parsed.outcome === 'failed') outcome = 'failed';
       } catch { /* an empty or malformed body is treated as a plain Stop */ }
-      const settled = interactions.finish(session, outcome);
-      log(`HTTP STOP session=${id} outcome=${outcome} interaction=${settled?.id ?? 'none'}`);
-      json(200, { ok: true, interaction: settled });
+      void manager.getMeta(id).catch(() => ({})).then(async (meta) => {
+        const settled = await interactions.finish(session, outcome, meta as Record<string, unknown>);
+        log(`HTTP STOP session=${id} outcome=${outcome} interaction=${settled?.id ?? 'none'} source=${settled?.transcriptSource ?? '-'}`);
+        json(200, { ok: true, interaction: settled });
+      });
     });
     return true;
   }
