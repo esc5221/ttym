@@ -1535,6 +1535,8 @@ function App() {
   // 창별 세밀 줌 (데스크톱 셸에서만): ⌘+/− 5% 스텝, ⌘0 리셋. 50~200% 클램프.
   // 브라우저 줌은 오리진 단위로 전 창이 동기화되지만 webview 줌은 창의 것이다.
   const zoomRef = useRef(1);
+  const zoomSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zoomInitDone = useRef(false);
   useEffect(() => {
     if (!IS_NATIVE) return;
     const tauri = (window as unknown as { __TAURI__?: { webview?: { getCurrentWebview?: () => { setZoom: (f: number) => Promise<void> } } } }).__TAURI__;
@@ -1550,6 +1552,13 @@ function App() {
       e.preventDefault();
       zoomRef.current = Math.min(2, Math.max(0.5, Math.round(next * 100) / 100));
       void webview.setZoom(zoomRef.current);
+      // 마지막으로 정한 zoom이 다음 창의 기본값이 된다. 창별 키(label)는
+      // timestamp 라벨이 config에 쓰레기를 무한 축적해서 기각 — 창별 독립은
+      // 런타임에서만, 영속은 하나의 truth로.
+      if (zoomSaveTimer.current !== null) clearTimeout(zoomSaveTimer.current);
+      zoomSaveTimer.current = setTimeout(() => {
+        void api.patchConfig(API_BASE, { zoom: String(zoomRef.current) }).catch(() => {});
+      }, 500);
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
@@ -1598,6 +1607,20 @@ function App() {
     if (values['font-size'] !== undefined) {
       const size = Number(values['font-size']);
       if (Number.isFinite(size) && size >= 8 && size <= 32) setFontSize(size);
+    }
+    // desktop 창의 zoom 복원 — 최초 config 수신 때 한 번만. 이후의 push에
+    // 반응하면 다른 창에서 zoom을 바꿀 때마다 이 창까지 끌려간다.
+    if (IS_NATIVE && !zoomInitDone.current && values.zoom !== undefined) {
+      zoomInitDone.current = true;
+      const z = Number(values.zoom);
+      if (Number.isFinite(z) && z >= 0.5 && z <= 2) {
+        const tauri = (window as unknown as { __TAURI__?: { webview?: { getCurrentWebview?: () => { setZoom: (f: number) => Promise<void> } } } }).__TAURI__;
+        const webview = tauri?.webview?.getCurrentWebview?.();
+        if (webview) {
+          zoomRef.current = z;
+          void webview.setZoom(z);
+        }
+      }
     }
   }, []);
 

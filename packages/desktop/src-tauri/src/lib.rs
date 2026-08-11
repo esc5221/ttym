@@ -73,6 +73,9 @@ fn candidate_bins(app: &tauri::AppHandle) -> Vec<PathBuf> {
     }
 
     if let Ok(resource_dir) = app.path().resource_dir() {
+        // Tauri encodes a `../../../dist` resource path as `_up_/_up_/_up_/dist`
+        // inside Resources — measured on the shipped bundle, not guessed.
+        bins.push(resource_dir.join("_up_").join("_up_").join("_up_").join("dist").join("ttym"));
         bins.push(resource_dir.join("dist").join("ttym"));
         bins.push(resource_dir.join("ttym"));
     }
@@ -154,8 +157,10 @@ fn open_window(app: &tauri::AppHandle) -> Result<String, String> {
         .initialization_script(
             // Every page in this webview — launcher and served UI alike —
             // sees the native marker. Pure data, no IPC surface exposed to
-            // the remote origin.
-            "window.__TTYM_NATIVE__ = { shell: 'tauri', platform: 'macos' };",
+            // the remote origin. The label lets the page tell windows apart.
+            &format!(
+                "window.__TTYM_NATIVE__ = {{ shell: 'tauri', platform: 'macos', label: '{label}' }};"
+            ),
         )
         .build()
         .map_err(|err| format!("failed to open window: {err}"))?;
