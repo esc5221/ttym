@@ -303,6 +303,10 @@ struct Config {
     runtime_dir: PathBuf,
     ring_size: usize,
     cwd: Option<String>,
+    /// Socket path handed down by the server — the single source of truth,
+    /// unique per holder incarnation so a stale socket from a dead session
+    /// with a recycled id can never intercept a fresh connect.
+    socket_override: Option<PathBuf>,
 }
 
 fn parse_args() -> Config {
@@ -313,6 +317,7 @@ fn parse_args() -> Config {
     let mut runtime_dir = PathBuf::from("/tmp/ttym");
     let mut ring_size: usize = 1 << 20; // 1MB
     let mut cwd: Option<String> = None;
+    let mut socket_override: Option<PathBuf> = None;
     let mut cmd = Vec::new();
 
     let mut i = 1;
@@ -324,6 +329,7 @@ fn parse_args() -> Config {
             "--runtime-dir" => { i += 1; runtime_dir = PathBuf::from(&args[i]); }
             "--ring-size" => { i += 1; ring_size = args[i].parse().expect("--ring-size"); }
             "--cwd" => { i += 1; cwd = Some(args[i].clone()); }
+            "--socket" => { i += 1; socket_override = Some(PathBuf::from(&args[i])); }
             "--" => { cmd = args[i + 1..].to_vec(); break; }
             other => { eprintln!("unknown arg: {other}"); process::exit(1); }
         }
@@ -332,7 +338,7 @@ fn parse_args() -> Config {
     if cmd.is_empty() {
         cmd = vec![env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())];
     }
-    Config { id, cmd, cols, rows, runtime_dir, ring_size, cwd }
+    Config { id, cmd, cols, rows, runtime_dir, ring_size, cwd, socket_override }
 }
 
 // ───── Helpers ─────
@@ -383,7 +389,24 @@ fn main() {
     let config = parse_args();
     fs::create_dir_all(&config.runtime_dir).expect("mkdir runtime_dir");
 
-    let socket_path = config.runtime_dir.join(format!("session-{}.sock", config.id));
+    let socket_path = config.socket_override.clone()
+        .unwrap_or_else(|| socket_path_for(&config.runtime_dir, config.id));
+    if let Some(dir) = socket_path.parent() {
+        fs::create_dir_all(dir).expect("create socket namespace");
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            if let Some(user_root) = dir.parent() {
+                let _ = fs::set_permissions(user_root, fs::Permissions::from_mode(0o700));
+            }
+            let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
+        }
+    }
+    // Validate in BYTES (sockaddr_un limit is bytes, not chars) and fail
+    // with words, not a panic backtrace.
+    if socket_path.as_os_str().len() > 100 {
+        eprintln!("ttym-holder: socket path exceeds sockaddr_un limit: {}", socket_path.display());
+        process::exit(1);
+    }
     let manifest_path = config.runtime_dir.join(format!("session-{}.json", config.id));
     let _ = fs::remove_file(&socket_path); // clean stale
 
@@ -392,6 +415,16 @@ fn main() {
         ws_col: config.cols, ws_row: config.rows,
         ws_xpixel: 0, ws_ypixel: 0,
     };
+
+    // Bind BEFORE forkpty: a bind failure must not leave an orphaned PTY
+    // child behind. The listener is CLOEXEC (std default), so the child
+    // does not inherit it.
+    let mut listener = UnixListener::bind(&socket_path).expect("bind");
+    listener.set_nonblocking(true).unwrap();
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600));
+    }
 
     let result = unsafe { forkpty(Some(&winsize), None) }.expect("forkpty");
     let (master, child_pid) = match result {
@@ -441,14 +474,6 @@ fn main() {
 
     let master_fd = master.as_raw_fd();
     set_nonblocking(master_fd);
-
-    // ── Unix listener ──
-    let mut listener = UnixListener::bind(&socket_path).expect("bind");
-    listener.set_nonblocking(true).unwrap();
-    #[cfg(unix)] {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600));
-    }
 
     // ── Manifest ──
     let created_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
@@ -875,6 +900,7 @@ fn main() {
     // Cleanup
     let _ = fs::remove_file(&socket_path);
     let _ = fs::remove_file(&manifest_path);
+    let _ = fs::remove_file(&socket_path);
     log(config.id, "exiting");
 }
 
@@ -899,6 +925,31 @@ fn pty_exit(
         let _ = write_frame(c, CMD_EXIT, &code);
     }
     *linger = Some(Instant::now() + Duration::from_secs(30));
+}
+
+/// FNV-1a 64 over the runtime-dir string AS RECEIVED from the server.
+/// Deliberately not canonicalized: Rust's canonicalize resolves symlinks
+/// (/var → /private/var on macOS) and Node's resolve() does not — hashing the
+/// exchanged string is the only representation both sides share.
+/// The TS twin lives in packages/server/src/session.ts (holderSocketPath).
+fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// Sockets live in a short, deterministic namespace of their own —
+/// /tmp/ttym-<uid>/<hash>/session-<id>.sock — because sockaddr_un caps the
+/// path at ~104 bytes and a deep TTYM_RUNTIME_DIR used to panic the bind.
+/// Manifests and checkpoints stay in the runtime dir; only the transport
+/// path moves.
+fn socket_path_for(runtime_dir: &std::path::Path, id: u32) -> PathBuf {
+    let uid = unsafe { libc::getuid() };
+    let hash = fnv1a64(&runtime_dir.display().to_string());
+    PathBuf::from(format!("/tmp/ttym-{}/{:016x}/session-{}.sock", uid, hash, id))
 }
 
 fn format_cmd_json(cmd: &[String]) -> String {
@@ -980,6 +1031,14 @@ mod tests {
         t.feed(&osc, start);
         t.prune_below(ring.base_offset());
         assert_eq!(t.first_at_or_after(ring.base_offset()), None);
+    }
+
+    #[test]
+    fn fnv1a64_matches_known_vector() {
+        // TS 쌍둥이(session.ts holderSocketPath)와 같은 값을 내야 한다.
+        assert_eq!(super::fnv1a64(""), 0xcbf29ce484222325);
+        assert_eq!(super::fnv1a64("a"), 0xaf63dc4c8601ec8c);
+        assert_eq!(super::fnv1a64("/Users/x/.ttym/run"), super::fnv1a64("/Users/x/.ttym/run"));
     }
 
     #[test]

@@ -94,6 +94,24 @@ describe('Session (holder-backed)', () => {
     await waitFor(() => session.ring.nextSeq > seqBefore ? true : undefined);
   });
 
+  it('creates sessions under a runtime dir far past sockaddr_un limits', async () => {
+    // sockaddr_un은 경로를 ~104바이트로 제한한다. 소켓이 runtime dir 안에
+    // 살던 시절엔 깊은 TTYM_RUNTIME_DIR가 holder bind를 panic시켰다 — 지금은
+    // 소켓만 /tmp/ttym-<uid>/<해시>/ 네임스페이스로 나가 있어야 한다.
+    const deep = resolve(TEST_RUNTIME_DIR,
+      'a-very-deeply-nested-runtime-directory-path-segment-one',
+      'segment-two-that-pushes-the-total-well-past-one-hundred-and-four-bytes');
+    mkdirSync(deep, { recursive: true });
+    expect(Buffer.byteLength(deep)).toBeGreaterThan(104);
+
+    const session = await Session.create(
+      8, ['/bin/sh', '-lc', "printf 'DEEP-OK\\n'; stty -echo; exec cat"],
+      80, 24, deep,
+    );
+    sessions.push(session);
+    await waitFor(() => session.snapshot().includes('DEEP-OK') ? true : undefined);
+  });
+
   it('degraded integrity heals only on a stream-level RIS', async () => {
     mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
     const session = await Session.create(

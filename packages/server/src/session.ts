@@ -1,4 +1,5 @@
 import { spawn, ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createConnection, Socket } from 'node:net';
 import { existsSync, openSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -171,6 +172,44 @@ export function getHomeDir(): string {
   return resolve(process.env.HOME || '/tmp', '.ttym');
 }
 
+/**
+ * FNV-1a 64 over the runtime-dir string as passed to the holder. The Rust twin
+ * lives in holder/src/main.rs (fnv1a64) — the two must agree byte for byte,
+ * which is why neither side canonicalizes: Rust's canonicalize resolves
+ * symlinks (/var → /private/var) and Node's resolve() does not.
+ */
+function fnv1a64(input: string): bigint {
+  const MASK = 0xffffffffffffffffn;
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of Buffer.from(input, 'utf8')) {
+    hash ^= BigInt(byte);
+    hash = (hash * 0x100000001b3n) & MASK;
+  }
+  return hash;
+}
+
+/**
+ * Where a session's holder socket lives: a short, deterministic namespace
+ * (/tmp/ttym-<uid>/<hash>/) instead of the runtime dir, because sockaddr_un
+ * caps paths at ~104 bytes and a deep TTYM_RUNTIME_DIR used to panic the
+ * holder's bind (and would break our own connect the same way). Recovery
+ * still connects to whatever the manifest recorded, so old sessions keep
+ * their old paths.
+ */
+export function holderSocketPath(runtimeDir: string, id: number, nonce: string): string {
+  const uid = process.getuid?.() ?? 0;
+  const hash = fnv1a64(runtimeDir).toString(16).padStart(16, '0');
+  // The nonce makes the path unique per holder INCARNATION. Without it, a
+  // stale socket left by a dead session whose id got recycled (runtime dir
+  // wiped, ids restart) still has a live listener behind it — and a fresh
+  // server's connect lands on the wrong holder. Measured, not hypothetical.
+  const path = `/tmp/ttym-${uid}/${hash}/session-${id}-${nonce}.sock`;
+  if (Buffer.byteLength(path) > 100) {
+    throw new Error(`holder socket path exceeds sockaddr_un limit: ${path}`);
+  }
+  return path;
+}
+
 export function getRuntimeDir(): string {
   const env = process.env;
   if (env.TTYM_RUNTIME_DIR) return env.TTYM_RUNTIME_DIR;
@@ -328,7 +367,7 @@ export class Session {
     id: number, cmd: string[], cols: number, rows: number,
     runtimeDir: string, cwd?: string, extraEnv?: Record<string, string>,
   ): Promise<Session> {
-    const socketPath = resolve(runtimeDir, `session-${id}.sock`);
+    const socketPath = holderSocketPath(runtimeDir, id, randomUUID().slice(0, 8));
 
     // Spawn holder (detached, survives server exit)
     // stdio must be 'ignore' — pipe would kill holder on SIGPIPE when server exits
@@ -337,6 +376,7 @@ export class Session {
       '--cols', String(cols),
       '--rows', String(rows),
       '--runtime-dir', runtimeDir,
+      '--socket', socketPath,
     ];
     if (cwd) args.push('--cwd', cwd);
     args.push('--', ...cmd);
