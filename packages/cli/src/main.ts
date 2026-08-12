@@ -118,7 +118,7 @@ function fetchDelete(port, path) {
   return fetchRequest(port, 'DELETE', path);
 }
 
-async function fetchRequest(port, method, path, body, timeoutMs = HTTP_TIMEOUT_MS) {
+async function fetchRequest(port, method, path, body = undefined, timeoutMs = HTTP_TIMEOUT_MS) {
   try {
     return await apiRequest(apiBase(port), path, { method, body, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) { return legacyBody(err); }
@@ -172,7 +172,7 @@ function printOutput(value, asJson = false) {
   console.log(value);
 }
 
-function encodeFrame(sessionId, cmd, payload = Buffer.alloc(0)) {
+function encodeFrame(sessionId, cmd, payload: Uint8Array = Buffer.alloc(0)) {
   const body = Buffer.isBuffer(payload) ? payload : Buffer.from(payload);
   const frame = Buffer.allocUnsafe(3 + body.length);
   frame.writeUInt16LE(sessionId, 0);
@@ -851,7 +851,7 @@ async function cmdMeta() {
   const now = new Date().toISOString();
 
   // Collect --set key=value pairs and --claude-session shorthand
-  const patch = {};
+  const patch: Record<string, unknown> = {};
   let hasPatch = false;
   const args = process.argv.slice(4);
   let pendingClaudeSource = null;
@@ -1026,7 +1026,7 @@ async function resolveWorkspace(port, token) {
   process.exit(EXIT.NOT_FOUND);
 }
 
-async function resolveAttachTarget(port, token, options = {}) {
+async function resolveAttachTarget(port, token, options: Record<string, any> = {}) {
   const { createIfMissing = false, createOptions = {} } = options;
   const normalized = normalizeAddressToken(token);
   if (!normalized) {
@@ -1119,7 +1119,7 @@ function findMemberInWorkspace(workspace, token) {
   return null;
 }
 
-async function createWorkspaceMember(port, workspace, opts = {}) {
+async function createWorkspaceMember(port, workspace, opts: Record<string, any> = {}) {
   const { name, role = null, cmd = null, cwd = null } = opts;
   const usedNames = new Set((workspace.members || []).map((m) => m.name));
   let memberName = name;
@@ -1130,7 +1130,7 @@ async function createWorkspaceMember(port, workspace, opts = {}) {
   } else if (usedNames.has(memberName)) {
     throw new Error(`member name already exists: ${memberName}`);
   }
-  const sessionBody = {
+  const sessionBody: Record<string, unknown> = {
     cmd: cmd && cmd.length > 0 ? cmd : [process.env.SHELL || '/bin/bash'],
     cols: 80,
     rows: 24,
@@ -1617,7 +1617,7 @@ function isHookInstalled(cfg) {
 }
 
 function agentInstall(cfg) {
-  let settings = {};
+  let settings: Record<string, any> = {};
   try { settings = JSON.parse(readFileSync(cfg.settingsPath, 'utf8')); } catch {}
 
   if (!settings.hooks) settings.hooks = {};
@@ -1628,7 +1628,7 @@ function agentInstall(cfg) {
 
     let target = settings.hooks[wanted.event].find((entry) => (entry.matcher ?? '') === (wanted.matcher ?? ''));
     if (!target) {
-      target = { matcher: wanted.matcher, hooks: [] };
+      target = { matcher: wanted.matcher, hooks: [] } as { matcher: string; hooks: unknown[] };
       settings.hooks[wanted.event].push(target);
     }
     if (!Array.isArray(target.hooks)) target.hooks = [];
@@ -1653,7 +1653,7 @@ function agentInstall(cfg) {
 }
 
 function agentUninstall(cfg) {
-  let settings = {};
+  let settings: Record<string, any> = {};
   try { settings = JSON.parse(readFileSync(cfg.settingsPath, 'utf8')); } catch {}
 
   let removed = false;
@@ -2008,7 +2008,7 @@ async function cmdSplit() {
     console.error('split needs a workspace member as its target, not a bare session id');
     process.exit(EXIT.USAGE);
   }
-  const body = { targetSessionId: target.sessionId, name };
+  const body: Record<string, unknown> = { targetSessionId: target.sessionId, name };
   if (cmd) body.cmd = cmd;
   const data = await fetchPost(port, `/api/workspaces/${encodeURIComponent(target.workspace.id)}/split`, body);
   if (!data || data.error || !data.session) {

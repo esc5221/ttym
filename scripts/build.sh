@@ -39,7 +39,7 @@ echo "      $(du -h "$DIST/ttym-server.js" | cut -f1) ttym-server.js"
 # Bundled rather than copied: the source imports workspace TS packages, and
 # inlining ws means dist no longer needs the repo node_modules at runtime.
 echo "[3/4] Bundling CLI (esbuild)..."
-npx esbuild packages/cli/src/main.js \
+npx esbuild packages/cli/src/main.ts \
   --bundle \
   --platform=node \
   --format=esm \
