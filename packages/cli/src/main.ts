@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // C4b: 디스패치만 남는다 — 각 도메인은 제 파일에 산다.
 import process from 'node:process';
 import { EXIT, getPort } from './common.js';
