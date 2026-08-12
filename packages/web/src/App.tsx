@@ -175,6 +175,29 @@ async function apiCreateWorkspace(ws: { id: string; name: string; layout: Layout
   } catch { return null; }
 }
 
+/** 셸에 안전하게 꽂을 경로: 평범한 문자만이 아니면 따옴표로 감싼다.
+ *  ghostty는 백슬래시, vibetunnel은 따옴표를 쓰는데 하류(claude 복원기)는
+ *  둘 다 처리한다 — 읽기 좋은 따옴표 쪽을 따른다. */
+function quotePathForShell(path: string): string {
+  return /^[A-Za-z0-9_\-./~]+$/.test(path) ? path : `"${path.replace(/"/g, '\\"')}"`;
+}
+
+/** 드롭된 File들을 서버 drops/로 올리고 실경로 목록을 받는다 (웹 전용 —
+ *  브라우저는 원본 경로를 원리적으로 숨기므로 내용이 대신 여행한다). */
+async function uploadDroppedFiles(files: File[]): Promise<string[]> {
+  const paths: string[] = [];
+  for (const file of files) {
+    const res = await fetch(`${API_BASE}/api/upload?name=${encodeURIComponent(file.name)}`, {
+      method: 'POST',
+      body: file,
+    });
+    if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+    const { path } = await res.json() as { path: string };
+    paths.push(path);
+  }
+  return paths;
+}
+
 function workspaceDisplayLabel(workspace: Workspace): string {
   return workspaceLabel(workspace.project, workspace.name);
 }
@@ -695,6 +718,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   const [standaloneSessions, setStandaloneSessions] = useState<Array<{ id: number; cwd?: string }>>([]);
   const [attachLoading, setAttachLoading] = useState(false);
   const [dragSid, setDragSid] = useState<number | null>(null);
+  const [fileDropSid, setFileDropSid] = useState<number | null>(null);
   const [bells, setBells] = useState<Set<number>>(new Set());
   const [lastAgentIds, setLastAgentIds] = useState<Record<number, { claude?: string; codex?: string }>>({});
   const barrier = useRef(new MutationBarrier());
@@ -746,6 +770,39 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
     const fallback = window.setInterval(() => { void refresh(); }, 30_000);
     return () => { unsubscribe(); window.clearInterval(fallback); };
   }, [workspaceId, refresh, applyWorkspace, mux]);
+
+  /** 드롭 공통 종착지: 경로들을 인용해 해당 pane의 PTY에 타이핑처럼 꽂는다.
+   *  제출(CR)은 하지 않는다 — vscode·ghostty와 같은 관례. */
+  const insertPathsIntoPane = useCallback((sid: number, paths: string[]) => {
+    if (paths.length === 0) return;
+    mux.send(sid, paths.map(quotePathForShell).join(' '));
+    setFocusedSid(sid);
+  }, [mux]);
+
+  // desktop에선 웹뷰 HTML5 drop이 억제되고 네이티브 drag-drop 이벤트가 온다 —
+  // 그리고 여기엔 실경로가 실려 있다(vscode·ghostty 계보). 좌표로 pane을
+  // 찾아 그 PTY에 꽂는다. 업로드는 필요 없다.
+  useEffect(() => {
+    if (!IS_NATIVE) return;
+    const tauri = (window as unknown as {
+      __TAURI__?: { event?: { listen?: (name: string, cb: (e: { payload: { paths?: string[]; position?: { x: number; y: number } } }) => void) => Promise<() => void> } };
+    }).__TAURI__;
+    const listen = tauri?.event?.listen;
+    if (!listen) return;
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    void listen('tauri://drag-drop', (event) => {
+      const paths = event.payload?.paths ?? [];
+      const pos = event.payload?.position;
+      if (paths.length === 0 || !pos) return;
+      const scale = window.devicePixelRatio || 1;
+      const el = document.elementFromPoint(pos.x / scale, pos.y / scale);
+      const paneEl = el?.closest?.('[data-pane-sid]');
+      const sid = paneEl ? Number(paneEl.getAttribute('data-pane-sid')) : NaN;
+      if (Number.isFinite(sid) && sid > 0) insertPathsIntoPane(sid, paths);
+    }).then((fn) => { if (disposed) fn(); else unlisten = fn; });
+    return () => { disposed = true; unlisten?.(); };
+  }, [insertPathsIntoPane]);
 
   const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
 
@@ -934,10 +991,30 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
     return (
       <div
         key={sid}
+        data-pane-sid={sid}
         onMouseDown={() => { setFocusedSid(sid); setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; }); }}
+        onDragOver={(e) => {
+          // 파일 드래그만 받는다 — 헤더의 pane 교환 드래그는 Files 타입이 없다.
+          if (!e.dataTransfer.types.includes('Files')) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          setFileDropSid(sid);
+        }}
+        onDragLeave={() => setFileDropSid((cur) => (cur === sid ? null : cur))}
+        onDrop={(e) => {
+          if (!e.dataTransfer.types.includes('Files')) return;
+          e.preventDefault();
+          setFileDropSid(null);
+          const files = Array.from(e.dataTransfer.files);
+          void uploadDroppedFiles(files)
+            .then((paths) => insertPathsIntoPane(sid, paths))
+            .catch(() => {});
+        }}
         style={{
           display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: 'var(--bg0)',
-          border: U.frameBorder ? (dead ? '1px solid var(--err)' : '1px solid var(--line)') : 'none',
+          border: fileDropSid === sid
+            ? '1px solid var(--accent)'
+            : U.frameBorder ? (dead ? '1px solid var(--err)' : '1px solid var(--line)') : 'none',
           borderRadius: U.paneRadius,
           overflow: 'hidden',
         }}
@@ -1027,7 +1104,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, bells, mux, localEchoEnabled, fontSize, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, fileDropSid, bells, mux, localEchoEnabled, fontSize, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (

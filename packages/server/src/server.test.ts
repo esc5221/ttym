@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
 import { createServer, agentIsActive, AGENT_ACTIVE_TTL_MS, TtymServer } from './server.js';
 import { CMD, decode, encode, toBuffer } from './protocol.js';
-import { rmSync } from 'node:fs';
+import { rmSync, readFileSync } from 'node:fs';
 
 type Frame = NonNullable<ReturnType<typeof decode>>;
 
@@ -371,6 +371,32 @@ describe('createServer', () => {
       terminal: { integrity: string };
     };
     expect(runtime.terminal.integrity).toBe('healthy');
+  });
+
+  it('accepts a dropped file upload and dedupes names Finder-style', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const put = (name: string, body: string) =>
+      fetch(`http://127.0.0.1:${port}/api/upload?name=${encodeURIComponent(name)}`, {
+        method: 'POST', body,
+      }).then(async (r) => ({ status: r.status, json: await r.json() as { path?: string; name?: string; error?: string } }));
+
+    const first = await put('note.txt', 'ONE');
+    expect(first.status).toBe(201);
+    expect(first.json.name).toBe('note.txt');
+    expect(readFileSync(first.json.path!, 'utf8')).toBe('ONE');
+
+    // 같은 이름 재드롭: 덮어쓰기 금지 — 앞서 준 경로의 내용이 대화 중간에
+    // 바뀌는 건 조용한 오염이다. Finder식 -2로 비켜간다.
+    const second = await put('note.txt', 'TWO');
+    expect(second.json.name).toBe('note-2.txt');
+    expect(readFileSync(first.json.path!, 'utf8')).toBe('ONE');
+    expect(readFileSync(second.json.path!, 'utf8')).toBe('TWO');
+
+    // 경로 성분은 신뢰하지 않는다.
+    const sneaky = await put('../../evil.sh', 'X');
+    expect(sneaky.status).toBe(201);
+    expect(sneaky.json.name).toBe('evil.sh');
+    expect(sneaky.json.path!.includes('..')).toBe(false);
   });
 
   it('a paused-then-reattached viewer keeps receiving live output', async () => {

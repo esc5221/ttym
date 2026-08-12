@@ -61,3 +61,34 @@ export async function sweepRuntimeDir(
 
   return { removed, kept };
 }
+
+/**
+ * Sweep the drops directory — files handed to sessions via drag-and-drop.
+ * Pure age policy: a drop is a delivery, not a store; after the grace window
+ * nothing should still be pointing at it.
+ */
+export async function sweepDropsDir(dir: string, maxAgeMs: number): Promise<SweepResult> {
+  let files: string[];
+  try {
+    files = await readdir(dir);
+  } catch {
+    return { removed: [], kept: 0 };
+  }
+  const removed: string[] = [];
+  let kept = 0;
+  const now = Date.now();
+  for (const file of files) {
+    const path = resolve(dir, file);
+    try {
+      const info = await stat(path);
+      if (!info.isFile()) { kept += 1; continue; }
+      if (now - info.mtimeMs > maxAgeMs) {
+        await unlink(path);
+        removed.push(file);
+      } else {
+        kept += 1;
+      }
+    } catch { kept += 1; }
+  }
+  return { removed, kept };
+}

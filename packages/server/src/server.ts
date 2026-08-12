@@ -1,13 +1,13 @@
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { extname, resolve } from 'node:path';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { extname, resolve, basename as basenamePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import { InteractionStore } from './interaction.js';
-import { sweepRuntimeDir } from './run-gc.js';
+import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
 import { ConfigStore } from './config-file.js';
 import { agentKindOf } from './agent-providers.js';
 import { getHomeDir, type Session } from './session.js';
@@ -25,6 +25,8 @@ const WS_HIGH_WATER = 1 << 20;
 // the stream from stuttering at the boundary.
 const ACK_HIGH_WATER = 256 * 1024;
 const ACK_LOW_WATER = 16 * 1024;
+/** Drag-and-drop upload ceiling — a delivery mechanism, not a file store. */
+const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 /** Delta replay above this falls back to one capped snapshot (tmux attach model). */
 const REPLAY_MAX_BYTES = 64 * 1024;
 /** Replay chunks merge into frames of about this size. */
@@ -217,6 +219,63 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     req.on('data', (c) => body += c);
     req.on('end', () => resolve(body));
   });
+
+  // POST /api/upload?name=<filename> — the web half of file drag-and-drop.
+  // A browser cannot learn a dropped file's real path (by design), so the
+  // lineage inverts: the CONTENT travels here, lands in ~/.ttym/drops under
+  // its original name, and the returned path is what gets typed into the
+  // pane. The vibetunnel model, with Finder-style dedupe instead of uuids —
+  // the agent reads the filename in the prompt, so the filename should mean
+  // something. Native surfaces (desktop) never call this; they have the real
+  // path.
+  if (path === '/api/upload' && req.method === 'POST') {
+    const rawName = url.searchParams.get('name') ?? '';
+    // basename()은 신뢰 경계다 — 클라이언트가 보낸 이름의 경로 성분은 버린다.
+    const safeName = basenamePath(rawName).replace(/^\.+/, '').trim();
+    if (!safeName) { json(400, { error: 'name required' }); return true; }
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let aborted = false;
+    req.on('data', (chunk: Buffer) => {
+      if (aborted) return;
+      total += chunk.length;
+      if (total > UPLOAD_MAX_BYTES) {
+        aborted = true;
+        json(413, { error: `file exceeds ${UPLOAD_MAX_BYTES / 1024 / 1024}MB limit` });
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (aborted) return;
+      void (async () => {
+        const dir = resolve(getHomeDir(), 'drops');
+        await mkdir(dir, { recursive: true });
+        const dot = safeName.lastIndexOf('.');
+        const stem = dot > 0 ? safeName.slice(0, dot) : safeName;
+        const ext = dot > 0 ? safeName.slice(dot) : '';
+        // Finder-style collision handling: image.png, image-2.png, … The 'wx'
+        // flag makes each claim atomic, so two same-name drops cannot land on
+        // one file even if they race.
+        for (let i = 1; i <= 100; i++) {
+          const candidate = i === 1 ? safeName : `${stem}-${i}${ext}`;
+          const target = resolve(dir, candidate);
+          try {
+            await writeFile(target, Buffer.concat(chunks, total), { flag: 'wx' });
+            log(`UPLOAD ${candidate} ${total}B`);
+            json(201, { path: target, name: candidate, bytes: total });
+            return;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+          }
+        }
+        json(507, { error: 'too many name collisions' });
+      })().catch(() => { if (!res.headersSent) json(500, { error: 'write failed' }); });
+    });
+    return true;
+  }
 
   // GET|PATCH /api/config — the flat key=value file, served so every surface
   // (web, desktop, each window) reads and writes the same truth.
@@ -823,6 +882,11 @@ export async function createServer(port: number): Promise<TtymServer> {
       sweepRuntimeDir(manager.runtimeDir, keep, gcDays * 24 * 60 * 60 * 1000)
         .then(({ removed }) => {
           if (removed.length > 0) console.log(`[gc] swept ${removed.length} orphaned files`);
+        })
+        .catch(() => {});
+      sweepDropsDir(resolve(getHomeDir(), 'drops'), gcDays * 24 * 60 * 60 * 1000)
+        .then(({ removed }) => {
+          if (removed.length > 0) console.log(`[gc] swept ${removed.length} expired drops`);
         })
         .catch(() => {});
     };

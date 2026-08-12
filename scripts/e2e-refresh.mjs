@@ -11,7 +11,7 @@
 // 실행: node scripts/e2e-refresh.mjs
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -72,37 +72,19 @@ function wsOnce() {
   });
 }
 
-async function createMarkerSession() {
+async function createSessionWith(cmd) {
   const ws = await wsOnce();
   const sid = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('CREATE timed out')), 10000);
     ws.on('message', (buf) => {
       if (buf[2] === CMD.CREATE) { clearTimeout(timer); resolve(buf.readUInt16LE(0)); }
     });
-    ws.send(enc(0, CMD.CREATE, {
-      cmd: ['/bin/sh', '-lc', `printf '${MARKER}\\n'; stty -echo; exec cat`],
-      cols: 80, rows: 24,
-    }));
+    ws.send(enc(0, CMD.CREATE, { cmd: ['/bin/sh', '-lc', cmd], cols: 80, rows: 24 }));
   });
   ws.close();
   return sid;
 }
 
-async function createMarkerSession2() {
-  const ws = await wsOnce();
-  const sid = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('CREATE2 timed out')), 10000);
-    ws.on('message', (buf) => {
-      if (buf[2] === CMD.CREATE) { clearTimeout(timer); resolve(buf.readUInt16LE(0)); }
-    });
-    ws.send(enc(0, CMD.CREATE, {
-      cmd: ['/bin/sh', '-lc', "printf 'E2E-SECOND-WS\\n'; stty -echo; exec cat"],
-      cols: 80, rows: 24,
-    }));
-  });
-  ws.close();
-  return sid;
-}
 
 async function destroySession(sid) {
   try {
@@ -130,7 +112,7 @@ async function expectMarker(page, label, timeoutMs) {
 try {
   startServer();
   await waitForServer();
-  const sid = await createMarkerSession();
+  const sid = await createSessionWith(`printf '${MARKER}\\n'; stty -echo; exec cat`);
   createdSessions.push(sid);
 
   const wsRes = await fetch(`http://127.0.0.1:${PORT}/api/workspaces`, {
@@ -143,7 +125,7 @@ try {
   });
   if (wsRes.status !== 201) throw new Error(`workspace create failed: ${wsRes.status}`);
 
-  const sid2 = await createMarkerSession2();
+  const sid2 = await createSessionWith("printf 'E2E-SECOND-WS\\n'; stty -echo; exec cat");
   createdSessions.push(sid2);
   const ws2Res = await fetch(`http://127.0.0.1:${PORT}/api/workspaces`, {
     method: 'POST',
@@ -207,6 +189,43 @@ try {
     failures++;
     const has = await page.evaluate(() => document.body.innerText.includes('P2-HIDDEN-OUT'));
     console.log(`  FAIL  복귀 pane 상태 — 기존버퍼:${!has ? '?' : 'ok'} hidden출력:${has}`);
+  }
+
+  // 파일 드롭: 브라우저는 실경로를 숨기므로 내용이 서버 drops/로 여행하고,
+  // 돌려받은 경로가 인용되어 pane에 타이핑된다. 에코 켠 셸이라 타이핑이
+  // 곧 화면 증거다 (-echo 세션에선 개행 전 입력이 안 보인다 — 실측).
+  {
+    const sid3 = await createSessionWith('exec cat');
+    createdSessions.push(sid3);
+    await fetch(`http://127.0.0.1:${PORT}/api/workspaces`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'e2e-ws3', project: 'default', name: 'e2e3',
+        layout: { type: 'pane', sessionId: sid3 }, members: [] }),
+    });
+    await page.goto(`http://127.0.0.1:${PORT}/#w/e2e-ws3`);
+    await page.waitForTimeout(1500);
+    const dispatched = await page.evaluate(() => {
+      const pane = document.querySelector('[data-pane-sid]');
+      if (!pane) return false;
+      const file = new File(['DROP-CONTENT'], 'drop me.txt', { type: 'text/plain' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      pane.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      return true;
+    });
+    if (!dispatched) { failures++; console.log('  FAIL  드롭 대상 pane을 찾지 못함'); }
+    try {
+      await page.waitForFunction(() => document.body.innerText.includes('drop me.txt'), null, { timeout: 5000 });
+      const stored = readFileSync(join(HOME, 'drops', 'drop me.txt'), 'utf8');
+      if (stored === 'DROP-CONTENT') {
+        console.log('  PASS  드롭한 파일이 drops/에 원본명으로 저장되고 인용된 경로가 pane에 꽂힌다');
+      } else {
+        failures++; console.log('  FAIL  drops/ 내용 불일치:', JSON.stringify(stored));
+      }
+    } catch {
+      failures++;
+      console.log('  FAIL  드롭 경로가 화면에 나타나지 않음');
+    }
   }
 
   // P4: 보고 있는 중에 서버가 죽었다 살아나면, 손대지 않아도 화면이
