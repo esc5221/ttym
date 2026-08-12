@@ -55,9 +55,38 @@ function readPid() {
   }
 }
 
+/**
+ * 전역 플래그 선추출 — --port·--json은 argv 어디에 있든 여기서 먼저 빠진다.
+ * 이게 없던 시절 `add --cmd claude --port 7692`는 --port를 claude의 인자로
+ * 넘겨 즉사시켰고(탐욕적 --cmd), `ttym --port N <cmd>`는 디스패치가 깨졌다.
+ * `--` 뒤는 원문 보존 — 데이터와 하위 명령의 영토다.
+ */
+const GLOBAL = { port: null, json: false };
+{
+  const argv = process.argv;
+  const kept = argv.slice(0, 2);
+  let passthrough = false;
+  for (let i = 2; i < argv.length; i++) {
+    const a = argv[i];
+    if (passthrough) { kept.push(a); continue; }
+    if (a === '--') { passthrough = true; kept.push(a); continue; }
+    if (a === '--port' && argv[i + 1] && /^\d+$/.test(argv[i + 1])) { GLOBAL.port = parseInt(argv[i + 1], 10); i++; continue; }
+    if (a === '--json') { GLOBAL.json = true; continue; }
+    kept.push(a);
+  }
+  process.argv = kept;
+}
+
+/**
+ * Exit code contract — the contract suite asserts these, scripts branch on
+ * them. One number per *question the caller asks*, not per failure site:
+ *   0 성공 · 1 일반 실패 · 2 usage · 3 대상 해석 실패(없음·모호)
+ *   4 서버 연결 불가 · 5 API 버전 불일치
+ */
+const EXIT = { OK: 0, FAIL: 1, USAGE: 2, NOT_FOUND: 3, NO_SERVER: 4, VERSION: 5 };
+
 function getPort() {
-  const idx = process.argv.indexOf('--port');
-  if (idx !== -1 && process.argv[idx + 1]) return parseInt(process.argv[idx + 1], 10);
+  if (GLOBAL.port !== null) return GLOBAL.port;
   return parseInt(process.env.PORT || '7690', 10);
 }
 
@@ -120,11 +149,12 @@ async function ensureCompatibleServer(port) {
   if (info && typeof info.apiVersion === 'number' && info.apiVersion !== API_VERSION) {
     console.error(`error: server speaks api v${info.apiVersion}, this CLI speaks v${API_VERSION}`);
     console.error('       restart the server from the same build as this CLI');
-    process.exit(1);
+    process.exit(EXIT.VERSION);
   }
 }
 
 function hasFlag(flag) {
+  if (flag === '--json') return GLOBAL.json;
   return process.argv.includes(flag);
 }
 
@@ -194,13 +224,13 @@ function cmdStart() {
   const pid = readPid();
   if (pid) {
     console.log(`ttym already running (pid ${pid})`);
-    process.exit(1);
+    process.exit(EXIT.FAIL);
   }
 
   if (!existsSync(SERVER_JS)) {
     console.error(`server not found: ${SERVER_JS}`);
     console.error('run scripts/build.sh first');
-    process.exit(1);
+    process.exit(EXIT.FAIL);
   }
 
   mkdirSync(HOME_DIR, { recursive: true });
@@ -256,7 +286,7 @@ function cmdStop() {
   const pid = readPid();
   if (!pid) {
     console.log('ttym is not running');
-    process.exit(1);
+    process.exit(EXIT.FAIL);
   }
   signalSafe(pid, 'SIGTERM');
   waitForExit(pid);
@@ -294,7 +324,7 @@ async function cmdStatus() {
   const pid = readPid();
   if (!pid) {
     console.log('ttym is not running');
-    process.exit(1);
+    process.exit(EXIT.NO_SERVER); // status는 질문 — "안 떠있음"은 분기 가능한 답이어야 한다
   }
 
   const port = getPort();
@@ -319,7 +349,7 @@ function parsePrefixKey(spec) {
   const m = String(spec).toLowerCase().match(/^(c-|ctrl-|\^)([a-z\[\\\]])$/);
   if (!m) {
     console.error(`invalid prefix key: ${spec} (expected C-<letter>)`);
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const ch = m[2];
   if (ch >= 'a' && ch <= 'z') return ch.charCodeAt(0) - 96;
@@ -364,7 +394,7 @@ async function cmdAttach() {
     if (arg === '--prefix') { prefixSpec = head[++i] ?? null; continue; }
     if (arg.startsWith('--')) {
       console.error(`unknown option: ${arg}`);
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     positional.push(arg);
   }
@@ -374,7 +404,7 @@ async function cmdAttach() {
     console.error('usage: ttym attach <session-id|project/workspace/member|workspace/member>');
     console.error('            [--readonly] [--prefix C-<key>]');
     console.error('            [--new [--cmd <cmd...>] [--cwd <path>] [--role <role>] [--name <name>]]');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const prefixByte = parsePrefixKey(prefixSpec);
   const pfxLabel = prefixLabel(prefixByte);
@@ -385,7 +415,7 @@ async function cmdAttach() {
   });
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error('ttym attach requires an interactive TTY');
-    process.exit(1);
+    process.exit(EXIT.FAIL);
   }
   const attachMode = readonly ? 'readonly' : 'readwrite';
   const wsUrl = `ws://127.0.0.1:${port}/ws`;
@@ -801,7 +831,7 @@ async function cmdAttach() {
 function cmdLog() {
   if (!existsSync(LOG_FILE)) {
     console.log('no log file');
-    process.exit(1);
+    process.exit(EXIT.FAIL);
   }
   const follow = process.argv.includes('-f');
   const args = follow ? ['-f', LOG_FILE] : ['-50', LOG_FILE];
@@ -813,7 +843,7 @@ async function cmdMeta() {
   const sessionId = process.argv[3];
   if (!sessionId || isNaN(parseInt(sessionId, 10))) {
     console.error('usage: ttym meta <session-id> [--set key=value ...] [--claude-session <id>] [--claude-source <source>] [--clear-claude-session [id]] [--codex-session <id>] [--clear-codex-session [id]]');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const id = parseInt(sessionId, 10);
   const port = getPort();
@@ -915,7 +945,7 @@ async function cmdMeta() {
     }
   } catch {
     console.error('failed to connect to ttym server');
-    process.exit(1);
+    process.exit(EXIT.NO_SERVER);
   }
 }
 
@@ -951,14 +981,14 @@ async function resolveCurrentWorkspace(port) {
   const sid = process.env.TTYM_SESSION_ID;
   if (!sid || isNaN(parseInt(sid, 10))) {
     console.error('current workspace resolution requires TTYM_SESSION_ID');
-    process.exit(1);
+    process.exit(EXIT.FAIL);
   }
   const sessionId = parseInt(sid, 10);
   const workspaces = await listWorkspaces(port);
   const workspace = findWorkspaceBySessionId(workspaces, sessionId);
   if (!workspace) {
     console.error(`current session #${sessionId} is not assigned to a workspace`);
-    process.exit(1);
+    process.exit(EXIT.NOT_FOUND);
   }
   return workspace;
 }
@@ -971,7 +1001,7 @@ async function resolveWorkspace(port, token) {
   const normalized = normalizeAddressToken(token);
   if (!normalized) {
     console.error('workspace target is required');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
 
   const direct = await getWorkspaceById(port, normalized);
@@ -988,12 +1018,12 @@ async function resolveWorkspace(port, token) {
     if (exact.length === 1) return exact[0];
     if (exact.length > 1) {
       console.error(`workspace name is ambiguous: ${normalized}`);
-      process.exit(1);
+      process.exit(EXIT.NOT_FOUND);
     }
   }
 
   console.error(`workspace not found: ${token}`);
-  process.exit(1);
+  process.exit(EXIT.NOT_FOUND);
 }
 
 async function resolveAttachTarget(port, token, options = {}) {
@@ -1001,13 +1031,13 @@ async function resolveAttachTarget(port, token, options = {}) {
   const normalized = normalizeAddressToken(token);
   if (!normalized) {
     console.error('attach target is required');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
 
   if (/^\d+$/.test(normalized)) {
     if (createIfMissing) {
       console.error('--new requires a workspace/member address, not a raw session id');
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     const sessionId = parseInt(normalized, 10);
     return {
@@ -1031,7 +1061,7 @@ async function resolveAttachTarget(port, token, options = {}) {
     const matches = workspaces.filter((ws) => ws.name === workspaceName);
     if (matches.length > 1) {
       console.error(`workspace name is ambiguous: ${workspaceName}`);
-      process.exit(1);
+      process.exit(EXIT.NOT_FOUND);
     }
     if (matches.length === 1) {
       workspace = matches[0];
@@ -1041,7 +1071,7 @@ async function resolveAttachTarget(port, token, options = {}) {
 
   if (!workspace) {
     console.error(`attach target not found: ${token}`);
-    process.exit(1);
+    process.exit(EXIT.NOT_FOUND);
   }
 
   const existing = findMemberInWorkspace(workspace, memberToken);
@@ -1056,12 +1086,12 @@ async function resolveAttachTarget(port, token, options = {}) {
 
   if (!createIfMissing) {
     console.error(`member not found: ${memberToken}`);
-    process.exit(1);
+    process.exit(EXIT.NOT_FOUND);
   }
 
   if (/^\d+$/.test(normalizeAddressToken(memberToken) || '')) {
     console.error('--new requires a member name, not a session id');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
 
   const created = await createWorkspaceMember(port, workspace, {
@@ -1133,14 +1163,14 @@ function requireMember(workspace, token) {
   const normalized = normalizeAddressToken(token);
   if (!normalized) {
     console.error('member target is required');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
 
   const byName = (workspace.members || []).filter((member) => member.name === normalized);
   if (byName.length === 1) return byName[0];
   if (byName.length > 1) {
     console.error(`member name is ambiguous: ${normalized}`);
-    process.exit(1);
+    process.exit(EXIT.NOT_FOUND);
   }
 
   if (/^\d+$/.test(normalized)) {
@@ -1150,7 +1180,7 @@ function requireMember(workspace, token) {
   }
 
   console.error(`member not found: ${token}`);
-  process.exit(1);
+  process.exit(EXIT.NOT_FOUND);
 }
 
 async function patchSessionMeta(port, sessionId, patch) {
@@ -1206,7 +1236,7 @@ async function cmdProject() {
   }
 
   console.log('usage: ttym project list [--json]');
-  process.exit(1);
+  process.exit(EXIT.USAGE);
 }
 
 async function cmdWorkspace() {
@@ -1261,7 +1291,7 @@ async function cmdWorkspace() {
     const name = readOption(args, '--name');
     if (!name) {
       console.error('usage: ttym workspace create <project> --name <name> [--json]');
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     const id = randomUUID().slice(0, 8);
     const workspace = await fetchPost(port, '/api/workspaces', {
@@ -1292,7 +1322,7 @@ async function cmdWorkspace() {
     const spec = args[1];
     if (!spec) {
       console.error('usage: ttym workspace layout <workspace|--current> <even-h|even-v|main-v|tiled|auto|layout-json>');
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     // tmux select-layout: 프리셋 이름과 커스텀 트리를 같은 입구로 받는다.
     const presets = ['even-h', 'even-v', 'main-v', 'tiled', 'auto'];
@@ -1308,7 +1338,7 @@ async function cmdWorkspace() {
     const name = readOption(args, '--name');
     if (!name) {
       console.error('usage: ttym workspace rename <workspace|--current> --name <name>');
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     const next = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(workspace.id)}`, { name });
     if (asJson) return printOutput(next, true);
@@ -1336,17 +1366,18 @@ async function cmdWorkspace() {
     } catch (e) {
       if (asJson) return printOutput({ error: e.message }, true);
       console.error(`workspace add failed: ${e.message}`);
-      process.exit(1);
+      process.exit(EXIT.FAIL);
     }
     return;
   }
 
-  if (action === 'remove' || action === 'detach' || action === 'terminate') {
-    if (action === 'terminate') {
-      // Identical to remove since the beginning (bin/ttym:1265 in the v2 tree);
-      // one name for one behaviour. The alias answers until the old grammar goes.
-      console.error('note: `terminate` is an alias of `remove` and will be dropped with the old grammar');
-    }
+  if (action === 'terminate') {
+    // 처음부터 remove와 동일 동작이었다(v2 잔재). 이름 하나, 동작 하나.
+    console.error("`terminate` is gone — use: ttym workspace remove <workspace|--current> <member>");
+    process.exit(EXIT.USAGE);
+  }
+
+  if (action === 'remove' || action === 'detach') {
     const workspace = await resolveWorkspace(port, args[0]);
     const member = requireMember(workspace, args[1]);
     await fetchDelete(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members/${member.sessionId}`);
@@ -1357,7 +1388,7 @@ async function cmdWorkspace() {
         workspaceName: null,
       });
     }
-    if (action === 'remove' || action === 'terminate') {
+    if (action === 'remove') {
       await fetchDelete(port, `/api/sessions/${member.sessionId}`);
     }
     const result = { ok: true, action, workspace: `${workspace.project}/${workspace.name}`, member: member.name, sessionId: member.sessionId };
@@ -1373,7 +1404,7 @@ async function cmdWorkspace() {
     const member = requireMember(workspace, args[1]);
     if (!payload) {
       console.error('usage: ttym workspace send <workspace|--current> <member> -- "command\\n"');
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     const result = await fetchPost(port, `/api/sessions/${member.sessionId}/send`, { data: payload });
     if (asJson) return printOutput(result, true);
@@ -1463,7 +1494,7 @@ async function cmdWorkspace() {
     const name = readOption(args, '--name');
     if (!name) {
       console.error('usage: ttym workspace member rename <workspace|--current> <member> --name <name>');
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     const updated = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members/${member.sessionId}`, { name });
     await patchSessionMeta(port, member.sessionId, {
@@ -1490,12 +1521,11 @@ async function cmdWorkspace() {
   console.log('  add <workspace|--current> [--name <name>] [--role <role>] [--cmd ...] [--json]');
   console.log('  remove <workspace|--current> <member> [--json]');
   console.log('  detach <workspace|--current> <member> [--json]');
-  console.log('  terminate <workspace|--current> <member> [--json]');
   console.log('  send <workspace|--current> <member> -- \"command\\\\n\"');
   console.log('  await <workspace|--current> <member> [-- \"prompt\"] [--timeout ms] [--json]');
   console.log('  screen <workspace|--current> <member> [--json]');
   console.log('  member rename <workspace|--current> <member> --name <name>');
-  process.exit(1);
+  process.exit(EXIT.USAGE);
 }
 
 // ───── Agent Integration ─────
@@ -1653,7 +1683,7 @@ function resolveAgent(name) {
   if (name && !AGENTS[name]) {
     console.error(`unknown agent: ${name}`);
     console.error(`available: ${Object.keys(AGENTS).join(', ')}`);
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   return name ? AGENTS[name] : null;
 }
@@ -1681,7 +1711,7 @@ async function cmdAgent() {
   if (action === 'install' || action === 'uninstall') {
     if (!agentName) {
       console.error(`usage: ttym agent ${action} <${Object.keys(AGENTS).join('|')}>`);
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     const cfg = resolveAgent(agentName);
     return action === 'install' ? agentInstall(cfg) : agentUninstall(cfg);
@@ -1693,7 +1723,7 @@ async function cmdAgent() {
     if (!sid || isNaN(parseInt(sid, 10))) {
       console.error('usage: ttym agent info [session-id]');
       console.error('  (or run inside a ttym session)');
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     const port = getPort();
     try {
@@ -1716,7 +1746,7 @@ async function cmdAgent() {
       }
     } catch {
       console.error('failed to connect to ttym server');
-      process.exit(1);
+      process.exit(EXIT.NO_SERVER);
     }
     return;
   }
@@ -1726,7 +1756,7 @@ async function cmdAgent() {
     const sid = process.env.TTYM_SESSION_ID;
     if (!sid) {
       console.error('ttym agent resume must be run inside a ttym session');
-      process.exit(1);
+      process.exit(EXIT.FAIL);
     }
     const port = getPort();
     let meta;
@@ -1734,7 +1764,7 @@ async function cmdAgent() {
       meta = await fetchJson(port, `/api/sessions/${parseInt(sid, 10)}/meta`);
     } catch {
       console.error('failed to connect to ttym server');
-      process.exit(1);
+      process.exit(EXIT.NO_SERVER);
     }
 
     // Find which agent to resume
@@ -1747,7 +1777,7 @@ async function cmdAgent() {
       targetSessionId = meta?.[cfg.metaKey] || meta?.[cfg.lastMetaKey];
       if (!targetSessionId) {
         console.error(`no ${cfg.name} session linked to this ttym session`);
-        process.exit(1);
+        process.exit(EXIT.NOT_FOUND);
       }
       targetCfg = cfg;
     } else {
@@ -1770,7 +1800,7 @@ async function cmdAgent() {
       }
       if (!targetCfg) {
         console.error('no agent session linked to this ttym session');
-        process.exit(1);
+        process.exit(EXIT.NOT_FOUND);
       }
     }
 
@@ -1804,7 +1834,7 @@ async function cmdAgent() {
   for (const [key, cfg] of Object.entries(AGENTS)) {
     console.log(`  ${key}    ${cfg.name}`);
   }
-  process.exit(1);
+  process.exit(EXIT.USAGE);
 }
 
 
@@ -1831,7 +1861,7 @@ async function resolveMatches(port, expr) {
     const at = clause.indexOf(':');
     if (at === -1) {
       console.error(`not a matcher: ${clause} (expected field:query)`);
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     return { field: clause.slice(0, at).trim(), query: clause.slice(at + 1).trim() };
   });
@@ -1874,15 +1904,15 @@ async function resolveMatches(port, expr) {
         if (query === 'agent') return c.agentKind !== null;
         if (query === 'shell') return !c.agentKind;
         console.error(`unknown state: ${query} (busy|idle|agent|shell)`);
-        process.exit(1);
+        process.exit(EXIT.USAGE);
       default:
         console.error(`unknown match field: ${field} (name|role|tag|ws|state|id)`);
-        process.exit(1);
+        process.exit(EXIT.USAGE);
     }
   }));
   if (matches.length === 0) {
     console.error(`no members match: ${expr}`);
-    process.exit(1);
+    process.exit(EXIT.NOT_FOUND);
   }
   return matches;
 }
@@ -1890,20 +1920,20 @@ async function resolveMatches(port, expr) {
 async function resolveAddress(port, token) {
   if (!token) {
     console.error('address required: ws:name, :name, or #id');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   if (token.startsWith('#')) {
     const sessionId = parseInt(token.slice(1), 10);
     if (isNaN(sessionId)) {
       console.error(`not a session id: ${token}`);
-      process.exit(1);
+      process.exit(EXIT.USAGE);
     }
     return { sessionId, label: `#${sessionId}`, workspace: null, member: null };
   }
   const colon = token.indexOf(':');
   if (colon === -1) {
     console.error(`not an address: ${token} (expected ws:name, :name, or #id)`);
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const wsToken = token.slice(0, colon);
   const memberToken = token.slice(colon + 1);
@@ -1938,7 +1968,7 @@ async function cmdNew() {
   const name = args[0] && !args[0].startsWith('-') ? args[0] : null;
   if (!name) {
     console.error('usage: ttym new <name> [-- <cmd...>]');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const port = getPort();
   await ensureCompatibleServer(port);
@@ -1965,7 +1995,7 @@ async function cmdSplit() {
   const name = args[1] && !args[1].startsWith('-') ? args[1] : null;
   if (!targetToken || !name) {
     console.error('usage: ttym split <ws:name|:name> <new-name> [-- <cmd...>]');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const port = getPort();
   await ensureCompatibleServer(port);
@@ -1976,14 +2006,14 @@ async function cmdSplit() {
   const target = await resolveAddress(port, targetToken);
   if (!target.workspace) {
     console.error('split needs a workspace member as its target, not a bare session id');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const body = { targetSessionId: target.sessionId, name };
   if (cmd) body.cmd = cmd;
   const data = await fetchPost(port, `/api/workspaces/${encodeURIComponent(target.workspace.id)}/split`, body);
   if (!data || data.error || !data.session) {
     console.error(`split failed: ${data?.error ?? 'no session returned'}`);
-    process.exit(1);
+    process.exit(EXIT.FAIL);
   }
   const result = {
     address: `${target.workspace.project}/${target.workspace.name}:${name}`,
@@ -2000,7 +2030,7 @@ async function cmdSendAddr() {
   const token = args[0];
   if (!token || !payload) {
     console.error('usage: ttym send <ws:name|:name|#id | --match "expr"> -- "data"');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const port = getPort();
   await ensureCompatibleServer(port);
@@ -2018,12 +2048,42 @@ async function cmdSendAddr() {
   console.log(`sent to ${target.label}`);
 }
 
+/** 계약 조항 "비대화형 resize": ttym resize <addr> <cols> <rows> */
+async function cmdResizeAddr() {
+  const token = process.argv[3];
+  const cols = parseInt(process.argv[4], 10);
+  const rows = parseInt(process.argv[5], 10);
+  if (!token || !Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) {
+    console.error('usage: ttym resize <ws:name|:name|#id> <cols> <rows>');
+    process.exit(EXIT.USAGE);
+  }
+  const port = getPort();
+  const target = await resolveAddress(port, token);
+  await fetchPost(port, `/api/sessions/${target.sessionId}/resize`, { cols, rows });
+  if (hasFlag('--json')) return printOutput({ ok: true, sessionId: target.sessionId, cols, rows }, true);
+  console.log(`resized #${target.sessionId} to ${cols}x${rows}`);
+}
+
+/** 계약 조항 "비대화형 종료": ttym kill <addr> — 세션과 holder까지 끝낸다. */
+async function cmdKillAddr() {
+  const token = process.argv[3];
+  if (!token) {
+    console.error('usage: ttym kill <ws:name|:name|#id>');
+    process.exit(EXIT.USAGE);
+  }
+  const port = getPort();
+  const target = await resolveAddress(port, token);
+  await fetchDelete(port, `/api/sessions/${target.sessionId}`);
+  if (hasFlag('--json')) return printOutput({ ok: true, sessionId: target.sessionId }, true);
+  console.log(`killed #${target.sessionId}`);
+}
+
 async function cmdScreenAddr() {
   const args = process.argv.slice(3);
   const token = args[0];
   if (!token) {
     console.error('usage: ttym screen <ws:name|:name|#id | --match \"expr\"> [--json]');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const port = getPort();
   await ensureCompatibleServer(port);
@@ -2054,7 +2114,7 @@ async function cmdAwaitAddr() {
   const token = args[0];
   if (!token || !prompt) {
     console.error('usage: ttym await <ws:name|:name|#id | --match \"expr\"> [--timeout ms] -- "prompt"');
-    process.exit(1);
+    process.exit(EXIT.USAGE);
   }
   const port = getPort();
   await ensureCompatibleServer(port);
@@ -2129,7 +2189,7 @@ async function cmdAwaitAddr() {
  */
 async function cmdReportStop() {
   const sessionId = process.argv[4] || process.env.TTYM_SESSION_ID;
-  if (!sessionId) { console.error('session id required'); process.exit(1); }
+  if (!sessionId) { console.error('session id required'); process.exit(EXIT.USAGE); }
   const eventIdx = process.argv.indexOf('--event');
   const event = eventIdx > 0 ? process.argv[eventIdx + 1] : 'Stop';
   const port = getPort();
@@ -2145,12 +2205,23 @@ async function cmdReportStop() {
 
 const cmd = process.argv[2];
 
+/** fetch 실패를 계약 코드로 번역한다 — 생 스택트레이스는 계약 위반이다. */
+function isConnectFailure(err) {
+  if (!err) return false;
+  const cause = err.cause ?? err;
+  return cause?.code === 'ECONNREFUSED' || cause?.code === 'ECONNRESET'
+    || cause?.code === 'UND_ERR_CONNECT_TIMEOUT' || /fetch failed/i.test(String(err?.message ?? ''));
+}
+
+try {
 switch (cmd) {
   case 'attach':  await cmdAttach(); break;
   case 'new':     await cmdNew(); break;
   case 'split':   await cmdSplit(); break;
   case 'send':    await cmdSendAddr(); break;
   case 'screen':  await cmdScreenAddr(); break;
+  case 'resize':  await cmdResizeAddr(); break;
+  case 'kill':    await cmdKillAddr(); break;
   case 'await':   await cmdAwaitAddr(); break;
   case 'start':   cmdStart(); break;
   case 'stop':    cmdStop(); break;
@@ -2180,6 +2251,8 @@ switch (cmd) {
   console.log('  split <addr> <name> [-- cmd] Split beside a member (addr: ws:name | :name)');
   console.log('  send <addr> -- "data"        Send bytes (addr: ws:name | :name | #id)');
   console.log('  screen <addr>                Read the screen');
+  console.log('  resize <addr> <cols> <rows>  Resize a session');
+  console.log('  kill <addr>                  Kill a session (holder included)');
   console.log('  await <addr> -- "prompt"     Ask an agent and wait for its answer');
     console.log('  status                       Show server & session info');
     console.log('  current                      Show current project/workspace/member context');
@@ -2192,5 +2265,13 @@ switch (cmd) {
     console.log('  agent resume [agent]         Resume agent session');
     console.log('  agent info [session-id]      Show linked agent sessions');
     console.log('  log [-f]                     Show server log');
-    process.exit(cmd ? 1 : 0);
+    process.exit(cmd ? EXIT.USAGE : EXIT.OK); // 모르는 명령은 usage(2), 빈 호출의 help는 성공(0)
+}
+} catch (err) {
+  if (isConnectFailure(err)) {
+    console.error(`cannot reach ttym server on port ${getPort()} — is it running? (ttym start)`);
+    process.exit(EXIT.NO_SERVER);
+  }
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exit(EXIT.FAIL);
 }

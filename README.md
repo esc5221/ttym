@@ -123,8 +123,23 @@ ws:name     member "name" of workspace "ws"
 #42         raw session id — reaches sessions outside any workspace too
 ```
 
-On startup the CLI checks `API_VERSION` against `/api/version` and exits 1 on
-mismatch rather than misbehaving quietly.
+On startup the CLI checks `API_VERSION` against `/api/version` and refuses to
+run on mismatch rather than misbehaving quietly.
+
+Global flags (`--port`, `--json`) may appear anywhere in the command line —
+they are extracted before dispatch, so `--cmd` never swallows them. Everything
+after `--` is passed through verbatim.
+
+Exit codes are a contract, verified by the contract suite:
+
+```
+0  success
+1  general failure
+2  usage error
+3  target resolution failed (unknown or ambiguous address)
+4  server unreachable
+5  API version mismatch
+```
 
 ### Sessions
 
@@ -135,6 +150,8 @@ ttym send <ws:name|:name|#id> -- "data"    # raw bytes to the PTY
 ttym screen <ws:name|:name|#id> [--json]   # read the current screen
 ttym await <ws:name|:name|#id> [--timeout ms] -- "prompt"
                                            # ask an agent, get only this turn's answer
+ttym resize <ws:name|:name|#id> <cols> <rows>
+ttym kill <ws:name|:name|#id>              # end the session, holder included
 ```
 
 ### Server lifecycle
@@ -185,6 +202,7 @@ ttym workspace member rename <ws|--current> <m> --name <new>
 ttym workspace detach    <ws|--current> <m>   # drop membership, keep the session
 ttym workspace remove    <ws|--current> <m>   # drop membership, kill the session
 ttym workspace send/screen/await ...          # legacy syntax — coexists with colon addresses
+# `terminate` is gone — it was `remove` under a second name.
 ```
 
 `--current` resolves the workspace through `TTYM_SESSION_ID`, injected
