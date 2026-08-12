@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes } from '@ttym/ui';
-import { ansiToHtml } from '@ttym/vt';
 import * as api from '@ttym/api';
 import type { SessionInfo } from '@ttym/ui';
 import '@xterm/xterm/css/xterm.css';
@@ -164,10 +163,6 @@ async function fetchSessionMeta(sessionId: number): Promise<SessionMeta> {
   return api.getSessionMeta(API_BASE, sessionId);
 }
 
-async function fetchSessionScreen(sessionId: number): Promise<string> {
-  return api.getSessionScreen(API_BASE, sessionId);
-}
-
 async function fetchWorkspaces(): Promise<Workspace[]> {
   try {
     return await api.listWorkspaces(API_BASE) as Workspace[];
@@ -278,7 +273,6 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
   const [hoveredSessionId, setHoveredSessionId] = useState<number | null>(null);
-  const [hoveredScreen, setHoveredScreen] = useState<string>('hover a session to preview');
   const [compactLayout, setCompactLayout] = useState(() => window.innerWidth < 1080);
   // 우측 패널: hover 미리보기 ↔ live 터미널(행 클릭) ↔ workspace 분할 미니뷰(제목 클릭)
   const [panel, setPanel] = useState<DashPanel>({ kind: 'hover' });
@@ -351,29 +345,12 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
   useEffect(() => {
     if (sessions.length === 0) {
       setHoveredSessionId(null);
-      setHoveredScreen('hover a session to preview');
       return;
     }
     if (hoveredSessionId === null || !sessions.some((session) => session.id === hoveredSessionId)) {
       setHoveredSessionId(sessions[0]!.id);
     }
   }, [sessions, hoveredSessionId]);
-
-  useEffect(() => {
-    if (hoveredSessionId === null || panel.kind !== 'hover') return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const screen = await fetchSessionScreen(hoveredSessionId);
-        if (!cancelled) setHoveredScreen(screen || 'no output yet');
-      } catch {
-        if (!cancelled) setHoveredScreen('preview unavailable');
-      }
-    };
-    void tick();
-    const timer = window.setInterval(() => { void tick(); }, 5000);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [hoveredSessionId, panel.kind]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -626,18 +603,26 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
         {panel.kind === 'live' ? (
           // 행 클릭 = 그 자리에서 바로 쓰는 터미널. 단일 대형 뷰라 GPU 허용.
           <div style={{ flex: 1, minHeight: 0 }}>
-            <Terminal mux={mux} attachId={panel.sid} localEcho={localEchoEnabled} onExit={() => setPanel({ kind: 'hover' })} />
+            {/* 헤더가 말하는 그대로 '프리뷰'다 — readwrite로 두면 세션의 진짜
+                뷰어와 cols 리사이즈 싸움이 나고, 축소가 아니라 잘림이 된다.
+                조작은 workspace/세션 페이지의 영토. */}
+            <Terminal mux={mux} attachId={panel.sid} mode="readonly" fontSize={10} enableWebgl={false} />
           </div>
         ) : panel.kind === 'ws' ? (
           renderWsMini(panel.wsId)
         ) : hoveredWsId !== null ? (
           renderWsMini(hoveredWsId)
+        ) : hoveredSessionId !== null ? (
+          // 호버도 클릭(live)과 같은 물건이다 — 예전엔 /screen 텍스트 덤프를
+          // 5초 폴링으로 HTML화해 pre-wrap으로 재줄바꿈했고, 그게 "호버만
+          // 다르게 보이는" 원인의 전부였다. 같은 readonly 터미널 하나로 통일.
+          <div style={{ flex: 1, minHeight: 0, pointerEvents: 'none' }}>
+            <Terminal mux={mux} attachId={hoveredSessionId} mode="readonly" fontSize={10} enableWebgl={false} />
+          </div>
         ) : (
-          <div
-            className="preview-scroll"
-            style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '12px 14px', color: 'var(--term-fg)', fontFamily: 'monospace', fontSize: 12, lineHeight: 1.45, whiteSpace: 'pre-wrap' }}
-            dangerouslySetInnerHTML={{ __html: ansiToHtml(hoveredScreen) }}
-          />
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontFamily: 'monospace', fontSize: 12 }}>
+            hover a session to preview
+          </div>
         )}
       </div>
     </div>
@@ -1397,7 +1382,7 @@ function PreviewCard({ mux, sessionId, label, sublabel, status }: {
         </span>
       </div>
       <div style={{ height: 220, pointerEvents: 'none' }}>
-        <Terminal mux={mux} attachId={sessionId} mode="readonly" fontSize={9} enableWebgl={false} />
+        <Terminal mux={mux} attachId={sessionId} mode="readonly" fontSize={10} enableWebgl={false} />
       </div>
     </div>
   );
