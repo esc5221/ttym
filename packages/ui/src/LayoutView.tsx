@@ -56,7 +56,9 @@ export function LayoutView({
   useEffect(() => { setDrag(null); }, [layout]);
 
   if (zoomedSessionId !== null && findPane(layout, zoomedSessionId)) {
-    return <div style={{ width: '100%', height: '100%' }}>{renderPane(zoomedSessionId, [])}</div>;
+    // display:flex — pane 루트는 flex:1로 늘어나는 물건이라, 컨테이너가
+    // flex가 아니면 내용 높이로 수축한다 (단일 pane workspace에서 실측).
+    return <div style={{ width: '100%', height: '100%', display: 'flex', minWidth: 0, minHeight: 0 }}>{renderPane(zoomedSessionId, [])}</div>;
   }
 
   const renderNode = (node: LayoutNode, path: number[]): ReactNode => {
@@ -144,7 +146,7 @@ export function LayoutView({
     return <div data-splitbox style={style}>{children}</div>;
   };
 
-  return <div style={{ width: '100%', height: '100%' }}>{renderNode(layout, [])}</div>;
+  return <div style={{ width: '100%', height: '100%', display: 'flex', minWidth: 0, minHeight: 0 }}>{renderNode(layout, [])}</div>;
 }
 
 function normalize(sizes: number[] | undefined, count: number): number[] {
