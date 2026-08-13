@@ -18,6 +18,12 @@
     #root { min-height: 100%; background: var(--bg0, #1e1e1e); }
     .xterm-viewport::-webkit-scrollbar { display: none; }
     .xterm-viewport { scrollbar-width: none; }
+    /* 스크롤 컨테이너용 얇은 스크롤바 — 평소엔 안 보이고 리스트에 호버할 때만 썸이 뜬다. */
+    .thin-scroll::-webkit-scrollbar { width: 6px; }
+    .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+    .thin-scroll::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+    .thin-scroll:hover::-webkit-scrollbar-thumb { background: var(--line-strong, #3c3c3c); }
+    .thin-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-dim, #6e6e6e); }
     .preview-scroll::-webkit-scrollbar { display: none; }
     .preview-scroll { scrollbar-width: none; -ms-overflow-style: none; }
   </style>

@@ -506,6 +506,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
     <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: compactLayout ? 'minmax(0, 1fr)' : 'minmax(360px, 460px) minmax(0, 1fr)', fontFamily: 'var(--mono)' }}>
       <div
         ref={listRef}
+        className="thin-scroll"
         onMouseLeave={() => setHl((prev) => ({ ...prev, visible: false }))}
         onScroll={() => setHl((prev) => (prev.visible ? { ...prev, visible: false } : prev))}
         style={{ borderRight: compactLayout ? 'none' : '1px solid var(--line)', background: 'var(--bg1)', padding: 14, overflowY: 'auto', minHeight: 0, position: 'relative' }}
