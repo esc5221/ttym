@@ -9,6 +9,7 @@ const { Terminal } = headless;
 import { SerializeAddon } from '@xterm/addon-serialize';
 import { OutputRing } from './output-ring.js';
 import { SyncBlockFilter } from './sync-block.js';
+import { CommandIndex } from './command-index.js';
 
 export type SessionStatus = 'attached' | 'detached' | 'dead';
 export type ViewerMode = 'readwrite' | 'readonly';
@@ -255,6 +256,7 @@ export class Session {
 
   // Layer 3: Ring buffer (for viewer delta replay)
   readonly ring: OutputRing;
+  readonly commands: CommandIndex;
 
   // Multi-viewer state
   private viewers = new Map<string, Viewer>();
@@ -360,6 +362,14 @@ export class Session {
     // — stale watermarks fall outside [base, lastSeq] and take the snapshot
     // path. Base stays far under u32 wire range (seq is u32 on the wire).
     this.ring = new OutputRing(ringBytes(), randomSeqBase());
+
+    // 명령 인덱스 — 쉘의 OSC 133/633 신호를 스트림 좌표(ring seq)와 함께 기록.
+    // 핸들러는 term.write 파싱 중에 불리고 ring push는 그 뒤라, nextSeq가
+    // 곧 이 청크의 시작 좌표다. true 반환은 headless 소비만 뜻한다 —
+    // 클라이언트 전달은 ring 원본 바이트로 이미 이뤄진다.
+    this.commands = new CommandIndex(() => this.ring.nextSeq);
+    this.term.parser.registerOscHandler(133, (data) => { this.commands.osc133(data); return true; });
+    this.term.parser.registerOscHandler(633, (data) => { this.commands.osc633(data); return true; });
   }
 
   /** Create a new session: spawn holder, connect */

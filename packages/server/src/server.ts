@@ -524,6 +524,19 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
+  // GET /api/sessions/:id/commands — the command index (OSC 133/633).
+  // 쉘 통합이 없는 세션은 빈 목록이 정상이다 — 신호가 안 오면 안 쌓일 뿐.
+  const commandsMatch = path.match(/^\/api\/sessions\/(\d+)\/commands$/);
+  if (commandsMatch && req.method === 'GET') {
+    const id = parseInt(commandsMatch[1], 10);
+    const session = manager.get(id);
+    if (!session || session.isDead) { json(404, { error: 'not found' }); return true; }
+    const limitRaw = url.searchParams.get('limit');
+    const limit = limitRaw && /^\d+$/.test(limitRaw) ? Math.min(parseInt(limitRaw, 10), 500) : 50;
+    json(200, { total: session.commands.total, commands: session.commands.list(limit) });
+    return true;
+  }
+
   // GET /api/sessions/:id/screen — read current screen
   const screenMatch = path.match(/^\/api\/sessions\/(\d+)\/screen$/);
   if (screenMatch && req.method === 'GET') {
