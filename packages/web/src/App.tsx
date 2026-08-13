@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes } from '@ttym/ui';
+import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes, getHost } from '@ttym/ui';
 import * as api from '@ttym/api';
 import type { SessionInfo } from '@ttym/ui';
 import '@xterm/xterm/css/xterm.css';
@@ -503,7 +503,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
   };
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: compactLayout ? 'minmax(0, 1fr)' : 'minmax(360px, 460px) minmax(0, 1fr)', fontFamily: 'monospace' }}>
+    <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: compactLayout ? 'minmax(0, 1fr)' : 'minmax(360px, 460px) minmax(0, 1fr)', fontFamily: 'var(--mono)' }}>
       <div
         ref={listRef}
         onMouseLeave={() => setHl((prev) => ({ ...prev, visible: false }))}
@@ -643,7 +643,7 @@ function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mu
             <Terminal mux={mux} attachId={hoveredSessionId} mode="readonly" fontSize={10} enableWebgl={false} />
           </div>
         ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontFamily: 'monospace', fontSize: 12 }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontFamily: 'var(--mono)', fontSize: 12 }}>
             hover a session to preview
           </div>
         )}
@@ -719,6 +719,8 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   const [attachLoading, setAttachLoading] = useState(false);
   const [dragSid, setDragSid] = useState<number | null>(null);
   const [fileDropSid, setFileDropSid] = useState<number | null>(null);
+  /** pane 내 문자열 검색 (vscode 터미널의 ⌘F). null = 닫힘. */
+  const [search, setSearch] = useState<{ sid: number; query: string; index: number; count: number } | null>(null);
   const [bells, setBells] = useState<Set<number>>(new Set());
   const [lastAgentIds, setLastAgentIds] = useState<Record<number, { claude?: string; codex?: string }>>({});
   const barrier = useRef(new MutationBarrier());
@@ -945,11 +947,37 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
     return () => window.removeEventListener('keydown', handler);
   }, [attachOpen]);
 
+  // 검색 결과 카운트 구독 — host가 (index, count)를 밀어준다.
+  useEffect(() => {
+    if (!search) return;
+    const host = getHost(search.sid);
+    if (!host) return;
+    host.onSearchResults = (index, count) => {
+      setSearch((cur) => (cur && cur.sid === search.sid ? { ...cur, index, count } : cur));
+    };
+    return () => { host.onSearchResults = undefined; };
+  }, [search?.sid]);
+
+  // 다른 pane으로 넘어가면 찾기바는 닫힌다 — 하이라이트도 함께.
+  useEffect(() => {
+    if (search && focusedSid !== null && search.sid !== focusedSid) {
+      getHost(search.sid)?.clearSearch();
+      setSearch(null);
+    }
+  }, [focusedSid]);
+
   // ── 키바인딩: ⌘\ 우분할 · ⌘⇧\ 하분할 · ⌘←→ 포커스 순환 ──
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
+      // ⌘F: 포커스 pane 검색. 브라우저 찾기는 이 페이지에선 캔버스라 무용 —
+      // 가로채도 잃는 것이 없다. pane이 없으면 브라우저 기본 동작 유지.
+      if (meta && e.key === 'f' && !e.shiftKey && focusedSid !== null) {
+        e.preventDefault();
+        setSearch({ sid: focusedSid, query: '', index: -1, count: 0 });
+        return;
+      }
       if (meta && e.key === '\\') { e.preventDefault(); void doSplit(e.shiftKey ? 'down' : 'right'); return; }
       if (meta && (e.code === 'ArrowLeft' || e.code === 'ArrowRight')) {
         e.preventDefault();
@@ -1017,8 +1045,44 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             : U.frameBorder ? (dead ? '1px solid var(--err)' : '1px solid var(--line)') : 'none',
           borderRadius: U.paneRadius,
           overflow: 'hidden',
+          position: 'relative',
         }}
       >
+        {search?.sid === sid ? (
+          <div style={{
+            position: 'absolute', top: 34, right: 10, zIndex: 3,
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'var(--bg1)', border: '1px solid var(--line)', borderRadius: 6,
+            padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 11,
+          }}>
+            <input
+              autoFocus
+              value={search.query}
+              placeholder="find"
+              onChange={(e) => {
+                const query = e.target.value;
+                setSearch((cur) => (cur ? { ...cur, query } : cur));
+                getHost(sid)?.findNext(query, true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); const h = getHost(sid); if (e.shiftKey) h?.findPrevious(search.query); else h?.findNext(search.query); }
+                else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  const h = getHost(sid);
+                  h?.clearSearch(); h?.focusTerminal();
+                  setSearch(null);
+                }
+              }}
+              style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 11, width: 150 }}
+            />
+            <span style={{ color: 'var(--text-dim)', minWidth: 34, textAlign: 'right' }}>
+              {search.query ? `${search.count === 0 ? 0 : search.index + 1}/${search.count}` : ''}
+            </span>
+            <span onClick={() => { const h = getHost(sid); h?.findPrevious(search.query); }} style={{ cursor: 'pointer', color: 'var(--text-soft)' }}>↑</span>
+            <span onClick={() => { const h = getHost(sid); h?.findNext(search.query); }} style={{ cursor: 'pointer', color: 'var(--text-soft)' }}>↓</span>
+            <span onClick={() => { const h = getHost(sid); h?.clearSearch(); h?.focusTerminal(); setSearch(null); }} style={{ cursor: 'pointer', color: 'var(--text-dim)' }}>✕</span>
+          </div>
+        ) : null}
         <div
           className="reveal-parent"
           style={{
@@ -1054,12 +1118,12 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
                 title={agent?.active ? `${agent.kind} · running` : `${agent?.kind} · idle`}
               />
             ) : null}
-            <span style={{ color: agentColor ?? (isFocused ? 'var(--text)' : 'var(--text-soft)'), fontSize: 11, fontFamily: 'monospace', fontWeight: 700, flexShrink: 0 }}>
+            <span style={{ color: agentColor ?? (isFocused ? 'var(--text)' : 'var(--text-soft)'), fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
               {name || `#${sid}`}
             </span>
-            {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'monospace', flexShrink: 0 }}>#{sid}</span> : null}
+            {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)', flexShrink: 0 }}>#{sid}</span> : null}
             {cwd ? (
-              <span style={{ color: 'var(--cwd)', fontSize: 10, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={cwd}>
+              <span style={{ color: 'var(--cwd)', fontSize: 10, fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={cwd}>
                 {formatCwd(cwd)}
               </span>
             ) : null}
@@ -1071,7 +1135,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             {bells.has(sid) ? (
               <span title="bell" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)', boxShadow: '0 0 6px var(--warn)', flexShrink: 0 }} />
             ) : null}
-            {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'monospace' }}>zoom</span> : null}
+            {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'var(--mono)' }}>zoom</span> : null}
             {canRestore ? (
               <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="이전 에이전트 세션 복원">restore</button>
             ) : null}
@@ -1104,7 +1168,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, fileDropSid, bells, mux, localEchoEnabled, fontSize, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, fileDropSid, search, bells, mux, localEchoEnabled, fontSize, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
@@ -1161,7 +1225,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             splitterActiveColor="var(--accent)"
           />
         ) : (
-          <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'monospace' }}>loading…</div>
+          <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'var(--mono)' }}>loading…</div>
         )}
       </div>
 
@@ -1172,7 +1236,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
 const emptyPaneStyle: React.CSSProperties = {
   height: '100%', width: '100%',
   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-  background: 'var(--bg1)', color: 'var(--text-dim)', fontFamily: 'monospace', fontSize: 12, gap: 8,
+  background: 'var(--bg1)', color: 'var(--text-dim)', fontFamily: 'var(--mono)', fontSize: 12, gap: 8,
 };
 
 function SettingsOverlay({
@@ -1269,7 +1333,7 @@ function SettingsOverlay({
             <span style={settingsLabelStyle}>font size</span>
             <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
               <button onClick={() => onFontSizeChange(Math.max(8, fontSize - 1))} style={{ ...actionBtnStyle, padding: '2px 8px', fontSize: 11 }}>−</button>
-              <span style={{ color: 'var(--text)', fontSize: 12, fontFamily: 'monospace', width: 20, textAlign: 'center' }}>{fontSize}</span>
+              <span style={{ color: 'var(--text)', fontSize: 12, fontFamily: 'var(--mono)', width: 20, textAlign: 'center' }}>{fontSize}</span>
               <button onClick={() => onFontSizeChange(Math.min(32, fontSize + 1))} style={{ ...actionBtnStyle, padding: '2px 8px', fontSize: 11 }}>+</button>
             </span>
           </label>
@@ -1322,7 +1386,7 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
 
   if (loading) {
     return (
-      <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'monospace' }}>loading...</div>
+      <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'var(--mono)' }}>loading...</div>
     );
   }
 
@@ -1338,7 +1402,7 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
       </div>
 
       {noSessions ? (
-        <div style={{ color: 'var(--text-dim)', fontSize: 13, fontFamily: 'monospace', padding: 40 }}>
+        <div style={{ color: 'var(--text-dim)', fontSize: 13, fontFamily: 'var(--mono)', padding: 40 }}>
           no active sessions. go to{' '}
           <span onClick={() => navigate({ page: 'dashboard' })} style={{ color: 'var(--accent)', cursor: 'pointer' }}>
             dashboard
@@ -1357,13 +1421,13 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
                 }}
                 onClick={() => navigate({ page: 'workspace', id: ws.id })}
               >
-                <span style={{ color: 'var(--text)', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
+                <span style={{ color: 'var(--text)', fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600 }}>
                   {workspaceDisplayLabel(ws)}
                 </span>
-                <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'monospace' }}>
+                <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'var(--mono)' }}>
                   {ws.liveSessions.length} session{ws.liveSessions.length !== 1 ? 's' : ''}
                 </span>
-                <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'monospace', marginLeft: 'auto' }}>
+                <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'var(--mono)', marginLeft: 'auto' }}>
                   click to open &rarr;
                 </span>
               </div>
@@ -1391,10 +1455,10 @@ function OverviewPage({ mux }: { mux: TerminalMux }) {
                 display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10,
                 padding: '6px 12px', background: 'var(--bg1)', borderRadius: 4,
               }}>
-                <span style={{ color: 'var(--text-soft)', fontSize: 13, fontFamily: 'monospace', fontWeight: 600 }}>
+                <span style={{ color: 'var(--text-soft)', fontSize: 13, fontFamily: 'var(--mono)', fontWeight: 600 }}>
                   standalone
                 </span>
-                <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'monospace' }}>
+                <span style={{ color: 'var(--text-dim)', fontSize: 11, fontFamily: 'var(--mono)' }}>
                   {standalone.length} session{standalone.length !== 1 ? 's' : ''}
                 </span>
               </div>
@@ -1442,7 +1506,7 @@ function PreviewCard({ mux, sessionId, label, sublabel, status }: {
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '4px 10px', background: 'var(--bg2)',
         borderBottom: '1px solid #2a2a2a',
-        fontFamily: 'monospace', fontSize: 11, userSelect: 'none',
+        fontFamily: 'var(--mono)', fontSize: 11, userSelect: 'none',
       }}>
         <span style={{
           width: 6, height: 6, borderRadius: '50%',
@@ -1699,7 +1763,7 @@ function App() {
 
   if (!connected || !muxRef.current) {
     return (
-      <div style={{ color: 'var(--text-soft)', padding: 40, fontFamily: 'monospace' }}>
+      <div style={{ color: 'var(--text-soft)', padding: 40, fontFamily: 'var(--mono)' }}>
         {connectNote}
       </div>
     );
@@ -1771,7 +1835,7 @@ function App() {
                     else if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); }
                   }}
                   onClick={(e) => e.stopPropagation()}
-                  style={{ background: 'var(--bg0)', color: 'var(--text)', border: '1px solid var(--line-strong)', borderRadius: 4, padding: '1px 5px', fontFamily: 'monospace', fontSize: 12, width: 110, outline: 'none' }}
+                  style={{ background: 'var(--bg0)', color: 'var(--text)', border: '1px solid var(--line-strong)', borderRadius: 4, padding: '1px 5px', fontFamily: 'var(--mono)', fontSize: 12, width: 110, outline: 'none' }}
                 />
               ) : (
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
@@ -1811,7 +1875,7 @@ const tabStripStyle: React.CSSProperties = {
   // 면은 bg0 하나 — 스트립도 workspace와 같은 들판이다. 슬래브 은퇴.
   // 구분선도 없다: 같은 면이라 경계가 필요 없어졌다.
   background: 'var(--bg0)',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   flexShrink: 0,
   userSelect: 'none',
 };
@@ -1824,7 +1888,7 @@ const tabStyle: React.CSSProperties = {
   padding: '0 13px',
   borderRadius: 7,
   fontSize: 12,
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   color: 'var(--text-dim)',
   background: 'transparent',
   border: '1px solid transparent',
@@ -1863,7 +1927,7 @@ const toolbarStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: 12,
   borderBottom: '1px solid #333',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
 };
 
 const btnStyle: React.CSSProperties = {
@@ -1872,7 +1936,7 @@ const btnStyle: React.CSSProperties = {
   border: '1px solid #444',
   padding: '3px 10px',
   cursor: 'pointer',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   fontSize: 12,
   borderRadius: 3,
 };
@@ -1883,7 +1947,7 @@ const actionBtnStyle: React.CSSProperties = {
   border: '1px solid #444',
   padding: '4px 12px',
   cursor: 'pointer',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   fontSize: 12,
   borderRadius: 3,
 };
@@ -1895,7 +1959,7 @@ const closeBtnStyle: React.CSSProperties = {
   color: 'var(--text-dim)',
   cursor: 'pointer',
   fontSize: 14,
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   lineHeight: 1,
   padding: '0 4px',
   borderRadius: 3,
@@ -1908,7 +1972,7 @@ const miniLinkBtnStyle: React.CSSProperties = {
   border: '1px solid transparent',
   padding: '1px 5px',
   cursor: 'pointer',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   fontSize: 10,
   borderRadius: 3,
   lineHeight: 1.4,
@@ -1920,7 +1984,7 @@ const settingsButtonStyle: React.CSSProperties = {
   border: '1px solid var(--line-strong)',
   padding: '6px 10px',
   cursor: 'pointer',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   fontSize: 11,
   borderRadius: 7,
 };
@@ -1941,7 +2005,7 @@ const workspaceNameInputStyle: React.CSSProperties = {
   border: '1px solid var(--line-strong)',
   borderRadius: 4,
   padding: '2px 6px',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   fontSize: 15,
   fontWeight: 600,
   outline: 'none',
@@ -1961,7 +2025,7 @@ const attachDropdownStyle: React.CSSProperties = {
   background: 'var(--bg1)',
   boxShadow: '0 12px 30px rgba(0, 0, 0, 0.45)',
   backdropFilter: 'blur(14px)',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   zIndex: 50,
 };
 
@@ -1981,7 +2045,7 @@ const attachDropdownItemStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
   color: 'var(--text-soft)',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
   fontSize: 12,
   textAlign: 'left',
   cursor: 'pointer',
@@ -2005,7 +2069,7 @@ const settingsPopoverStyle: React.CSSProperties = {
   background: 'var(--bg1)',
   boxShadow: '0 18px 42px rgba(0, 0, 0, 0.42)',
   backdropFilter: 'blur(14px)',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
 };
 
 const settingsTitleStyle: React.CSSProperties = {
@@ -2034,7 +2098,7 @@ const settingsInputStyle: React.CSSProperties = {
   borderRadius: 7,
   padding: '7px 9px',
   outline: 'none',
-  fontFamily: 'monospace',
+  fontFamily: 'var(--mono)',
 };
 
 const settingsHintStyle: React.CSSProperties = {

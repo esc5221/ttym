@@ -1,6 +1,10 @@
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { SearchAddon } from '@xterm/addon-search';
+import { WebLinksAddon } from '@xterm/addon-web-links';
+import { ClipboardAddon } from '@xterm/addon-clipboard';
+import { WebFontsAddon } from '@xterm/addon-web-fonts';
 import type { IDisposable } from '@xterm/xterm';
 import { LocalEchoController, type TerminalMux, type ActionHandler } from '@ttym/vt';
 
@@ -119,11 +123,28 @@ function evictIdleHosts() {
   }
 }
 
+const IS_MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+
+// 맥 외 플랫폼에만 D2Coding webfont를 등록한다 — 맥은 Menlo가 현행 경험 그대로이고,
+// FontFace를 등록하지 않으면 스택의 D2Coding이 건너뛰어져 다운로드조차 없다.
+// 파일은 서버가 same-origin으로 서빙(packages/web/public/fonts, OFL).
+if (!IS_MAC && typeof document !== 'undefined' && 'fonts' in document) {
+  document.fonts.add(new FontFace('D2Coding', "url(/fonts/D2Coding.woff2) format('woff2')", { weight: '400' }));
+  document.fonts.add(new FontFace('D2Coding', "url(/fonts/D2Coding-Bold.woff2) format('woff2')", { weight: '700' }));
+}
+
+const TERMINAL_FONTS = IS_MAC
+  ? 'Menlo, Monaco, "Courier New", monospace'
+  : 'D2Coding, "Cascadia Mono", Consolas, "Courier New", monospace';
+
 export class TerminalHost {
   readonly wrapper: HTMLDivElement;
   readonly term: XTerm;
   private readonly fit: FitAddon;
   private webgl: WebglAddon | undefined;
+  private searchAddon: SearchAddon | undefined;
+  /** 찾기바가 구독한다: (activeIndex, total). 인덱스는 0-기준, 결과 없으면 (-1, 0). */
+  onSearchResults: ((index: number, count: number) => void) | undefined;
   private opts: HostOptions;
   private disposed = false;
   private opened = false;
@@ -159,9 +180,11 @@ export class TerminalHost {
     this.wrapper.style.height = '100%';
 
     this.term = new XTerm({
+      // 검색 하이라이트(decorations)가 proposed API — headless 쪽은 이미 켜져 있다.
+      allowProposedApi: true,
       cursorBlink: opts.mode !== 'readonly',
       fontSize: opts.fontSize,
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: TERMINAL_FONTS,
       theme: terminalTheme(),
       disableStdin: opts.mode === 'readonly',
     });
@@ -225,6 +248,13 @@ export class TerminalHost {
       this.wrapper.style.visibility = 'hidden';
       this.term.open(this.wrapper);
       this.maybeEnableWebgl();
+      // URL 클릭(web-links)과 OSC 52 클립보드 — 렌더러와 같은 시점에 싣는다.
+      // 링크는 에이전트가 뱉는 PR·배포 URL을 바로 여는 용도, OSC 52는 세션
+      // 안의 vim·tmux·원격 ssh가 시스템 클립보드로 복사하게 해준다.
+      // 로드 전엔 webfont를 스택에서 잠시 빼고 폴백으로 계측, 로드 완료 시 재계측.
+    try { this.term.loadAddon(new WebFontsAddon()); } catch {}
+    try { this.term.loadAddon(new WebLinksAddon()); } catch {}
+      try { this.term.loadAddon(new ClipboardAddon()); } catch {}
       try { this.fit.fit(); } catch {}
       requestAnimationFrame(() => { if (!this.disposed) this.wrapper.style.visibility = 'visible'; });
     }
@@ -324,6 +354,51 @@ export class TerminalHost {
     }
   }
 
+  // ── 검색 (vscode 터미널 모델: SearchAddon + 얇은 찾기바) ──
+
+  private ensureSearch(): SearchAddon {
+    if (!this.searchAddon) {
+      this.searchAddon = new SearchAddon();
+      this.term.loadAddon(this.searchAddon);
+      this.searchAddon.onDidChangeResults(({ resultIndex, resultCount }) => {
+        this.onSearchResults?.(resultIndex, resultCount);
+      });
+    }
+    return this.searchAddon;
+  }
+
+  private searchOptions(incremental: boolean) {
+    return {
+      incremental,
+      decorations: {
+        matchBackground: '#3a5a7a',
+        matchOverviewRuler: '#3a5a7a',
+        activeMatchBackground: '#007acc',
+        activeMatchColorOverviewRuler: '#007acc',
+      },
+    };
+  }
+
+  /** incremental: 타이핑 중 재검색(제자리), 아니면 다음 매치로 전진. */
+  findNext(query: string, incremental = false): boolean {
+    if (!query) { this.clearSearch(); return false; }
+    return this.ensureSearch().findNext(query, this.searchOptions(incremental));
+  }
+
+  findPrevious(query: string): boolean {
+    if (!query) return false;
+    return this.ensureSearch().findPrevious(query, this.searchOptions(false));
+  }
+
+  clearSearch() {
+    this.searchAddon?.clearDecorations();
+    this.onSearchResults?.(-1, 0);
+  }
+
+  focusTerminal() {
+    try { this.term.focus(); } catch {}
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -334,6 +409,8 @@ export class TerminalHost {
     this.cancelPendingWrites();
     this.webgl?.dispose();
     this.webgl = undefined;
+    this.searchAddon?.dispose();
+    this.searchAddon = undefined;
     this.fit.dispose();
     this.term.dispose();
     this.localEcho.setEnabled(false);
@@ -451,6 +528,16 @@ export class TerminalHost {
 
   private wireInput() {
     if (this.opts.mode === 'readonly') return;
+    // xterm 6.0은 mac의 Option+←/→ 특례(ESC b / ESC f — Terminal.app·5.5와 동일)를
+    // 버리고 CSI 1;3D/C를 보낸다. zsh 기본 keymap은 이 시퀀스를 몰라 C/D가
+    // 그대로 찍히므로, 순수 Option+좌우에 한해 5.5의 단어점프 바이트를 복원한다.
+    this.term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== 'keydown' || this.opts.mode === 'readonly') return true;
+      if (!IS_MAC || !ev.altKey || ev.metaKey || ev.ctrlKey || ev.shiftKey) return true;
+      if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return true;
+      this.mux.send(this.sessionId, ev.key === 'ArrowLeft' ? '\x1bb' : '\x1bf');
+      return false;
+    });
     this.inputDisposables.push(this.term.onData((data) => {
       this.localEcho.handleLocalInput(data);
       this.mux.send(this.sessionId, data);

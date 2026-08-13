@@ -228,6 +228,28 @@ try {
     }
   }
 
+  // 터미널 내 문자열 검색(⌘F): SearchAddon + 찾기바 — 매치 카운트가 뜨는
+  // 것까지가 계약. 브라우저 찾기는 캔버스라 원래 무용했다.
+  {
+    await page.goto(`http://127.0.0.1:${PORT}/#w/e2e-ws`);
+    await page.waitForTimeout(1200);
+    await page.click('[data-pane-sid]');
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+KeyF' : 'Control+KeyF');
+    try {
+      await page.waitForSelector('input[placeholder="find"]', { timeout: 3000 });
+      await page.keyboard.type('E2E-MARKER');
+      await page.waitForFunction(
+        () => /\b1\/[1-9]/.test(document.body.innerText),
+        null, { timeout: 4000 },
+      );
+      console.log('  PASS  ⌘F 검색 — 찾기바가 열리고 매치 카운트가 뜬다');
+      await page.keyboard.press('Escape');
+    } catch (e) {
+      failures++;
+      console.log('  FAIL  터미널 검색 —', String(e).slice(0, 80));
+    }
+  }
+
   // P4: 보고 있는 중에 서버가 죽었다 살아나면, 손대지 않아도 화면이
   // 돌아와야 한다 (onDisconnect → 백오프 재접속 → 리로드 → 스냅샷).
   await page.goto(`http://127.0.0.1:${PORT}/#w/e2e-ws`);

@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ttym</title>
   <style>
+    /* D2Coding은 맥 외 플랫폼에서만 JS가 FontFace로 등록 — 맥에선 스택에서 건너뛰어진다. */
+    :root { --mono: Menlo, Monaco, D2Coding, "Cascadia Mono", Consolas, monospace; }
     * { margin: 0; padding: 0; box-sizing: border-box; transition: none !important; animation: none !important; }
       .agent-dot-run { animation: agent-pulse 1.4s ease-in-out infinite !important; }
       /* 행동 버튼은 hover에서만 — 상태 표시(점·bell)는 항상 보인다. */

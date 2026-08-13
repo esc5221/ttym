@@ -15,6 +15,7 @@ vi.mock('@xterm/xterm', () => {
     writes: unknown[] = [];
     open() {}
     loadAddon() {}
+    attachCustomKeyEventHandler() {}
     dispose() {}
     refresh() {}
     onBell() { return { dispose() {} }; }
@@ -30,6 +31,11 @@ vi.mock('@xterm/xterm', () => {
 });
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} dispose() {} } }));
 vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { onContextLoss() {} dispose() {} } }));
+vi.mock('@xterm/addon-search', () => ({ SearchAddon: class { findNext() { return true; } findPrevious() { return true; } clearDecorations() {} onDidChangeResults() { return { dispose() {} }; } dispose() {} } }));
+// clipboard 애드온은 브라우저 전역(self)을 import 시점에 요구한다 — node 테스트에선 스텁.
+vi.mock('@xterm/addon-web-fonts', () => ({ WebFontsAddon: class { dispose() {} } }));
+vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class { dispose() {} } }));
+vi.mock('@xterm/addon-clipboard', () => ({ ClipboardAddon: class { dispose() {} } }));
 
 import { acquireHost, destroyAllHosts } from './terminal-host.js';
 import type { TerminalMux } from '@ttym/vt';

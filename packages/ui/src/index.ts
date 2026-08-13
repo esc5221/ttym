@@ -4,4 +4,5 @@ export { Terminal } from './Terminal';
 export type { TerminalProps } from './Terminal';
 export { LayoutView } from './LayoutView';
 export type { LayoutViewProps } from './LayoutView';
-export { refreshTerminalThemes } from './terminal-host.js';
+export { refreshTerminalThemes, getHost } from './terminal-host.js';
+export type { TerminalHost } from './terminal-host.js';
