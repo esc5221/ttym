@@ -53,3 +53,7 @@ export function patchSessionAnnotations(
 ): Promise<SessionAnnotations> {
   return request(base, `/api/sessions/${sessionId}/annotations`, { method: 'PATCH', body: patch });
 }
+
+export function getAgentStates(base: BaseUrl): Promise<Record<number, { kind: string | null; active: boolean }>> {
+  return request(base, '/api/agent-states');
+}

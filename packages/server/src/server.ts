@@ -745,6 +745,21 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
+  // GET /api/agent-states — 모든 라이브 세션의 {kind, active} 한 판.
+  // 실측에서 창 10개 × 27세션의 60초 안전망 스윕이 분당 270커넥션을 만들었다
+  // (server는 단명 CLI 소켓 누수 때문에 Connection: close가 계약이다 — 8c3cb6c).
+  // 요청 수를 줄이는 게 옳은 방향이지, keep-alive를 되살리는 게 아니다.
+  if (path === '/api/agent-states' && req.method === 'GET') {
+    const sessions = manager.list();
+    Promise.all(sessions.map(async (info) => {
+      const meta = await manager.getMeta(info.id);
+      return [info.id, { kind: agentKindOf(meta), active: agentIsActive(meta) }] as const;
+    })).then((entries) => {
+      json(200, Object.fromEntries(entries));
+    }).catch(() => json(500, { error: 'assembly failed' }));
+    return true;
+  }
+
   // GET /api/map — 작업 지도 한 판을 서버가 조립해서 준다: 살아있는 세션마다
   // AI 요약(meta.mapSummary, user-owned 절반)과 신선도, workspace마다 배치(map).
   // 신선도는 seq에 정직하다: atSeq 이후 링이 전진했으면 stale — 낡음을 숨기지 않는다.

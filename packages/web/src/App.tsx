@@ -909,13 +909,17 @@ function App() {
     if (memberIds.length === 0) { setAgentStates({}); return; }
     let cancelled = false;
     const sweep = async () => {
-      const entries = await Promise.all(memberIds.map(async (id) => {
-        try {
-          const runtime = await api.getSessionRuntime(API_BASE, id);
-          return [id, { kind: runtime.agent.kind, active: runtime.agent.active }] as const;
-        } catch { return [id, { kind: null, active: false }] as const; }
-      }));
-      if (!cancelled) setAgentStates(Object.fromEntries(entries));
+      // 세션당 1요청(N+1)이던 것을 한 판으로 — 창 10개가 각자 돌리던 안전망이
+      // 분당 270커넥션을 만들던 실측이 이 배치의 이유다.
+      try {
+        const all = await api.getAgentStates(API_BASE);
+        if (cancelled) return;
+        const entries = memberIds.map((id) => {
+          const state = all[id];
+          return [id, state ? { kind: state.kind as AgentState['kind'], active: state.active } : { kind: null, active: false }] as const;
+        });
+        setAgentStates(Object.fromEntries(entries));
+      } catch {}
     };
     void sweep();
     const fallback = window.setInterval(() => { void sweep(); }, 60_000);

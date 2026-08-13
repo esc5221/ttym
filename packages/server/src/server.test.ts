@@ -1038,6 +1038,20 @@ describe('meta ownership over HTTP', () => {
     await fetch(`http://127.0.0.1:${port}/api/sessions/${sid}`, { method: 'DELETE' }).catch(() => {});
   });
 
+  it('agent states come as one batch — the N+1 sweep is gone', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const created = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24 }),
+    });
+    const sid = (await created.json()).id as number;
+    const res = await fetch(`http://127.0.0.1:${port}/api/agent-states`);
+    expect(res.status).toBe(200);
+    const states = await res.json();
+    expect(states[String(sid)]).toEqual({ kind: null, active: false });
+    await fetch(`http://127.0.0.1:${port}/api/sessions/${sid}`, { method: 'DELETE' }).catch(() => {});
+  });
+
   it('the summarizer prompt round-trips and resets; the api key is write-only', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     // 기본 지시문이 유효본이다

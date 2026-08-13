@@ -33,6 +33,7 @@ export function createApi(base: BaseUrl) {
         sessions.patchSessionMeta(base, id, patch),
       send: (id: number, data: string) => sessions.sendToSession(base, id, data),
       runtime: (id: number) => sessions.getSessionRuntime(base, id),
+      agentStates: () => sessions.getAgentStates(base),
       annotations: (id: number) => sessions.getSessionAnnotations(base, id),
       patchAnnotations: (id: number, patch: Parameters<typeof sessions.patchSessionAnnotations>[2]) =>
         sessions.patchSessionAnnotations(base, id, patch),
