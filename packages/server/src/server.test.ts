@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import WebSocket from 'ws';
 import { createServer, agentIsActive, AGENT_ACTIVE_TTL_MS, TtymServer } from './server.js';
 import { CMD, decode, encode, toBuffer } from './protocol.js';
-import { rmSync, readFileSync } from 'node:fs';
+import { rmSync, readFileSync, writeFileSync } from 'node:fs';
 
 type Frame = NonNullable<ReturnType<typeof decode>>;
 
@@ -93,6 +93,49 @@ describe('createServer', () => {
     delete process.env.TTYM_RUNTIME_DIR;
     delete process.env.TTYM_HOME;
   });
+
+  it('a rival server never steals sessions a live server owns', async () => {
+    // 2026-08-13 dev 사고의 재현: 서버 A가 세션·holder를 쥐고 있는데 같은
+    // 런타임으로 서버 B가 부팅하면 — lease는 거절되고(recoverOne), 그 부재를
+    // workspace 복원이 '사망'으로 읽어 같은 id로 사칭 holder를 소환했었다.
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const wsRes = await fetch(`http://127.0.0.1:${port}/api/workspaces`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project: 'rival', name: 'w' }),
+    });
+    const wsId = (await wsRes.json()).id;
+    const created = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24 }),
+    });
+    const sid = (await created.json()).id as number;
+    await fetch(`http://127.0.0.1:${port}/api/workspaces/${wsId}/members`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: sid, name: 'victim' }),
+    });
+    const manifestPath = `${runtimeDir}/session-${sid}.json`;
+    const before = JSON.parse(readFileSync(manifestPath, 'utf8'));
+
+    // 부활 미끼: 복원 경로가 읽을 스냅샷을 심는다
+    writeFileSync(`${runtimeDir}/snapshot-${sid}.json`, JSON.stringify({
+      version: 1, id: sid, cmd: ['/bin/sh'], cols: 80, rows: 24,
+      createdAt: Date.now(), savedAt: Date.now(), screen: '', meta: {},
+    }));
+
+    const rival = await createServer(0);
+    try {
+      // 강탈 금지의 증명 세 겹: 라이벌은 그 세션을 모르고, manifest의
+      // holder는 그대로이며, A의 세션은 여전히 살아 동작한다.
+      expect(rival.manager.get(sid)).toBeUndefined();
+      const after = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      expect(after.pid).toBe(before.pid);
+      expect(after.socket).toBe(before.socket);
+    } finally {
+      await rival.close();
+    }
+    const alive = await fetch(`http://127.0.0.1:${port}/api/sessions/${sid}/screen`);
+    expect(alive.status).toBe(200);
+  }, 30_000);
 
   it('returns error and cleans up when verify detects early exit', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;

@@ -1,4 +1,5 @@
 import { createServer as createHttpServer, IncomingMessage, ServerResponse } from 'node:http';
+import { createServer as createNetServer } from 'node:net';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { extname, resolve, basename as basenamePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -925,6 +926,16 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
 // ───── Main ─────
 
 export async function createServer(port: number): Promise<TtymServer> {
+  // 포트 선점 검사 — holder를 건드리기 전에. 다른 서버가 이미 살아있다면
+  // 여기서 즉사해야 한다: 복구 경로가 lease 거절을 만나고 workspace 복원이
+  // 같은 id로 사칭 holder를 소환하는 연쇄(2026-08-13 사고)의 원천 차단.
+  // 아래 heldByOthers 가드가 안전벨트, 이건 문단속이다.
+  await new Promise<void>((portFree, portTaken) => {
+    const probe = createNetServer();
+    probe.once('error', portTaken);
+    probe.listen(port, '0.0.0.0', () => probe.close(() => portFree()));
+  });
+
   const manager = new SessionManager();
 
   // Load workspace store first so we know which session IDs deserve restore.

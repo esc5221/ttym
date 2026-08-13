@@ -100,6 +100,13 @@ export class SessionManager {
     await Promise.all(manifests.map((filename) => this.recoverOne(filename)));
   }
 
+  /**
+   * lease 거절로 건너뛴 세션 id들 — 다른 살아있는 서버의 소유물.
+   * restoreWorkspace가 이 id를 '죽은 세션'으로 읽고 같은 id로 부활시키면
+   * 사칭 holder가 세션 신원을 강탈한다(2026-08-13 dev 사고). 절대 금지.
+   */
+  private heldByOthers = new Set<number>();
+
   private async recoverOne(filename: string): Promise<void> {
     const manifestPath = resolve(this.runtimeDir, filename);
     try {
@@ -141,6 +148,8 @@ export class SessionManager {
         // Another server is driving this session. Its manifest is correct and
         // must survive — deleting it here is how a losing server used to strand
         // a live holder.
+        const idMatch = filename.match(/session-(\d+)\.json$/);
+        if (idMatch) this.heldByOthers.add(parseInt(idMatch[1], 10));
         console.log(`[mgr] ${filename} held by another server, leaving it alone`);
         return;
       }
@@ -210,6 +219,11 @@ export class SessionManager {
       // more accurate record of the screen, and deleting it here is what forced
       // every swap to rebuild from the smaller raw ring instead.
       if (this.sessions.has(snap.id)) {
+        continue;
+      }
+      // 소유권이 다른 서버에 있는 id — 부재가 아니라 점유다. 부활은 강탈이 된다.
+      if (this.heldByOthers.has(snap.id)) {
+        console.log(`[mgr] session=${snap.id} held by another server — not resurrecting`);
         continue;
       }
 
