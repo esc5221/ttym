@@ -15,6 +15,10 @@ import {
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
+import { actionBtnStyle, tabStyle, AGENT_COLORS, API_BASE, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { DashboardPage } from './DashboardPage.js';
+import { MapPage } from './MapPage.js';
+import { SettingsModal } from './SettingsModal.js';
 
 /** crypto.randomUUID fallback for non-secure contexts (HTTP over LAN) */
 function uuid(): string {
@@ -22,638 +26,7 @@ function uuid(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-// ───── Workspace 타입 + Server API ─────
-
-interface WorkspaceMember {
-  sessionId: number;
-  name: string;
-  role?: string;
-  tags?: string[];
-  createdAt?: number;
-  updatedAt?: number;
-}
-
-interface SessionMeta {
-  cwd?: string | null;
-  [key: string]: unknown;
-}
-
-interface PanelState {
-  key: string;
-  sessionId?: number;
-  memberName?: string;
-  cwd?: string;
-  dead?: boolean;
-}
-
-interface Workspace {
-  id: string;
-  project: string;
-  name: string;
-  layout: LayoutNode;
-  members: WorkspaceMember[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-const LOCAL_ECHO_STORAGE_KEY = 'ttym-demo-local-echo';
-
-// UI 스타일: frame(기본) = bg0 들판 + 라운드 프레임 + dim 포커스,
-// classic = bg2 크롬 바 + 좌측 포커스 바. 차이는 전부 이 테이블 한 곳에 산다.
-type UiStyle = 'frame' | 'classic';
-
-// 데스크톱 셸(Tauri)이 주입하는 마커 — 순수 데이터, IPC 없음.
-// 감지되면 트래픽라이트 자리를 비우고 스트립을 창 드래그 영역으로 쓴다.
-const IS_NATIVE = typeof (window as unknown as { __TTYM_NATIVE__?: unknown }).__TTYM_NATIVE__ !== 'undefined';
-const UI_STYLE_STORAGE_KEY = 'ttym-ui-style';
-
-const UI_STYLES = {
-  frame: {
-    stripBg: 'var(--bg0)',
-    stripLine: 'none',
-    tabActiveBg: 'var(--bg2)',
-    wrapPad: 5,
-    splitterPx: 6,
-    splitterColor: 'transparent',
-    paneRadius: 6,
-    termPad: '0 6px 6px',
-    frameBorder: true,
-    headerBar: false,
-  },
-  classic: {
-    stripBg: 'var(--bg2)',
-    stripLine: '1px solid var(--line)',
-    tabActiveBg: 'var(--bg0)',
-    wrapPad: 0,
-    splitterPx: 5,
-    splitterColor: 'var(--line)',
-    paneRadius: 0,
-    termPad: '0',
-    frameBorder: false,
-    headerBar: true,
-  },
-} as const;
-
-function readUiStyle(): UiStyle {
-  try { return localStorage.getItem(UI_STYLE_STORAGE_KEY) === 'classic' ? 'classic' : 'frame'; } catch { return 'frame'; }
-}
-
-// 에이전트 식별색 — 정체는 이름의 색, 활동은 4px 점. 필 배지는 쓰지 않는다.
-const AGENT_COLORS: Record<string, string> = { 'claude-code': 'var(--agent-claude)', codex: 'var(--agent-codex)' };
-
-interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean }
-
-function readLocalEchoEnabled(): boolean {
-  try {
-    return window.localStorage.getItem(LOCAL_ECHO_STORAGE_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function writeLocalEchoEnabled(value: boolean) {
-  try {
-    window.localStorage.setItem(LOCAL_ECHO_STORAGE_KEY, value ? '1' : '0');
-  } catch {}
-}
-
-/** Derive ttym server host from current page URL */
-function getTtymHost(): string {
-  const h = window.location.hostname;
-  // ttym-ui.lullu.lan → ttym.lullu.lan (Caddy proxy, port 80)
-  if (h.startsWith('ttym-ui.')) return `ttym.${h.slice(8)}`;
-  // tunnel or same-origin proxy → use current host (Vite proxies /api and /ws)
-  if (h.startsWith('ttym.') || h === 'localhost' || h === '127.0.0.1') return window.location.host;
-  // fallback: same host, port 7690
-  return `${h}:7690`;
-}
-const TTYM_HOST = getTtymHost();
-const isSecure = window.location.protocol === 'https:';
-const API_BASE = `${isSecure ? 'https' : 'http'}://${TTYM_HOST}`;
-
-function getTtymUiBase(): string {
-  const { protocol, hostname } = window.location;
-  if (hostname.startsWith('ttym-ui.')) return `${protocol}//${hostname}`;
-  if (hostname.startsWith('ttym.')) return `${protocol}//ttym-ui.${hostname.slice(5)}`;
-  return 'http://ttym-ui.lullu.lan';
-}
-
-function getSessionUrl(sessionId: number): string {
-  return `${getTtymUiBase()}/#s/${sessionId}`;
-}
-
-async function copySessionUrl(sessionId: number) {
-  const url = getSessionUrl(sessionId);
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(url);
-    return;
-  }
-
-  const input = document.createElement('input');
-  input.value = url;
-  input.style.position = 'fixed';
-  input.style.opacity = '0';
-  document.body.appendChild(input);
-  input.select();
-  document.execCommand('copy');
-  document.body.removeChild(input);
-}
-
-async function fetchSessionMeta(sessionId: number): Promise<SessionMeta> {
-  return api.getSessionMeta(API_BASE, sessionId);
-}
-
-async function fetchWorkspaces(): Promise<Workspace[]> {
-  try {
-    return await api.listWorkspaces(API_BASE) as Workspace[];
-  } catch { return []; }
-}
-
-async function apiCreateWorkspace(ws: { id: string; name: string; layout: LayoutNode }): Promise<Workspace | null> {
-  try {
-    return await api.createWorkspace(API_BASE, { id: ws.id, name: ws.name, layout: ws.layout }) as Workspace;
-  } catch { return null; }
-}
-
-/** 셸에 안전하게 꽂을 경로: 평범한 문자만이 아니면 따옴표로 감싼다.
- *  ghostty는 백슬래시, vibetunnel은 따옴표를 쓰는데 하류(claude 복원기)는
- *  둘 다 처리한다 — 읽기 좋은 따옴표 쪽을 따른다. */
-function quotePathForShell(path: string): string {
-  return /^[A-Za-z0-9_\-./~]+$/.test(path) ? path : `"${path.replace(/"/g, '\\"')}"`;
-}
-
-/** 드롭된 File들을 서버 drops/로 올리고 실경로 목록을 받는다 (웹 전용 —
- *  브라우저는 원본 경로를 원리적으로 숨기므로 내용이 대신 여행한다). */
-async function uploadDroppedFiles(files: File[]): Promise<string[]> {
-  const paths: string[] = [];
-  for (const file of files) {
-    const res = await fetch(`${API_BASE}/api/upload?name=${encodeURIComponent(file.name)}`, {
-      method: 'POST',
-      body: file,
-    });
-    if (!res.ok) throw new Error(`upload failed: ${res.status}`);
-    const { path } = await res.json() as { path: string };
-    paths.push(path);
-  }
-  return paths;
-}
-
-function workspaceDisplayLabel(workspace: Workspace): string {
-  return workspaceLabel(workspace.project, workspace.name);
-}
-
-function memberLabel(name: string | undefined, sessionId: number): string {
-  return name ? `${name} · #${sessionId}` : `#${sessionId}`;
-}
-
-function sessionWorkspaceMembership(workspaces: Workspace[]): Map<number, { workspace: Workspace; memberName?: string }> {
-  const membership = new Map<number, { workspace: Workspace; memberName?: string }>();
-  for (const workspace of workspaces) {
-    const names = memberNameBySession(workspace.members);
-    for (const sessionId of layoutToSessionIds(workspace.layout).filter((id) => id > 0)) {
-      membership.set(sessionId, { workspace, memberName: names.get(sessionId) });
-    }
-  }
-  return membership;
-}
-
-async function apiUpdateWorkspace(id: string, patch: { name?: string; layout?: LayoutNode }): Promise<void> {
-  try {
-    await api.updateWorkspace(API_BASE, id, patch);
-  } catch {}
-}
-
-async function apiDeleteWorkspace(id: string): Promise<void> {
-  try {
-    await api.deleteWorkspace(API_BASE, id);
-  } catch {}
-}
-
-async function apiRemoveMember(wsId: string, sessionId: number): Promise<void> {
-  try {
-    await api.removeWorkspaceMember(API_BASE, wsId, sessionId);
-  } catch {}
-}
-
-async function apiAddMember(
-  wsId: string,
-  sessionId: number,
-  name: string,
-): Promise<Workspace | null> {
-  try {
-    return await api.addWorkspaceMember(API_BASE, wsId, { sessionId, name }) as Workspace;
-  } catch { return null; }
-}
-
-async function apiSplitWorkspace(
-  id: string,
-  options: { targetSessionId?: number; cwd?: string; cols?: number; rows?: number; name?: string; role?: string; cmd?: string[]; direction?: 'right' | 'left' | 'down' | 'up' } = {},
-): Promise<Workspace | null> {
-  try {
-    const data = await api.splitWorkspace(API_BASE, id, options);
-    return (data?.workspace as Workspace) ?? null;
-  } catch { return null; }
-}
-
-// ───── 해시 라우팅 ─────
-
-type Route =
-  | { page: 'dashboard' }
-  | { page: 'overview' }
-  | { page: 'session'; id: number }
-  | { page: 'viewer'; id: number }
-  | { page: 'workspace'; id: string };
-
-function parseHash(): Route {
-  const hash = window.location.hash;
-  if (hash === '#overview') return { page: 'overview' };
-  const sessionMatch = hash.match(/^#s\/(\d+)$/);
-  if (sessionMatch) return { page: 'session', id: parseInt(sessionMatch[1], 10) };
-  const viewerMatch = hash.match(/^#v\/(\d+)$/);
-  if (viewerMatch) return { page: 'viewer', id: parseInt(viewerMatch[1], 10) };
-  const wsMatch = hash.match(/^#w\/(.+)$/);
-  if (wsMatch) return { page: 'workspace', id: wsMatch[1] };
-  return { page: 'dashboard' };
-}
-
-function navigate(route: Route) {
-  switch (route.page) {
-    case 'dashboard': window.location.hash = ''; break;
-    case 'overview': window.location.hash = 'overview'; break;
-    case 'session': window.location.hash = `s/${route.id}`; break;
-    case 'viewer': window.location.hash = `v/${route.id}`; break;
-    case 'workspace': window.location.hash = `w/${route.id}`; break;
-  }
-}
-
 // ───── 대시보드 ─────
-
-type DashPanel = { kind: 'hover' } | { kind: 'live'; sid: number } | { kind: 'ws'; wsId: string };
-
-function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mux: TerminalMux; agentStates: Record<number, AgentState>; localEchoEnabled: boolean; actionsSlot: HTMLElement | null }) {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
-  const [loading, setLoading] = useState(true);
-  const [hoveredSessionId, setHoveredSessionId] = useState<number | null>(null);
-  const [compactLayout, setCompactLayout] = useState(() => window.innerWidth < 1080);
-  // 우측 패널: hover 미리보기 ↔ live 터미널(행 클릭) ↔ workspace 분할 미니뷰(제목 클릭)
-  const [panel, setPanel] = useState<DashPanel>({ kind: 'hover' });
-  const [hoveredWsId, setHoveredWsId] = useState<string | null>(null);
-  // 모핑 하이라이트: 행별 배경 대신 리스트에 단 하나 떠 있는 박스가
-  // hover 대상의 rect로 미끄러진다. variant가 곧 "무엇을 보고 있나"다.
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const [hl, setHl] = useState<{ top: number; left: number; width: number; height: number; variant: 'row' | 'ws'; visible: boolean }>(
-    { top: 0, left: 0, width: 0, height: 0, variant: 'row', visible: false },
-  );
-
-  const moveHl = useCallback((el: HTMLElement, variant: 'row' | 'ws') => {
-    const container = listRef.current;
-    if (!container) return;
-    const cRect = container.getBoundingClientRect();
-    const rect = el.getBoundingClientRect();
-    setHl({
-      top: rect.top - cRect.top + container.scrollTop,
-      left: rect.left - cRect.left,
-      width: rect.width,
-      height: rect.height,
-      variant,
-      visible: true,
-    });
-  }, []);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [list, wsList] = await Promise.all([mux.listSessions(), fetchWorkspaces()]);
-      const live = list.filter((s) => s.status !== 'dead');
-      setSessions(live);
-      setWorkspaces(wsList);
-      const cwdEntries = await Promise.all(live.map(async (session) => {
-        try {
-          const meta = await fetchSessionMeta(session.id);
-          return [session.id, typeof meta.cwd === 'string' ? meta.cwd : ''] as const;
-        } catch {
-          return [session.id, ''] as const;
-        }
-      }));
-      setSessionCwds(Object.fromEntries(cwdEntries.filter(([, cwd]) => cwd)));
-    } catch {}
-    setLoading(false);
-  }, [mux]);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  useEffect(() => {
-    return mux.onWorkspace((event) => {
-      setWorkspaces((prev) => {
-        if (event.deletedId) return prev.filter((w) => w.id !== event.deletedId);
-        const next = event.workspace as unknown as Workspace | undefined;
-        if (!next) return prev;
-        const at = prev.findIndex((w) => w.id === next.id);
-        if (at === -1) return [...prev, next];
-        const copy = prev.slice(); copy[at] = next; return copy;
-      });
-    });
-  }, [mux]);
-
-  useEffect(() => {
-    const media = window.matchMedia('(max-width: 1080px)');
-    const sync = () => setCompactLayout(media.matches);
-    sync();
-    media.addEventListener('change', sync);
-    return () => media.removeEventListener('change', sync);
-  }, []);
-
-  useEffect(() => {
-    if (sessions.length === 0) {
-      setHoveredSessionId(null);
-      return;
-    }
-    if (hoveredSessionId === null || !sessions.some((session) => session.id === hoveredSessionId)) {
-      setHoveredSessionId(sessions[0]!.id);
-    }
-  }, [sessions, hoveredSessionId]);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPanel({ kind: 'hover' });
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
-  // 죽은 세션은 membership만 걷어낸다 — 트리 정리는 서버 몫.
-  useEffect(() => {
-    if (loading || sessions.length === 0) return;
-    const aliveIds = new Set(sessions.map((s) => s.id));
-    let changed = false;
-    for (const ws of workspaces) {
-      for (const id of layoutToSessionIds(ws.layout)) {
-        if (id > 0 && !aliveIds.has(id)) {
-          void apiRemoveMember(ws.id, id);
-          ws.layout = removePane(ws.layout, id);
-          changed = true;
-        }
-      }
-    }
-    if (changed) setWorkspaces([...workspaces]);
-  }, [sessions, loading]);
-
-  const createSession = useCallback(async () => {
-    try {
-      const id = await mux.createSession({ cols: 80, rows: 24 }, { onData: () => {}, onExit: () => {} });
-      mux.detachSession(id);
-      navigate({ page: 'session', id });
-    } catch (e) {
-      console.error('Failed to create session:', e);
-    }
-  }, [mux]);
-
-  const terminateSession = useCallback(async (sid: number, wsId?: string) => {
-    mux.destroySession(sid);
-    if (wsId) await apiRemoveMember(wsId, sid);
-    await refresh();
-  }, [mux, refresh]);
-
-  const deleteWorkspaceCascade = useCallback(async (ws: Workspace) => {
-    for (const sid of layoutToSessionIds(ws.layout).filter((id) => id > 0)) mux.destroySession(sid);
-    await apiDeleteWorkspace(ws.id);
-    await refresh();
-  }, [mux, refresh]);
-
-  const aliveIds = new Set(sessions.map((s) => s.id));
-  const assigned = new Set(workspaces.flatMap((w) => layoutToSessionIds(w.layout).filter((id) => id > 0)));
-  const standalone = sessions.filter((s) => !assigned.has(s.id));
-  const infoBySession = new Map(sessions.map((s) => [s.id, s] as const));
-
-  const sessionRow = (sid: number, name?: string, wsId?: string) => {
-    const info = infoBySession.get(sid);
-    const agent = agentStates[sid];
-    const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
-    const selected = panel.kind === 'live' && panel.sid === sid;
-    return (
-      <div
-        key={sid}
-        className="reveal-parent"
-        onClick={() => setPanel({ kind: 'live', sid })}
-        onMouseEnter={(e) => { setHoveredSessionId(sid); setHoveredWsId(null); moveHl(e.currentTarget, 'row'); }}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px',
-          borderRadius: 8, cursor: 'pointer', minWidth: 0,
-          borderLeft: selected ? '2px solid var(--accent)' : '2px solid transparent',
-          background: selected ? 'var(--hl)' : undefined,
-        }}
-      >
-        <span
-          className={agent?.active ? 'agent-dot-run' : undefined}
-          style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
-                   background: color ?? 'transparent', opacity: agent?.active ? 1 : 0.4 }}
-        />
-        <span style={{ color: 'var(--text-dim)', fontSize: 11, minWidth: 24, flexShrink: 0 }}>#{sid}</span>
-        <span style={{ color: color ?? 'var(--text)', fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
-          {name ?? '—'}
-        </span>
-        <span style={{ color: 'var(--text-dim)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-          {(sessionCwds[sid] ? `${formatCwd(sessionCwds[sid])} · ` : '') + (info ? info.cmd.join(' ') : '')}
-        </span>
-        <button
-          className="reveal"
-          onClick={(e) => { e.stopPropagation(); void terminateSession(sid, wsId); }}
-          style={{ ...closeBtnStyle, marginLeft: 0, flexShrink: 0 }}
-          title="세션 종료"
-        >×</button>
-      </div>
-    );
-  };
-
-  // workspace 분할 미니뷰 — 고정(ws)과 hover 양쪽에서 쓴다.
-  const renderWsMini = (wsId: string) => {
-    const target = workspaces.find((x) => x.id === wsId);
-    if (!target) return <div style={{ color: 'var(--text-dim)', padding: 20, fontSize: 12 }}>workspace가 사라졌다</div>;
-    const names = memberNameBySession(target.members);
-    return (
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <LayoutView
-          layout={target.layout}
-          splitterColor="var(--line)"
-          splitterActiveColor="var(--accent)"
-          renderPane={(sid) => sid <= 0 ? (
-            <div key="empty" style={{ ...emptyPaneStyle, fontSize: 11 }}>empty</div>
-          ) : (
-            <div key={sid} style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
-              <div
-                onClick={() => setPanel({ kind: 'live', sid })}
-                title="클릭: live로 전환"
-                style={{ display: 'flex', alignItems: 'center', gap: 6, height: 22, padding: '0 8px', background: 'var(--bg2)', borderBottom: '1px solid var(--line)', fontSize: 10, cursor: 'pointer', flexShrink: 0 }}
-              >
-                <span style={{ color: agentStates[sid]?.kind ? AGENT_COLORS[agentStates[sid]!.kind!] : 'var(--text-soft)', fontWeight: 700 }}>
-                  {names.get(sid) || `#${sid}`}
-                </span>
-                <span style={{ color: 'var(--text-dim)' }}>#{sid}</span>
-              </div>
-              <div style={{ flex: 1, minHeight: 0, pointerEvents: 'none' }}>
-                <Terminal mux={mux} attachId={sid} mode="readonly" fontSize={10} enableWebgl={false} />
-              </div>
-            </div>
-          )}
-        />
-      </div>
-    );
-  };
-
-  return (
-    <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: compactLayout ? 'minmax(0, 1fr)' : 'minmax(360px, 460px) minmax(0, 1fr)', fontFamily: 'var(--mono)' }}>
-      <div
-        ref={listRef}
-        className="thin-scroll"
-        onMouseLeave={() => setHl((prev) => ({ ...prev, visible: false }))}
-        onScroll={() => setHl((prev) => (prev.visible ? { ...prev, visible: false } : prev))}
-        style={{ borderRight: compactLayout ? 'none' : '1px solid var(--line)', background: 'var(--bg1)', padding: 14, overflowY: 'auto', minHeight: 0, position: 'relative' }}
-      >
-        <div
-          className="morph-hl"
-          style={{
-            position: 'absolute',
-            top: hl.top,
-            left: hl.left,
-            width: hl.width,
-            height: hl.height,
-            borderRadius: hl.variant === 'ws' ? 10 : 8,
-            // 콘텐츠 위에 얹는 베일 — 카드가 불투명해도 항상 보인다.
-            background: 'var(--hl)',
-            border: hl.variant === 'ws' ? '1px solid var(--accent-dim)' : '1px solid transparent',
-            opacity: hl.visible ? 1 : 0,
-            zIndex: 1,
-            pointerEvents: 'none',
-          }}
-        />
-        {actionsSlot ? createPortal(
-          <>
-            <button onClick={createSession} style={stripBtnStyle}>+ session</button>
-            <button onClick={refresh} style={stripBtnStyle} title="refresh">↻</button>
-          </>, actionsSlot) : null}
-
-        {loading && workspaces.length === 0 ? (
-          <div style={{ color: 'var(--text-dim)', fontSize: 12, padding: 8 }}>loading…</div>
-        ) : null}
-
-        {workspaces.map((ws) => {
-          const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0 && aliveIds.has(id));
-          const names = memberNameBySession(ws.members);
-          const running = ids.filter((id) => agentStates[id]?.active).length;
-          return (
-            <div key={ws.id} style={{
-              border: '1px solid var(--line)', borderRadius: 10, padding: 6, marginBottom: 10, background: 'var(--bg0)',
-              borderLeft: panel.kind === 'ws' && panel.wsId === ws.id ? '2px solid var(--accent)' : '1px solid var(--line)',
-            }}>
-              <div
-                className="reveal-parent"
-                onClick={() => setPanel({ kind: 'ws', wsId: ws.id })}
-                onMouseEnter={(e) => { setHoveredWsId(ws.id); moveHl(e.currentTarget.parentElement as HTMLElement, 'ws'); }}
-                title="hover: 분할 미리보기 · 클릭: 고정 · 탭: 전체 열기"
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', fontSize: 12, fontWeight: 700, color: 'var(--text-soft)', cursor: 'pointer' }}
-              >
-                {workspaceDisplayLabel(ws)}
-                <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  {running > 0 ? (
-                    <>
-                      <span className="agent-dot-run" style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--agent-claude)' }} />
-                      <span style={{ color: 'var(--text-dim)', fontSize: 10.5 }}>{running}</span>
-                    </>
-                  ) : null}
-                  <button
-                    className="reveal"
-                    onClick={(e) => { e.stopPropagation(); void deleteWorkspaceCascade(ws); }}
-                    style={closeBtnStyle}
-                    title="workspace 삭제 (세션 종료)"
-                  >×</button>
-                </span>
-              </div>
-              {ids.map((sid) => sessionRow(sid, names.get(sid), ws.id))}
-            </div>
-          );
-        })}
-
-        {standalone.length > 0 ? (
-          <>
-            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: 'var(--text-dim)', margin: '14px 4px 8px' }}>
-              standalone
-            </div>
-            {standalone.map((s) => sessionRow(s.id))}
-          </>
-        ) : null}
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: 'var(--bg0)' }}>
-        <div style={{ height: 34, display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderBottom: '1px solid var(--line)', background: 'var(--bg1)', fontSize: 11.5, color: 'var(--text-dim)', flexShrink: 0 }}>
-          {panel.kind === 'live' ? (
-            <>
-              <span style={{ color: 'var(--text-soft)', fontWeight: 700 }}>live</span>
-              <span>#{panel.sid}</span>
-              <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
-                <button onClick={() => navigate({ page: 'session', id: panel.sid })} style={miniLinkBtnStyle}>open</button>
-                <button onClick={() => void copySessionUrl(panel.sid)} style={miniLinkBtnStyle}>copy</button>
-                <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="미리보기로 (esc)">×</button>
-              </span>
-            </>
-          ) : panel.kind === 'ws' ? (
-            <>
-              <span style={{ color: 'var(--text-soft)', fontWeight: 700 }}>workspace</span>
-              <span>{(() => { const w = workspaces.find((x) => x.id === panel.wsId); return w ? workspaceDisplayLabel(w) : panel.wsId; })()}</span>
-              <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
-                <button onClick={() => navigate({ page: 'workspace', id: panel.wsId })} style={miniLinkBtnStyle}>open</button>
-                <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="미리보기로 (esc)">×</button>
-              </span>
-            </>
-          ) : (
-            <>
-              <span style={{ color: 'var(--text-soft)' }}>preview</span>
-              <span>{hoveredWsId !== null
-                ? (() => { const w = workspaces.find((x) => x.id === hoveredWsId); return w ? workspaceDisplayLabel(w) : hoveredWsId; })()
-                : hoveredSessionId !== null ? `#${hoveredSessionId}` : 'no session'}</span>
-              <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
-                {hoveredSessionId !== null ? (
-                  <>
-                    <button onClick={() => setPanel({ kind: 'live', sid: hoveredSessionId })} style={miniLinkBtnStyle}>live</button>
-                    <button onClick={() => navigate({ page: 'session', id: hoveredSessionId })} style={miniLinkBtnStyle}>open</button>
-                    <button onClick={() => void copySessionUrl(hoveredSessionId)} style={miniLinkBtnStyle}>copy</button>
-                  </>
-                ) : null}
-              </span>
-            </>
-          )}
-        </div>
-        {panel.kind === 'live' ? (
-          // 행 클릭 = 그 자리에서 바로 쓰는 터미널. 단일 대형 뷰라 GPU 허용.
-          <div style={{ flex: 1, minHeight: 0 }}>
-            {/* 헤더가 말하는 그대로 '프리뷰'다 — readwrite로 두면 세션의 진짜
-                뷰어와 cols 리사이즈 싸움이 나고, 축소가 아니라 잘림이 된다.
-                조작은 workspace/세션 페이지의 영토. */}
-            <Terminal mux={mux} attachId={panel.sid} mode="readonly" fontSize={10} enableWebgl={false} />
-          </div>
-        ) : panel.kind === 'ws' ? (
-          renderWsMini(panel.wsId)
-        ) : hoveredWsId !== null ? (
-          renderWsMini(hoveredWsId)
-        ) : hoveredSessionId !== null ? (
-          // 호버도 클릭(live)과 같은 물건이다 — 예전엔 /screen 텍스트 덤프를
-          // 5초 폴링으로 HTML화해 pre-wrap으로 재줄바꿈했고, 그게 "호버만
-          // 다르게 보이는" 원인의 전부였다. 같은 readonly 터미널 하나로 통일.
-          <div style={{ flex: 1, minHeight: 0, pointerEvents: 'none' }}>
-            <Terminal mux={mux} attachId={hoveredSessionId} mode="readonly" fontSize={10} enableWebgl={false} />
-          </div>
-        ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontFamily: 'var(--mono)', fontSize: 12 }}>
-            hover a session to preview
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ───── 단일 세션 페이지 ─────
 
 function SessionPage({ mux, sessionId, localEchoEnabled }: { mux: TerminalMux; sessionId: number; localEchoEnabled: boolean }) {
   return (
@@ -1239,124 +612,6 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   );
 }
 
-const emptyPaneStyle: React.CSSProperties = {
-  height: '100%', width: '100%',
-  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-  background: 'var(--bg1)', color: 'var(--text-dim)', fontFamily: 'var(--mono)', fontSize: 12, gap: 8,
-};
-
-function SettingsOverlay({
-  localEchoEnabled,
-  onLocalEchoChange,
-  uiStyle,
-  onUiStyleChange,
-  fontSize,
-  onFontSizeChange,
-  onThemeChange,
-}: {
-  localEchoEnabled: boolean;
-  onLocalEchoChange: (value: boolean) => void;
-  uiStyle: UiStyle;
-  onUiStyleChange: (value: UiStyle) => void;
-  fontSize: number;
-  onFontSizeChange: (value: number) => void;
-  onThemeChange: (value: 'dark' | 'light') => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>(
-    () => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'),
-  );
-
-  const applyTheme = useCallback((next: 'dark' | 'light') => {
-    setTheme(next);
-    if (next === 'light') document.documentElement.dataset.theme = 'light';
-    else delete document.documentElement.dataset.theme;
-    try { localStorage.setItem('ttym-theme', next); } catch {}
-    // 터미널 배경 = 앱 배경 원칙: 살아있는 xterm들도 같은 프레임에 갈아입는다.
-    refreshTerminalThemes();
-    onThemeChange(next);
-  }, [onThemeChange]);
-
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
-  return (
-    <div style={{ position: 'relative', zIndex: 100 }}>
-      <button onClick={() => setOpen((value) => !value)} style={settingsButtonStyle}>
-        settings
-      </button>
-      {open ? (
-        <div style={settingsPopoverStyle}>
-          <div style={settingsTitleStyle}>settings</div>
-          <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <span style={settingsLabelStyle}>ui style</span>
-            <span style={{ display: 'inline-flex', gap: 6 }}>
-              {(['frame', 'classic'] as const).map((option) => (
-                <button
-                  key={option}
-                  onClick={() => onUiStyleChange(option)}
-                  style={{
-                    ...actionBtnStyle,
-                    padding: '2px 10px',
-                    fontSize: 11,
-                    background: uiStyle === option ? 'var(--accent-bg)' : 'var(--bg2)',
-                    color: uiStyle === option ? 'var(--accent)' : 'var(--text-soft)',
-                    borderColor: uiStyle === option ? 'var(--accent-dim)' : 'var(--line)',
-                  }}
-                >
-                  {option}
-                </button>
-              ))}
-            </span>
-          </label>
-          <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <span style={settingsLabelStyle}>theme</span>
-            <span style={{ display: 'inline-flex', gap: 6 }}>
-              {(['dark', 'light'] as const).map((option) => (
-                <button
-                  key={option}
-                  onClick={() => applyTheme(option)}
-                  style={{
-                    ...actionBtnStyle,
-                    padding: '2px 10px',
-                    fontSize: 11,
-                    background: theme === option ? 'var(--accent-bg)' : 'var(--bg2)',
-                    color: theme === option ? 'var(--accent)' : 'var(--text-soft)',
-                    borderColor: theme === option ? 'var(--accent-dim)' : 'var(--line)',
-                  }}
-                >
-                  {option}
-                </button>
-              ))}
-            </span>
-          </label>
-          <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <span style={settingsLabelStyle}>font size</span>
-            <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-              <button onClick={() => onFontSizeChange(Math.max(8, fontSize - 1))} style={{ ...actionBtnStyle, padding: '2px 8px', fontSize: 11 }}>−</button>
-              <span style={{ color: 'var(--text)', fontSize: 12, fontFamily: 'var(--mono)', width: 20, textAlign: 'center' }}>{fontSize}</span>
-              <button onClick={() => onFontSizeChange(Math.min(32, fontSize + 1))} style={{ ...actionBtnStyle, padding: '2px 8px', fontSize: 11 }}>+</button>
-            </span>
-          </label>
-          <label style={{ ...settingsFieldStyle, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-            <span style={settingsLabelStyle}>optimistic local echo</span>
-            <input
-              type="checkbox"
-              checked={localEchoEnabled}
-              onChange={(event) => onLocalEchoChange(event.target.checked)}
-            />
-          </label>
-          <div style={settingsHintStyle}>experimental: predicts printable shell echo before server confirmation</div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 // ───── Overview 페이지 (실시간 미리보기) ─────
 
@@ -1536,6 +791,12 @@ function PreviewCard({ mux, sessionId, label, sublabel, status }: {
 }
 
 // ───── App (라우터) ─────
+
+const MAIN_VIEW_STORAGE_KEY = 'ttym-main-view';
+type MainView = 'preview' | 'map';
+function readMainView(): MainView {
+  try { return localStorage.getItem(MAIN_VIEW_STORAGE_KEY) === 'map' ? 'map' : 'preview'; } catch { return 'preview'; }
+}
 
 function App() {
   const muxRef = useRef<TerminalMux | null>(null);
@@ -1717,6 +978,12 @@ function App() {
     setLocalEchoEnabled(value);
   }, []);
 
+  const [mainView, setMainView] = useState<MainView>(() => readMainView());
+  const handleMainViewChange = useCallback((value: MainView) => {
+    try { localStorage.setItem(MAIN_VIEW_STORAGE_KEY, value); } catch {}
+    setMainView(value);
+  }, []);
+
   const handleUiStyleChange = useCallback((value: UiStyle) => {
     try { localStorage.setItem(UI_STYLE_STORAGE_KEY, value); } catch {}
     setUiStyle(value);
@@ -1734,6 +1001,10 @@ function App() {
     if (values['ui-style'] === 'frame' || values['ui-style'] === 'classic') {
       setUiStyle(values['ui-style']);
       try { localStorage.setItem(UI_STYLE_STORAGE_KEY, values['ui-style']); } catch {}
+    }
+    if (values['main-view'] === 'preview' || values['main-view'] === 'map') {
+      setMainView(values['main-view']);
+      try { localStorage.setItem(MAIN_VIEW_STORAGE_KEY, values['main-view']); } catch {}
     }
     if (values['local-echo'] !== undefined) setLocalEchoEnabled(values['local-echo'] === 'true');
     if (values['font-size'] !== undefined) {
@@ -1793,7 +1064,9 @@ function App() {
       page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} />;
       break;
     default:
-      page = <DashboardPage mux={mux} agentStates={agentStates} localEchoEnabled={localEchoEnabled} actionsSlot={stripSlot} />;
+      page = mainView === 'map'
+        ? <MapPage />
+        : <DashboardPage mux={mux} agentStates={agentStates} localEchoEnabled={localEchoEnabled} actionsSlot={stripSlot} />;
       break;
   }
 
@@ -1855,14 +1128,17 @@ function App() {
         <button onClick={() => void createWorkspaceTab()} style={tabAddStyle} title="new workspace">+</button>
         <span style={{ marginLeft: 'auto' }} />
         <span ref={setStripSlot} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} />
-        <SettingsOverlay
+        <SettingsModal
           localEchoEnabled={localEchoEnabled}
           onLocalEchoChange={(value) => { handleLocalEchoChange(value); patchConfig({ 'local-echo': String(value) }); }}
           uiStyle={uiStyle}
           onUiStyleChange={(value) => { handleUiStyleChange(value); patchConfig({ 'ui-style': value }); }}
+          mainView={mainView}
+          onMainViewChange={(value) => { handleMainViewChange(value); patchConfig({ 'main-view': value }); }}
           fontSize={fontSize}
           onFontSizeChange={(value) => { setFontSize(value); patchConfig({ 'font-size': String(value) }); }}
           onThemeChange={(value) => patchConfig({ theme: value })}
+          onPatchConfig={patchConfig}
         />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
@@ -1886,20 +1162,6 @@ const tabStripStyle: React.CSSProperties = {
   userSelect: 'none',
 };
 
-const tabStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 7,
-  height: 29,
-  padding: '0 13px',
-  borderRadius: 7,
-  fontSize: 12,
-  fontFamily: 'var(--mono)',
-  color: 'var(--text-dim)',
-  background: 'transparent',
-  border: '1px solid transparent',
-  cursor: 'pointer',
-};
 
 const tabActiveStyle: React.CSSProperties = {
   // 화면에서 유일하게 채워진 크롬 = 현재 워크스페이스.
@@ -1915,15 +1177,6 @@ const tabAddStyle: React.CSSProperties = {
 };
 
 /* 탭 스트립 우측의 workspace 액션 — 탭과 같은 조용한 문법. */
-const stripBtnStyle: React.CSSProperties = {
-  ...tabStyle,
-  height: 26,
-  padding: '0 10px',
-  fontSize: 11,
-  color: 'var(--text-soft)',
-  border: '1px solid var(--line)',
-  borderRadius: 6,
-};
 
 // ───── 스타일 ─────
 
@@ -1947,53 +1200,10 @@ const btnStyle: React.CSSProperties = {
   borderRadius: 3,
 };
 
-const actionBtnStyle: React.CSSProperties = {
-  background: 'var(--bg2)',
-  color: 'var(--text)',
-  border: '1px solid #444',
-  padding: '4px 12px',
-  cursor: 'pointer',
-  fontFamily: 'var(--mono)',
-  fontSize: 12,
-  borderRadius: 3,
-};
 
-const closeBtnStyle: React.CSSProperties = {
-  marginLeft: 'auto',
-  background: 'none',
-  border: 'none',
-  color: 'var(--text-dim)',
-  cursor: 'pointer',
-  fontSize: 14,
-  fontFamily: 'var(--mono)',
-  lineHeight: 1,
-  padding: '0 4px',
-  borderRadius: 3,
-};
 
 /* pane 헤더의 상시 노출 버튼 — 파랑은 포커스·상태 몫, 이 버튼들은 조용해야 한다. */
-const miniLinkBtnStyle: React.CSSProperties = {
-  background: 'transparent',
-  color: 'var(--text-dim)',
-  border: '1px solid transparent',
-  padding: '1px 5px',
-  cursor: 'pointer',
-  fontFamily: 'var(--mono)',
-  fontSize: 10,
-  borderRadius: 3,
-  lineHeight: 1.4,
-};
 
-const settingsButtonStyle: React.CSSProperties = {
-  background: 'var(--bg2)',
-  color: 'var(--text-soft)',
-  border: '1px solid var(--line-strong)',
-  padding: '6px 10px',
-  cursor: 'pointer',
-  fontFamily: 'var(--mono)',
-  fontSize: 11,
-  borderRadius: 7,
-};
 
 const workspaceNameStyle: React.CSSProperties = {
   color: 'var(--text)',
@@ -2064,37 +1274,9 @@ const attachDropdownEmptyStyle: React.CSSProperties = {
   fontSize: 11,
 };
 
-const settingsPopoverStyle: React.CSSProperties = {
-  position: 'absolute',
-  right: 0,
-  marginTop: 8,
-  width: 220,
-  padding: 12,
-  borderRadius: 10,
-  border: '1px solid var(--line-strong)',
-  background: 'var(--bg1)',
-  boxShadow: '0 18px 42px rgba(0, 0, 0, 0.42)',
-  backdropFilter: 'blur(14px)',
-  fontFamily: 'var(--mono)',
-};
 
-const settingsTitleStyle: React.CSSProperties = {
-  color: 'var(--text)',
-  fontSize: 12,
-  fontWeight: 600,
-  marginBottom: 10,
-};
 
-const settingsFieldStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 7,
-};
 
-const settingsLabelStyle: React.CSSProperties = {
-  color: 'var(--text-soft)',
-  fontSize: 11,
-};
 
 const settingsInputStyle: React.CSSProperties = {
   width: '100%',
@@ -2107,10 +1289,5 @@ const settingsInputStyle: React.CSSProperties = {
   fontFamily: 'var(--mono)',
 };
 
-const settingsHintStyle: React.CSSProperties = {
-  color: 'var(--text-dim)',
-  fontSize: 10,
-  marginTop: 8,
-};
 
 export default App;

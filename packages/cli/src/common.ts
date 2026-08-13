@@ -10,8 +10,11 @@ import { API_VERSION, isRuntimeMetaKey } from '@ttym/protocol';
 
 export const __dirname = dirname(fileURLToPath(import.meta.url));
 export const { WebSocket } = wsPkg;
-export const HOME_DIR = process.env.TTYM_HOME
-  ? resolve(process.env.TTYM_HOME)
+// `env TTYM_HOME=~/x`처럼 셸이 틸드를 안 편 채 도달하는 경우가 실재한다 —
+// 그대로 resolve하면 cwd 아래 '~' 디렉터리라는 유령 경로가 된다. 여기서 편다.
+const rawHome = process.env.TTYM_HOME?.replace(/^~(?=$|\/)/, process.env.HOME || '');
+export const HOME_DIR = rawHome
+  ? resolve(rawHome)
   : resolve(process.env.HOME || '/tmp', '.ttym');
 export const PID_FILE = resolve(HOME_DIR, 'ttym.pid');
 export const LOG_FILE = resolve(HOME_DIR, 'ttym.log');

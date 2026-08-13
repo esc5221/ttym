@@ -250,6 +250,47 @@ try {
     }
   }
 
+  // 작업 지도 모드: settings의 main view 토글이 지도를 그리고, 요약이
+  // 없는 신생 서버에선 안내 문구가 뜬다 (빈 주석 ≠ 오류 원칙의 UI 형태).
+  {
+    await page.goto(`http://127.0.0.1:${PORT}/`);
+    await page.waitForTimeout(800);
+    await page.evaluate(() => localStorage.setItem('ttym-main-view', 'map'));
+    await page.reload();
+    try {
+      await page.waitForSelector('.wmap', { timeout: 5000 });
+      await page.waitForFunction(
+        () => document.body.innerText.includes('no summaries yet') && document.body.innerText.includes('ttym map refresh'),
+        null, { timeout: 4000 },
+      );
+      console.log('  PASS  지도 모드 — main view 토글로 지도가 뜨고 빈 상태 안내가 보인다');
+
+      // 설정 모달: 열림 → map 섹션에 요약기 설정(프롬프트 기본값 포함) → esc 닫힘
+      await page.click('button[aria-label="settings"]');
+      await page.waitForSelector('[role="dialog"]', { timeout: 3000 });
+      await page.click('[role="dialog"] button:has-text("map")');
+      // 프롬프트는 마운트 후 비동기로 도착한다 — 값이 채워질 때까지 기다린다.
+      await page.waitForFunction(
+        () => {
+          const dlg = document.querySelector('[role="dialog"]');
+          if (!dlg || !dlg.innerText.includes('base url')) return false;
+          const ta = dlg.querySelector('textarea');
+          if (!ta || !ta.value.includes('JSON')) return false;
+          // one-off 정리 줄과 조립 구조 표시까지가 map 섹션의 계약이다
+          return dlg.innerText.includes('refresh now') && dlg.innerText.includes('workspace 목록');
+        },
+        null, { timeout: 4000 },
+      );
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), null, { timeout: 2000 });
+      console.log('  PASS  설정 모달 — 섹션 내비·요약기 설정·기본 프롬프트·esc 닫기');
+    } catch (e) {
+      failures++;
+      console.log('  FAIL  지도 모드 —', String(e).slice(0, 80));
+    }
+    await page.evaluate(() => localStorage.setItem('ttym-main-view', 'preview'));
+  }
+
   // P4: 보고 있는 중에 서버가 죽었다 살아나면, 손대지 않아도 화면이
   // 돌아와야 한다 (onDisconnect → 백오프 재접속 → 리로드 → 스냅샷).
   await page.goto(`http://127.0.0.1:${PORT}/#w/e2e-ws`);

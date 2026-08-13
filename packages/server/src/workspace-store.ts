@@ -26,12 +26,21 @@ export interface SplitNode {
 
 export type LayoutNode = PaneNode | SplitNode;
 
+/** 작업 지도에서의 배치 — 요약기가 쓰고 지도 뷰가 읽는다. 없으면 미분류. */
+export interface WorkspaceMapAnnotation {
+  stream?: string;
+  column?: number;
+  order?: number;
+  updatedAt?: number;
+}
+
 export interface WorkspaceInfo {
   id: string;
   project: string;
   name: string;
   layout: LayoutNode;
   members: WorkspaceMemberInfo[];
+  map?: WorkspaceMapAnnotation;
   createdAt: number;
   updatedAt: number;
 }
@@ -209,7 +218,7 @@ export class WorkspaceStore {
 
   update(
     id: string,
-    patch: { project?: string; name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: string },
+    patch: { project?: string; name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: string; map?: WorkspaceMapAnnotation | null },
   ): WorkspaceInfo | null {
     const ws = this.workspaces.get(id);
     if (!ws) return null;
@@ -222,6 +231,7 @@ export class WorkspaceStore {
       ws.layout = presetLayout(patch.preset, ws.members.map((m) => m.sessionId));
     }
     if (patch.members !== undefined) ws.members = patch.members;
+    if (patch.map !== undefined) ws.map = patch.map === null ? undefined : { ...patch.map, updatedAt: Date.now() };
     this.reconcileWorkspace(ws);
     ws.updatedAt = Date.now();
     this.scheduleSave();

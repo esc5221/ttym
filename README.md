@@ -152,6 +152,39 @@ ttym await <ws:name|:name|#id> [--timeout ms] -- "prompt"
                                            # ask an agent, get only this turn's answer
 ttym resize <ws:name|:name|#id> <cols> <rows>
 ttym kill <ws:name|:name|#id>              # end the session, holder included
+ttym map refresh [--model haiku] [--force] # AI-summarize stale sessions into the work map
+```
+
+`map refresh` reads each stale session's screen tail (stale = output advanced
+past the last summary's seq), batches them into one model call, and writes
+the results back: per-session summaries into session annotations
+(`mapSummary`), per-workspace placement (`stream`/`column`/`order`) into the
+workspace store. The web's **map** main view (settings → main view) renders
+it. Fresh sessions cost nothing — they are skipped.
+
+**Model backend — one rule**: if a base URL is set, the summarizer speaks
+OpenAI-compatible HTTP; otherwise it shells out to `claude -p`. Configure in
+`~/.ttym/config`:
+
+```
+map-model    = deepseek-v4-flash            # default: haiku (claude CLI)
+map-base-url = https://opencode.ai/zen/go/v1  # unset → claude CLI
+```
+
+The API key never goes in the config file (it is served to every client
+over `GET /api/config`). Put it in `~/.ttym/map-api-key` (chmod 600) or
+`OPENAI_API_KEY`. Reasoning models are handled: the request disables
+thinking (`thinking: {type: "disabled"}`) and retries without the knob if
+the server rejects it — measured on deepseek-v4-flash, which otherwise
+burns its whole token budget on reasoning and returns empty content.
+`claude -p` runs with `--no-session-persistence` so a 10-minute cadence
+does not litter `~/.claude/projects` with session transcripts.
+
+For a standing cadence, install the launchd template:
+
+```bash
+cp scripts/com.lullu.ttym-map-refresh.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.lullu.ttym-map-refresh.plist
 ```
 
 ### Server lifecycle
@@ -246,6 +279,7 @@ DELETE /api/sessions/:id                    kill (holder included)
 POST   /api/sessions/:id/send               {data} → raw bytes to the PTY
 GET    /api/sessions/:id/screen             current screen dump
 POST   /api/sessions/:id/resize             {cols, rows}
+GET    /api/map                             work map: workspaces + sessions + AI summaries + freshness
 POST   /api/sessions/:id/interactions       {prompt, timeoutMs?} → blocks until answered
 GET    /api/sessions/:id/interactions/:iid  resume an interaction handed off with a 202
 GET    /api/sessions/:id/runtime            assembled server-owned view (terminal·process·agent)
@@ -378,6 +412,27 @@ changes reach it through a normal server deploy — no rebuild. Rebuild only whe
 uses to bootstrap a server when none is running.
 
 pnpm workspace members: the 8 `packages/*` plus the Rust `holder/`.
+
+## Config file
+
+`~/.ttym/config` — flat `key = value`, `#` comments (the ghostty model). The
+server owns the file and serves it over `GET /api/config`; clients PATCH it
+and every surface (web, desktop, every window) follows. Comments and unknown
+lines survive edits. Never put secrets here — it is served to every client.
+
+```
+theme        = dark | light         UI + terminal palette
+ui-style     = frame | classic      chrome style
+main-view    = preview | map        main page: session previews or the work map
+font-size    = 14                   terminal font size (8–32)
+local-echo   = true | false         optimistic local echo (experimental)
+zoom         = 1.0                  desktop window zoom (written by the app)
+map-model    = haiku                summarizer model (see `map refresh`)
+map-base-url =                      set → OpenAI-compatible HTTP; unset → claude CLI
+```
+
+Related but deliberately outside this file: the summarizer API key lives in
+`~/.ttym/map-api-key` (chmod 600) or `OPENAI_API_KEY`.
 
 ## Environment variables
 

@@ -103,6 +103,21 @@ ttym workspace send demo/onboard claude-sub -- $'hello\r'
 ttym workspace screen demo/onboard claude-sub --json
 ```
 
+## 작업 지도 (map)
+
+메인 화면의 두 번째 모드(settings → main view → map). 세션별 AI 요약 + workspace 줄기 배치.
+
+```sh
+ttym map refresh                # stale 세션만 배치 요약 (claude -p haiku 기본)
+ttym map refresh --force        # 전체 재요약
+ttym map refresh --dry-run      # 프롬프트만 출력
+```
+
+- 백엔드 규칙 하나: config에 `map-base-url` 있으면 OpenAI 호환 HTTP, 없으면 `claude -p`.
+  모델은 `map-model`. API 키는 `~/.ttym/map-api-key`(0600) 또는 `OPENAI_API_KEY` — config 금지(서빙됨).
+- 데이터: 세션 요약은 meta.mapSummary(annotations), 배치는 workspace.map, 읽기는 `GET /api/map`.
+- 신선도는 seq 기반 — 요약 후 출력이 흐르면 stale. 주기 실행은 scripts/com.lullu.ttym-map-refresh.plist.
+
 ## Stop Hook (scripts/ttym-claude-stop-hook.sh)
 
 Claude Code 응답 완료 시 발동. 두 가지 역할:

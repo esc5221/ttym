@@ -978,6 +978,98 @@ describe('meta ownership over HTTP', () => {
     expect(result.interaction.status).toBe('completed');
     expect(result.interaction.transcript).toContain('ping');
   }, 15_000);
+
+  it('the work map joins summaries and stays seq-honest about freshness', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const wsRes = await fetch(`http://127.0.0.1:${port}/api/workspaces`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: 'map-ws', project: 'map', name: 'mapped', layout: { type: 'pane', sessionId: 0 } }),
+    });
+    const wsId = (await wsRes.json()).id as string;
+    expect(wsId).toBe('map-ws');
+    const created = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cmd: ['/bin/sh', '-lc', 'stty -echo; exec cat'], cols: 80, rows: 24 }),
+    });
+    const sid = (await created.json()).id as number;
+    await new Promise((r) => setTimeout(r, 300)); // 초기 프롬프트 출력이 가라앉게
+
+    // 요약이 없는 세션: summary=null이고 stale이다 — 없는 데이터를 지어내지 않는다.
+    const map1 = await (await fetch(`http://127.0.0.1:${port}/api/map`)).json();
+    const row1 = map1.sessions.find((s: any) => s.id === sid);
+    expect(row1.summary).toBeNull();
+    expect(row1.stale).toBe(true);
+
+    // 요약을 현재 seq에 박으면 fresh, 워크스페이스 배치도 같은 판에 실린다.
+    await fetch(`http://127.0.0.1:${port}/api/sessions/${sid}/annotations`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mapSummary: { title: '테스트 작업', note: '한 줄', status: 'run', atSeq: row1.lastSeq, updatedAt: Date.now() } }),
+    });
+    await fetch(`http://127.0.0.1:${port}/api/workspaces/${wsId}`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ map: { stream: '검증 줄기', column: 3, order: 0 } }),
+    });
+    const map2 = await (await fetch(`http://127.0.0.1:${port}/api/map`)).json();
+    const row2 = map2.sessions.find((s: any) => s.id === sid);
+    expect(row2.summary.title).toBe('테스트 작업');
+    expect(row2.stale).toBe(false);
+    const ws2 = map2.workspaces.find((w: any) => w.id === wsId);
+    expect(ws2.map.stream).toBe('검증 줄기');
+
+    // 세션에 출력이 흐르면 그 요약은 즉시 낡은 것으로 표시되어야 한다.
+    const sendRes = await fetch(`http://127.0.0.1:${port}/api/sessions/${sid}/send`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ data: 'hello-map\n' }),
+    });
+    expect(sendRes.status).toBe(200);
+    const t0 = Date.now();
+    let row3 = row2;
+    while (Date.now() - t0 < 5000) {
+      const map3 = await (await fetch(`http://127.0.0.1:${port}/api/map`)).json();
+      row3 = map3.sessions.find((s: any) => s.id === sid);
+      if (row3.stale) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(row3.stale).toBe(true);
+    await fetch(`http://127.0.0.1:${port}/api/sessions/${sid}`, { method: 'DELETE' }).catch(() => {});
+  });
+
+  it('the summarizer prompt round-trips and resets; the api key is write-only', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    // 기본 지시문이 유효본이다
+    const d1 = await (await fetch(`http://127.0.0.1:${port}/api/map/prompt`)).json();
+    expect(d1.isDefault).toBe(true);
+    expect(d1.prompt).toContain('작업 지도');
+    // 편집 → 유효본 교체, 리셋(빈 문자열) → 기본 복귀
+    const d2 = await (await fetch(`http://127.0.0.1:${port}/api/map/prompt`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: '커스텀 지시문: JSON만 내라' }),
+    })).json();
+    expect(d2.isDefault).toBe(false);
+    const d3 = await (await fetch(`http://127.0.0.1:${port}/api/map/prompt`, {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: '' }),
+    })).json();
+    expect(d3.isDefault).toBe(true);
+
+    // 키: 쓰면 set=true가 되지만 키 자체는 어떤 GET으로도 안 나온다
+    const k1 = await (await fetch(`http://127.0.0.1:${port}/api/map/api-key`)).json();
+    expect(k1.set).toBe(false);
+    await fetch(`http://127.0.0.1:${port}/api/map/api-key`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: 'sk-test-write-only' }),
+    });
+    const k2 = await (await fetch(`http://127.0.0.1:${port}/api/map/api-key`)).json();
+    expect(k2).toEqual({ set: true });
+    const cfg = await (await fetch(`http://127.0.0.1:${port}/api/config`)).json();
+    expect(JSON.stringify(cfg)).not.toContain('sk-test-write-only');
+    // 비우면 해제
+    await fetch(`http://127.0.0.1:${port}/api/map/api-key`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ key: '' }),
+    });
+    expect((await (await fetch(`http://127.0.0.1:${port}/api/map/api-key`)).json()).set).toBe(false);
+  });
 });
 
 describe('agentIsActive — liveness rule for the tab dot', () => {
@@ -1000,4 +1092,6 @@ describe('agentIsActive — liveness rule for the tab dot', () => {
     expect(agentIsActive({ agentActiveAt: NOW }, NOW)).toBe(false);
     expect(agentIsActive({ codexActive: true, agentActiveAt: NOW - 1 }, NOW)).toBe(true);
   });
+
+
 });

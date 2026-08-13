@@ -108,6 +108,19 @@ annotations (사용자)  그 외 전부. GET/PATCH /annotations
 분류 규칙은 `@ttym/protocol`에 있다 — 서버는 강제하고 CLI는 라우팅하므로
 같은 답이 필요하다.
 
+## 작업 지도 (map)
+
+```
+생산   ttym map refresh — stale(lastSeq > 요약의 atSeq) 세션의 화면 꼬리를
+       모델 1회 배치 호출로 요약. base-url 유무로 OpenAI 호환/claude -p 분기
+저장   세션 요약  → meta.mapSummary (annotations — 사용자 소유 절반)
+       줄기 배치  → workspace.map {stream, column, order} (workspaces.json)
+소비   GET /api/map — 서버가 세션×요약×신선도를 조립. 웹 map 뷰는 그리기만
+```
+
+요약은 관측에만 붙는다: 신호가 없으면 빈 목록, 모델이 빼먹은 세션은 빈
+요약으로 마킹("내용 없음"도 결론), 낡은 요약은 stale로 정직하게 노출.
+
 ## 운영 위생
 
 - `ttym.log`는 64MB 초과 시 copy-truncate (`.1` 한 세대). 모든 writer가

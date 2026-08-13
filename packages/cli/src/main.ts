@@ -6,6 +6,7 @@ import { cmdStart, cmdStop, cmdRestart, cmdStatus, cmdLog } from './lifecycle.js
 import { cmdAttach } from './attach.js';
 import { cmdMeta, cmdCurrent, cmdProject, cmdWorkspace } from './workspace.js';
 import { cmdAgent, cmdReportStop } from './agent.js';
+import { cmdMap } from './map.js';
 import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr, cmdCommandsAddr, cmdOutputAddr } from './sessions.js';
 
 // ───── Main ─────
@@ -47,6 +48,7 @@ switch (cmd) {
     if (process.argv[3] === 'report-stop') { await cmdReportStop(); break; }
     await cmdAgent();
     break;
+  case 'map':     await cmdMap(); break;
   case 'log':     cmdLog(); break;
   default:
     console.log(`usage: ttym <command>`);
@@ -65,6 +67,7 @@ switch (cmd) {
   console.log('  await <addr> -- "prompt"     Ask an agent (or run a shell command) and wait');
   console.log('  commands <addr>              Command history with exit codes (shell integration)');
   console.log('  output <addr> [--cmd N]      One command output, precisely sliced');
+  console.log('  map refresh [--model haiku]  AI-summarize stale sessions into the work map');
     console.log('  status                       Show server & session info');
     console.log('  current                      Show current project/workspace/member context');
     console.log('  project list                 List projects');

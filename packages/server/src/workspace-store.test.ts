@@ -741,4 +741,26 @@ describe('WorkspaceStore', () => {
     expect(ws.members).toHaveLength(1);
     expect(ws.members[0].sessionId).toBe(3);
   });
+
+  it('keeps map annotations through update, save and reload', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    await store.load();
+    store.create('ws-map', 'mapped', { type: 'pane', sessionId: 7 });
+    store.update('ws-map', { map: { stream: '회사 본류', column: 2, order: 1 } });
+    await store.save();
+
+    const reloaded = new WorkspaceStore(dir);
+    await reloaded.load();
+    const ws = reloaded.get('ws-map')!;
+    expect(ws.map?.stream).toBe('회사 본류');
+    expect(ws.map?.column).toBe(2);
+    expect(typeof ws.map?.updatedAt).toBe('number');
+
+    // null은 배치 해제다 — 필드가 사라져야 한다.
+    reloaded.update('ws-map', { map: null });
+    expect(reloaded.get('ws-map')!.map).toBeUndefined();
+  });
+
 });

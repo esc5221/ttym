@@ -12,6 +12,11 @@ import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
 import { ConfigStore } from './config-file.js';
 import { agentKindOf } from './agent-providers.js';
 import { getHomeDir, type Session } from './session.js';
+import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
+import { execFile } from 'node:child_process';
+
+let mapRefreshInFlight = false;
+import { readFileSync as readFileSyncFs, writeFileSync as writeFileSyncFs, unlinkSync, chmodSync } from 'node:fs';
 import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
 import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
@@ -738,6 +743,113 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       }
     });
     return true;
+  }
+
+  // GET /api/map — 작업 지도 한 판을 서버가 조립해서 준다: 살아있는 세션마다
+  // AI 요약(meta.mapSummary, user-owned 절반)과 신선도, workspace마다 배치(map).
+  // 신선도는 seq에 정직하다: atSeq 이후 링이 전진했으면 stale — 낡음을 숨기지 않는다.
+  if (path === '/api/map' && req.method === 'GET') {
+    const sessions = manager.list();
+    Promise.all(sessions.map(async (info) => {
+      const meta = await manager.getMeta(info.id);
+      const raw = meta.mapSummary;
+      const summary = raw && typeof raw === 'object' ? raw as Record<string, unknown> : null;
+      const atSeq = summary && typeof summary.atSeq === 'number' ? summary.atSeq : null;
+      return {
+        id: info.id,
+        cmd: info.cmd,
+        createdAt: info.createdAt,
+        lastSeq: info.lastSeq,
+        agentKind: agentKindOf(meta),
+        agentActive: agentIsActive(meta),
+        summary,
+        stale: atSeq === null || info.lastSeq > atSeq,
+      };
+    })).then((rows) => {
+      json(200, { generatedAt: Date.now(), workspaces: workspaceStore.list(), sessions: rows });
+    }).catch(() => json(500, { error: 'map assembly failed' }));
+    return true;
+  }
+
+  // GET|PUT /api/map/prompt — 요약기 지시문. 파일(map-prompt.txt)이 있으면
+  // 그것, 없으면 내장 기본값. 빈 문자열 PUT = 리셋. 단일 원천은 서버다 —
+  // CLI도 여기서 받아 쓰므로 사본이 두 벌 생기지 않는다.
+  if (path === '/api/map/prompt') {
+    if (req.method === 'GET') {
+      readMapPrompt().then((r) => json(200, r));
+      return true;
+    }
+    if (req.method === 'PUT') {
+      readBody().then(async (body) => {
+        try {
+          const { prompt } = JSON.parse(body);
+          if (typeof prompt !== 'string') { json(400, { error: 'prompt must be string' }); return; }
+          json(200, await writeMapPrompt(prompt));
+        } catch {
+          json(400, { error: 'invalid body' });
+        }
+      });
+      return true;
+    }
+  }
+
+  // POST /api/map/refresh — 웹의 "지금 정리" 버튼. 요약 로직을 서버에 복제하지
+  // 않고 동봉된 CLI를 스폰한다 — 로직의 단일 원천은 CLI 하나로 유지된다.
+  // note는 일회성 지시로 지시문 뒤에 붙는다(저장 안 됨).
+  if (path === '/api/map/refresh' && req.method === 'POST') {
+    // single-flight: 요약은 브라우저가 떠나도 서버에서 완주한다. 그 사이 새
+    // 페이지가 또 누르면 모델 호출이 이중으로 나가므로 하나만 허용한다.
+    if (mapRefreshInFlight) { json(409, { error: 'refresh already running' }); return true; }
+    mapRefreshInFlight = true;
+    readBody().then((body) => {
+      let note = '';
+      try {
+        const parsed = body ? JSON.parse(body) : {};
+        if (parsed && typeof parsed === 'object' && typeof parsed.note === 'string') note = parsed.note;
+        else if (parsed && typeof parsed === 'object' && parsed.note !== undefined) { json(400, { error: 'note must be string' }); return; }
+      } catch { json(400, { error: 'invalid body' }); return; }
+      const cliPath = resolve(SERVER_DIR, 'ttym');
+      const port = req.socket.localPort ?? 7690;
+      const cliArgs = [cliPath, 'map', 'refresh', '--json', '--port', String(port), ...(note.trim() ? ['--note', note.trim()] : [])];
+      execFile(process.execPath, cliArgs, { timeout: 200_000 }, (error, stdout, stderr) => {
+        mapRefreshInFlight = false;
+        if (error) { json(502, { error: (stderr || error.message).trim().slice(0, 300) }); return; }
+        try { json(200, JSON.parse(stdout)); } catch { json(200, { output: stdout.trim().slice(0, 300) }); }
+      });
+    }).catch(() => { mapRefreshInFlight = false; });
+    return true;
+  }
+
+  // GET|POST /api/map/api-key — 요약기 API 키는 write-only다. config는 모든
+  // 클라이언트에 서빙되므로 절대 싣지 않고, 파일(0600)로만 산다. GET은 존재
+  // 여부만 답한다 — 키가 이 API로 되돌아 나가는 일은 없다.
+  if (path === '/api/map/api-key') {
+    const keyPath = resolve(getHomeDir(), 'map-api-key');
+    if (req.method === 'GET') {
+      let set = false;
+      try { set = readFileSyncFs(keyPath, 'utf8').trim().length > 0; } catch {}
+      json(200, { set });
+      return true;
+    }
+    if (req.method === 'POST') {
+      readBody().then((body) => {
+        try {
+          const { key } = JSON.parse(body);
+          if (typeof key !== 'string') { json(400, { error: 'key must be string' }); return; }
+          if (!key.trim()) {
+            try { unlinkSync(keyPath); } catch {}
+            json(200, { set: false });
+            return;
+          }
+          writeFileSyncFs(keyPath, key.trim() + '\n', { mode: 0o600 });
+          chmodSync(keyPath, 0o600);
+          json(200, { set: true });
+        } catch {
+          json(400, { error: 'invalid body' });
+        }
+      });
+      return true;
+    }
   }
 
   // ───── Workspace API ─────
