@@ -4,7 +4,7 @@ import process from 'node:process';
 import { EXIT, getPort } from './common.js';
 import { cmdStart, cmdStop, cmdRestart, cmdStatus, cmdLog } from './lifecycle.js';
 import { cmdAttach } from './attach.js';
-import { cmdMeta, cmdCurrent, cmdProject, cmdWorkspace } from './workspace.js';
+import { cmdMeta, cmdCurrent, cmdWorkspace } from './workspace.js';
 import { cmdAgent, cmdReportStop } from './agent.js';
 import { cmdMap } from './map.js';
 import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr, cmdCommandsAddr, cmdOutputAddr } from './sessions.js';
@@ -38,7 +38,6 @@ switch (cmd) {
   case 'restart': cmdRestart(); break;
   case 'status':  await cmdStatus(); break;
   case 'current': await cmdCurrent(); break;
-  case 'project': await cmdProject(); break;
   case 'workspace': await cmdWorkspace(); break;
   case 'meta':    await cmdMeta(); break;
   case 'agent':   await cmdAgent(); break;
@@ -57,7 +56,7 @@ switch (cmd) {
     console.log('  start [--port 7690]          Start server in background');
     console.log('  stop                         Stop server (holders survive)');
     console.log('  restart                      Restart server');
-    console.log('  attach <target> [--new]      Attach to session or workspace member (prefix: C-b, C-b ? for keys)');
+    console.log('  attach <ws[/member]> [--new] Attach; --new creates workspace+member tmux-style (prefix: C-b)');
   console.log('  new <name> [-- cmd]          Create a session in the default workspace');
   console.log('  split <addr> <name> [-- cmd] Split beside a member (addr: ws:name | :name)');
   console.log('  send <addr> -- "data"        Send bytes (addr: ws:name | :name | #id)');
@@ -69,8 +68,7 @@ switch (cmd) {
   console.log('  output <addr> [--cmd N]      One command output, precisely sliced');
   console.log('  map refresh [--model haiku]  AI-summarize stale sessions into the work map');
     console.log('  status                       Show server & session info');
-    console.log('  current                      Show current project/workspace/member context');
-    console.log('  project list                 List projects');
+    console.log('  current                      Show current workspace/member context');
     console.log('  workspace <command>          Workspace/member control plane');
     console.log('  meta <id> [--set k=v]        Session metadata (get/set)');
     console.log('  agent install <agent>        Install agent hook (claude, codex)');

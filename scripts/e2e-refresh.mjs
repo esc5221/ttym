@@ -119,7 +119,7 @@ try {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      id: 'e2e-ws', project: 'default', name: 'e2e',
+      id: 'e2e-ws', name: 'e2e',
       layout: { type: 'pane', sessionId: sid }, members: [],
     }),
   });
@@ -131,7 +131,7 @@ try {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
-      id: 'e2e-ws2', project: 'default', name: 'e2e2',
+      id: 'e2e-ws2', name: 'e2e2',
       layout: { type: 'pane', sessionId: sid2 }, members: [],
     }),
   });
@@ -199,7 +199,7 @@ try {
     createdSessions.push(sid3);
     await fetch(`http://127.0.0.1:${PORT}/api/workspaces`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ id: 'e2e-ws3', project: 'default', name: 'e2e3',
+      body: JSON.stringify({ id: 'e2e-ws3', name: 'e2e3',
         layout: { type: 'pane', sessionId: sid3 }, members: [] }),
     });
     await page.goto(`http://127.0.0.1:${PORT}/#w/e2e-ws3`);

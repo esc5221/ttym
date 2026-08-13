@@ -854,16 +854,9 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
 
   // ───── Workspace API ─────
 
-  // GET /api/projects
-  if (path === '/api/projects' && req.method === 'GET') {
-    json(200, workspaceStore.listProjects());
-    return true;
-  }
-
   // GET /api/workspaces
   if (path === '/api/workspaces' && req.method === 'GET') {
-    const project = url.searchParams.get('project');
-    json(200, project ? workspaceStore.list().filter((workspace) => workspace.project === project) : workspaceStore.list());
+    json(200, workspaceStore.list());
     return true;
   }
 
@@ -890,13 +883,14 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
   if (path === '/api/workspaces' && req.method === 'POST') {
     readBody().then((body) => {
       try {
-        const { id, project, name, layout, members } = JSON.parse(body);
+        const { id, name, layout, members } = JSON.parse(body);
         if (!id || !name || !layout) { json(400, { error: 'id, name, layout required' }); return; }
-        const ws = workspaceStore.create(id, name, layout, project || 'default', members || []);
-        log(`WORKSPACE CREATE id=${id} project=${ws.project} name=${name}`);
+        const ws = workspaceStore.create(id, name, layout, members || []);
+        log(`WORKSPACE CREATE id=${id} name=${name}`);
         json(201, ws);
-      } catch {
-        json(400, { error: 'invalid body' });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'invalid body';
+        json(message.includes('already exists') ? 409 : 400, { error: message });
       }
     });
     return true;
@@ -922,8 +916,9 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
           if (!ws) { json(404, { error: 'not found' }); return; }
           log(`WORKSPACE UPDATE id=${wsId}`);
           json(200, ws);
-        } catch {
-          json(400, { error: 'invalid body' });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'invalid body';
+          json(message.includes('already exists') ? 409 : 400, { error: message });
         }
       });
       return true;

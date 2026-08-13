@@ -31,7 +31,6 @@ export interface PanelState {
 
 export interface Workspace {
   id: string;
-  project: string;
   name: string;
   layout: LayoutNode;
   members: WorkspaceMember[];
@@ -190,7 +189,7 @@ export async function uploadDroppedFiles(files: File[]): Promise<string[]> {
 }
 
 export function workspaceDisplayLabel(workspace: Workspace): string {
-  return workspaceLabel(workspace.project, workspace.name);
+  return workspaceLabel(workspace.name);
 }
 
 export function memberLabel(name: string | undefined, sessionId: number): string {

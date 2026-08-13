@@ -26,9 +26,9 @@ export async function cmdNew() {
   const workspace = await ensureDefaultWorkspace(port);
   const { workspace: updated, member, session } = await createWorkspaceMember(port, workspace, { name, cmd });
   const result = {
-    address: `${updated.project === 'default' ? '' : updated.project + '/'}${updated.name}:${member.name}`,
+    address: `${updated.name}:${member.name}`,
     sessionId: session.id,
-    workspace: `${updated.project}/${updated.name}`,
+    workspace: updated.name,
   };
   if (asJson) return printOutput(result, true);
   console.log(`${result.address}  #${session.id}`);
@@ -61,7 +61,7 @@ export async function cmdSplit() {
     process.exit(EXIT.FAIL);
   }
   const result = {
-    address: `${target.workspace.project}/${target.workspace.name}:${name}`,
+    address: `${target.workspace.name}:${name}`,
     sessionId: data.session.id,
   };
   if (asJson) return printOutput(result, true);

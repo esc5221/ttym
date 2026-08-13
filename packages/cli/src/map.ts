@@ -31,7 +31,6 @@ interface MapSession {
 
 interface MapWorkspace {
   id: string;
-  project: string;
   name: string;
   members: Array<{ sessionId: number; name: string }>;
   map?: { stream?: string; column?: number; order?: number };
@@ -162,7 +161,7 @@ function buildPrompt(instructions: string, note: string, map: { workspaces: MapW
   for (const w of map.workspaces) {
     const cur = w.map?.stream ? ` [기존 배치: stream="${w.map.stream}" column=${w.map.column} order=${w.map.order}]` : '';
     const members = w.members.map((m) => `${m.name}(#${m.sessionId})`).join(', ');
-    lines.push(`- ${w.id}: "${w.project}/${w.name}" 멤버: ${members}${cur}`);
+    lines.push(`- ${w.id}: "${w.name}" 멤버: ${members}${cur}`);
   }
   lines.push('');
   lines.push('=== 요약 대상 세션 (이 세션들만 sessions에 넣어라) ===');

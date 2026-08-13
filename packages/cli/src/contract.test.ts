@@ -118,7 +118,7 @@ suite('CLI 계약', () => {
   let memberSid = 0;
 
   it('§3 준비: workspace + 멤버 (--cmd 뒤의 --port가 명령을 오염시키지 않는다)', async () => {
-    const ws = JSON.parse(run(['workspace', 'create', 'contract', '--name', 'suite', '--json']).stdout);
+    const ws = JSON.parse(run(['workspace', 'create', 'suite', '--json']).stdout);
     wsId = ws.id;
     // C2 회귀의 핵심: --port가 --cmd 뒤에 와도 전역 플래그로 선추출된다.
     // 예전엔 /bin/zsh가 `--port N`을 제 인자로 받고 즉사했다.

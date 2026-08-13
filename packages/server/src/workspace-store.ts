@@ -36,7 +36,6 @@ export interface WorkspaceMapAnnotation {
 
 export interface WorkspaceInfo {
   id: string;
-  project: string;
   name: string;
   layout: LayoutNode;
   members: WorkspaceMemberInfo[];
@@ -55,8 +54,18 @@ export interface WorkspaceMemberInfo {
 }
 
 interface StoreFile {
-  version: 2;
+  version: 3;
   workspaces: WorkspaceInfo[];
+}
+
+/** v2 시절 파일: project 필드가 있었다 — 로드 시 폐기된다. */
+interface V2WorkspaceInfo extends WorkspaceInfo {
+  project?: string;
+}
+
+interface V2StoreFile {
+  version: 2;
+  workspaces: V2WorkspaceInfo[];
 }
 
 interface LegacyWorkspaceInfo {
@@ -99,23 +108,39 @@ export class WorkspaceStore {
   async load(): Promise<void> {
     try {
       const raw = await readFile(this.filePath, 'utf8');
-      const data = JSON.parse(raw) as StoreFile | LegacyStoreFile;
-      if ((data as StoreFile).version === 2 && Array.isArray((data as StoreFile).workspaces)) {
-        for (const ws of (data as StoreFile).workspaces) {
-          this.workspaces.set(ws.id, this.normalizeWorkspace(ws));
-        }
-        return;
+      const data = JSON.parse(raw) as StoreFile | V2StoreFile | LegacyStoreFile;
+      let entries: Array<WorkspaceInfo & { project?: string }> = [];
+      if ((data as StoreFile).version === 3 && Array.isArray((data as StoreFile).workspaces)) {
+        entries = (data as StoreFile).workspaces;
+      } else if ((data as V2StoreFile).version === 2 && Array.isArray((data as V2StoreFile).workspaces)) {
+        entries = (data as V2StoreFile).workspaces; // project 필드는 아래에서 폐기
+        this.dirty = true; // 첫 save가 v3로 승격
+      } else if ((data as LegacyStoreFile).version === 1 && Array.isArray((data as LegacyStoreFile).workspaces)) {
+        entries = (data as LegacyStoreFile).workspaces.map((ws) => ({ ...ws, members: [] as WorkspaceMemberInfo[] }));
+        this.dirty = true;
       }
-      if ((data as LegacyStoreFile).version === 1 && Array.isArray((data as LegacyStoreFile).workspaces)) {
-        for (const ws of (data as LegacyStoreFile).workspaces) {
-          this.workspaces.set(ws.id, this.normalizeWorkspace({
-            ...ws,
-            project: 'default',
-            members: [],
-          }));
+      for (const entry of entries) {
+        const { project: _dropped, ...ws } = entry;
+        // 이름이 곧 주소다(project 소멸의 대가) — 파일에 중복이 있으면 뒤의 것이
+        // -2, -3…을 받고 경고를 남긴다. 조용히 한쪽을 삼키지 않는다.
+        let name = ws.name;
+        for (let n = 2; this.hasName(name); n++) name = `${ws.name}-${n}`;
+        if (name !== ws.name) {
+          console.warn(`[ws ${ws.id}] duplicate name "${ws.name}" → "${name}"`);
+          this.dirty = true;
         }
+        this.workspaces.set(ws.id, this.normalizeWorkspace({ ...ws, name }));
       }
+      // 구버전 파일은 다음 변경을 기다리지 않고 부팅 즉시 승격한다.
+      if (this.dirty) void this.save();
     } catch {}
+  }
+
+  private hasName(name: string, exceptId?: string): boolean {
+    for (const ws of this.workspaces.values()) {
+      if (ws.id !== exceptId && ws.name === name) return true;
+    }
+    return false;
   }
 
   async save(): Promise<void> {
@@ -129,7 +154,7 @@ export class WorkspaceStore {
       do {
         this.saveQueued = false;
         const data: StoreFile = {
-          version: 2,
+          version: 3,
           workspaces: Array.from(this.workspaces.values()),
         };
         const tmpPath = this.filePath + '.tmp';
@@ -194,18 +219,6 @@ export class WorkspaceStore {
     return true;
   }
 
-  listProjects(): Array<{ name: string; workspaceCount: number; memberCount: number }> {
-    const stats = new Map<string, { workspaceCount: number; memberCount: number }>();
-    for (const workspace of this.workspaces.values()) {
-      const entry = stats.get(workspace.project) ?? { workspaceCount: 0, memberCount: 0 };
-      entry.workspaceCount += 1;
-      entry.memberCount += workspace.members.length;
-      stats.set(workspace.project, entry);
-    }
-    return Array.from(stats.entries())
-      .map(([name, entry]) => ({ name, ...entry }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }
 
   get(id: string): WorkspaceInfo | undefined {
     return this.workspaces.get(id);
@@ -215,13 +228,12 @@ export class WorkspaceStore {
     id: string,
     name: string,
     layout: LayoutNode,
-    project = 'default',
     members: WorkspaceMemberInfo[] = [],
   ): WorkspaceInfo {
+    if (this.hasName(name)) throw new Error(`workspace name already exists: ${name}`);
     const now = Date.now();
     const ws = this.normalizeWorkspace({
       id,
-      project,
       name,
       layout,
       members,
@@ -236,12 +248,14 @@ export class WorkspaceStore {
 
   update(
     id: string,
-    patch: { project?: string; name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: string; map?: WorkspaceMapAnnotation | null },
+    patch: { name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: string; map?: WorkspaceMapAnnotation | null },
   ): WorkspaceInfo | null {
     const ws = this.workspaces.get(id);
     if (!ws) return null;
-    if (patch.project !== undefined) ws.project = patch.project;
-    if (patch.name !== undefined) ws.name = patch.name;
+    if (patch.name !== undefined) {
+      if (this.hasName(patch.name, id)) throw new Error(`workspace name already exists: ${patch.name}`);
+      ws.name = patch.name;
+    }
     if (patch.layout !== undefined) ws.layout = patch.layout;
     if (patch.preset !== undefined && isLayoutPreset(patch.preset)) {
       // tmux select-layout: re-attach the same members to a fresh tree —
@@ -367,7 +381,6 @@ export class WorkspaceStore {
   private normalizeWorkspace(ws: WorkspaceInfo): WorkspaceInfo {
     const normalized: WorkspaceInfo = {
       ...ws,
-      project: ws.project || 'default',
       members: Array.isArray(ws.members) ? ws.members.map((member) => ({ ...member })) : [],
     };
     this.reconcileWorkspace(normalized);
@@ -429,7 +442,7 @@ export class WorkspaceStore {
 
     if (problems.length > 0) {
       this.lastDiagnostics.set(ws.id, problems);
-      console.warn(`[ws ${ws.project}/${ws.name}] ${problems.join('; ')}`);
+      console.warn(`[ws ${ws.name}] ${problems.join('; ')}`);
     } else {
       this.lastDiagnostics.delete(ws.id);
     }

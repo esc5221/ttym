@@ -72,36 +72,35 @@ suite('cli end to end', () => {
   });
 
   it('creates a workspace', () => {
-    const out = ttym(['workspace', 'create', 'e2e', '--name', 'suite', '--json']);
+    const out = ttym(['workspace', 'create', 'suite', '--json']);
     const ws = JSON.parse(out);
-    expect(ws.project).toBe('e2e');
     expect(ws.name).toBe('suite');
   });
 
   it('adds a member, which spawns a live session', async () => {
-    const out = ttym(['workspace', 'add', 'e2e/suite', '--name', 'sh', '--cmd', '/bin/zsh']);
+    const out = ttym(['workspace', 'add', 'suite', '--name', 'sh', '--cmd', '/bin/zsh']);
     expect(out).toContain('added');
     await until(async () => ((await api('/api/sessions')) ?? []).length === 1);
   }, 20_000);
 
 
   it('applies a layout preset without touching the sessions', () => {
-    const before = JSON.parse(ttym(['workspace', 'info', 'e2e/suite', '--json']));
-    const out = JSON.parse(ttym(['workspace', 'layout', 'e2e/suite', 'even-v', '--json']));
+    const before = JSON.parse(ttym(['workspace', 'info', 'suite', '--json']));
+    const out = JSON.parse(ttym(['workspace', 'layout', 'suite', 'even-v', '--json']));
     expect(out.layout).toBeDefined();
-    const after = JSON.parse(ttym(['workspace', 'info', 'e2e/suite', '--json']));
+    const after = JSON.parse(ttym(['workspace', 'info', 'suite', '--json']));
     expect(after.members.map((m: any) => m.sessionId).sort())
       .toEqual(before.members.map((m: any) => m.sessionId).sort());
   });
 
   it('resolves --match over membership fields', () => {
-    const out = JSON.parse(ttym(['screen', '--match', 'ws:e2e and name:sh', '--json']));
+    const out = JSON.parse(ttym(['screen', '--match', 'ws:suite and name:sh', '--json']));
     expect(Array.isArray(out)).toBe(true);
     expect(out.length).toBeGreaterThan(0);
-    expect(out[0].target).toContain('e2e/suite');
+    expect(out[0].target).toContain('suite');
   });
   it('sends input and reads it back from the screen', async () => {
-    ttym(['workspace', 'send', 'e2e/suite', 'sh', '--', 'echo E2E_ROUNDTRIP\n']);
+    ttym(['workspace', 'send', 'suite', 'sh', '--', 'echo E2E_ROUNDTRIP\n']);
     await until(async () => {
       const sessions = (await api('/api/sessions')) ?? [];
       if (sessions.length === 0) return false;
@@ -110,18 +109,18 @@ suite('cli end to end', () => {
     });
     // Poll the CLI path too: under load the render can land between the API
     // confirmation above and a single-shot read here.
-    await until(() => ttym(['workspace', 'screen', 'e2e/suite', 'sh']).includes('E2E_ROUNDTRIP'));
+    await until(() => ttym(['workspace', 'screen', 'suite', 'sh']).includes('E2E_ROUNDTRIP'));
   }, 20_000);
 
   it('structured output stays parseable', () => {
-    const out = ttym(['workspace', 'info', 'e2e/suite', '--json']);
+    const out = ttym(['workspace', 'info', 'suite', '--json']);
     const info = JSON.parse(out);
     expect(info.members?.length).toBe(1);
     expect(info.members[0].name).toBe('sh');
   });
 
   it('removes the member and its session', async () => {
-    ttym(['workspace', 'remove', 'e2e/suite', 'sh']);
+    ttym(['workspace', 'remove', 'suite', 'sh']);
     await until(async () => ((await api('/api/sessions')) ?? []).length === 0);
   }, 20_000);
 
@@ -159,7 +158,7 @@ suite('cli end to end', () => {
     ttym(['new', 'mute', '--', '/bin/sh']);
     const out = ttym(['await', 'default:mute', '--timeout', '1500', '--', 'hello'], { canFail: true });
     expect(out).toContain('timeout: still running');
-    ttym(['workspace', 'remove', 'default/default', 'mute']);
+    ttym(['workspace', 'remove', 'default', 'mute']);
   }, 20_000);
 
   it('restart keeps the sessions alive — the holder guarantee through the CLI', async () => {
@@ -179,8 +178,8 @@ suite('cli end to end', () => {
   }, 40_000);
 
   it('cleans up the grammar suite sessions', async () => {
-    ttym(['workspace', 'remove', 'default/default', 'g1']);
-    ttym(['workspace', 'remove', 'default/default', 'g2']);
+    ttym(['workspace', 'remove', 'default', 'g1']);
+    ttym(['workspace', 'remove', 'default', 'g2']);
     await until(async () => ((await api('/api/sessions')) ?? []).length === 0);
   }, 20_000);
 

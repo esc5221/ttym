@@ -104,7 +104,8 @@ dist/
 ```bash
 ./dist/ttym start                       # 서버 백그라운드 실행 (port 7690)
 
-./dist/ttym new claude -- claude        # 세션 생성, default workspace 에 이름 등록
+./dist/ttym attach work --new           # tmux 식: workspace + 셸 만들고 바로 진입
+./dist/ttym new claude -- claude        # 또는 headless: default workspace 에 세션 생성
 ./dist/ttym split :claude logs          # 옆에 분할 — 중첩과 비율이 유지된다
 ./dist/ttym attach default/claude       # TUI 로 붙기 (C-b d 로 빠져나옴)
 
@@ -219,8 +220,10 @@ ttym log [-f]              # ~/.ttym/ttym.log
 
 ```bash
 ttym attach <session-id>
+ttym attach <workspace>                  # 멤버 하나면 그것, 여럿이면 첫 멤버 (C-b n/p 순회)
 ttym attach <workspace>/<member>
-ttym attach <ws>/<member> --new --cmd claude --dangerously-skip-permissions
+ttym attach work --new                   # workspace + "main" 멤버 만들고 진입 — tmux 식
+ttym attach work/ai --new --cmd claude --dangerously-skip-permissions
 ttym attach <target> --readonly          # 관찰만
 ttym attach <target> --prefix C-a        # prefix 키 변경 (기본 C-b)
 ```
@@ -239,11 +242,10 @@ C-]           대체 detach
 ### workspace 컨트롤 플레인
 
 ```bash
-ttym current [--json]                       # 이 세션의 project/workspace/member
-ttym project list [--json]
-ttym workspace list [project] [--json]
+ttym current [--json]                       # 이 세션의 workspace/member
+ttym workspace list [--json]
 ttym workspace info <ws|--current> [--json]
-ttym workspace create <project> --name <name>
+ttym workspace create <name>
 ttym workspace rename <ws|--current> --name <new>
 ttym workspace delete <ws|--current>
 
@@ -314,9 +316,8 @@ GET|PUT /api/map/prompt                     요약기 지시문 (빈 PUT = 기�
 POST   /api/map/refresh                     요약기 실행 ({note?}; single-flight)
 GET|POST /api/map/api-key                   write-only 키 저장소; GET 은 {set} 만
 
-GET    /api/projects                        project 집계
-GET    /api/workspaces[?project=<p>]        workspace 목록
-POST   /api/workspaces                      생성 {id, name, layout, project?}
+GET    /api/workspaces                      workspace 목록
+POST   /api/workspaces                      생성 {id, name, layout} — 이름이 곧 주소(전역 유일)
 GET|PATCH|DELETE /api/workspaces/:id        PATCH 는 {map} 배치도 받는다
 POST   /api/workspaces/:id/members          멤버 추가 {sessionId, name, role?, tags?}
 PATCH|DELETE /api/workspaces/:id/members/:sid

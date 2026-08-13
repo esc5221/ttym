@@ -144,15 +144,16 @@ describe('boot against the production fixture', () => {
     }
   });
 
-  it('round-trips the store file as version 2 — the rollback door stays open', async () => {
+  it('migrates the production v2 fixture to version 3, dropping project', async () => {
     materialize(dir);
     const store = new WorkspaceStore(dir);
     await store.load();
     await store.save();
 
     const written = JSON.parse(readFileSync(resolve(dir, 'workspaces.json'), 'utf8'));
-    expect(written.version).toBe(2);
+    expect(written.version).toBe(3);
     expect(written.workspaces.length).toBe(FIXTURE.workspaces.workspaces.length);
+    expect(written.workspaces.some((ws: { project?: string }) => 'project' in ws)).toBe(false);
 
     // A second store — standing in for the previous server build's reader —
     // must load what this one wrote.

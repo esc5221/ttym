@@ -375,10 +375,10 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   // 탭 제목
   useEffect(() => {
     if (!ws) return;
-    const label = ws.project !== 'default' ? `${ws.project}/${ws.name}` : ws.name;
+    const label = ws.name;
     document.title = sessionIds.length > 0 ? `${label} (${sessionIds.length})` : label;
     return () => { document.title = 'ttym'; };
-  }, [ws?.name, ws?.project, sessionIds.length]);
+  }, [ws?.name, sessionIds.length]);
 
   const renderPane = useCallback((sid: number, _path: number[]) => {
     if (sid <= 0) {

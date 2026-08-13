@@ -50,7 +50,7 @@ describe('WorkspaceStore', () => {
     await store.load();
 
     const [workspace] = store.list();
-    expect(workspace.project).toBe('default');
+    expect('project' in workspace).toBe(false); // v3: project는 로드에서 폐기된다
     expect(workspace.members.map((member) => member.sessionId)).toEqual([11, 12]);
     expect(workspace.members.map((member) => member.name)).toEqual(['term-1', 'term-2']);
   });
@@ -67,7 +67,7 @@ describe('WorkspaceStore', () => {
         { type: 'pane', sessionId: 21 },
         { type: 'pane', sessionId: 22 },
       ],
-    }, 'ttym', [
+    }, [
       { sessionId: 21, name: 'lead', createdAt: 1, updatedAt: 1 },
       { sessionId: 22, name: 'devserver', createdAt: 1, updatedAt: 1 },
     ]);
@@ -90,7 +90,6 @@ describe('WorkspaceStore', () => {
       [23, 'term-2'],
       [22, 'devserver'],
     ]);
-    expect(store.listProjects()).toEqual([{ name: 'ttym', workspaceCount: 1, memberCount: 3 }]);
   });
 
   it('reorder rewrites tab order, rejects stale permutations, survives reload', async () => {
@@ -98,7 +97,7 @@ describe('WorkspaceStore', () => {
     dirs.push(dir);
     const store = new WorkspaceStore(dir);
     const pane = { type: 'pane', sessionId: 0 } as const;
-    for (const n of ['a', 'b', 'c']) store.create(n, n, pane, 'p', []);
+    for (const n of ['a', 'b', 'c']) store.create(n, n, pane, []);
     const events: unknown[] = [];
     store.onChange((e) => events.push(e));
 
@@ -123,7 +122,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     const store = new WorkspaceStore(dir);
-    const created = store.create('ws1', 'workspace 1', { type: 'pane', sessionId: 0 }, 'pilot', []);
+    const created = store.create('ws1', 'workspace 1', { type: 'pane', sessionId: 0 }, []);
 
     const first = store.addMember(created.id, { sessionId: 31, name: 'lead', role: 'agent', tags: [] });
     expect(first?.members.map((member) => member.name)).toEqual(['lead']);
@@ -163,7 +162,7 @@ describe('WorkspaceStore', () => {
         { type: 'pane', sessionId: 41 },
         { type: 'pane', sessionId: 42 },
       ],
-    }, 'pilot', [
+    }, [
       { sessionId: 41, name: 'lead', createdAt: 1, updatedAt: 1 },
       { sessionId: 42, name: 'logs', createdAt: 1, updatedAt: 1 },
     ]);
@@ -188,7 +187,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     const store = new WorkspaceStore(dir);
-    const created = store.create('dir-ws', 'dir-ws', { type: 'pane', sessionId: 41 }, 'pilot',
+    const created = store.create('dir-ws', 'dir-ws', { type: 'pane', sessionId: 41 },
       [{ sessionId: 41, name: 'lead', createdAt: 1, updatedAt: 1 }]);
 
     const down = store.splitRight(created.id, 41, { sessionId: 42, name: 'below', tags: [] }, 'down')!;
@@ -225,7 +224,7 @@ describe('WorkspaceStore', () => {
           ],
         },
       ],
-    }, 'proj', [
+    }, [
       { sessionId: 1, name: 'a', createdAt: 1, updatedAt: 1 },
       { sessionId: 2, name: 'b', createdAt: 1, updatedAt: 1 },
       { sessionId: 3, name: 'c', createdAt: 1, updatedAt: 1 },
@@ -265,7 +264,7 @@ describe('WorkspaceStore', () => {
           ],
         },
       ],
-    }, 'proj', [1, 2, 3, 4].map((id) => ({ sessionId: id, name: `m${id}`, createdAt: 1, updatedAt: 1 })));
+    }, [1, 2, 3, 4].map((id) => ({ sessionId: id, name: `m${id}`, createdAt: 1, updatedAt: 1 })));
 
     const innerBefore = JSON.stringify((created.layout as any).children[2]);
 
@@ -298,7 +297,7 @@ describe('WorkspaceStore', () => {
           ],
         },
       ],
-    }, 'proj', [1, 2, 3].map((id) => ({ sessionId: id, name: `m${id}`, createdAt: 1, updatedAt: 1 })));
+    }, [1, 2, 3].map((id) => ({ sessionId: id, name: `m${id}`, createdAt: 1, updatedAt: 1 })));
 
     let ws = created;
     for (const id of [10, 11, 12]) ws = store.addMember(ws.id, { sessionId: id, name: `n${id}`, tags: [] })!;
@@ -318,7 +317,7 @@ describe('WorkspaceStore', () => {
     const store = new WorkspaceStore(dir);
 
     // layout mentions only 41; 42 is a member the layout does not show.
-    const created = store.create('ws1', 'w', { type: 'pane', sessionId: 41 }, 'proj', [
+    const created = store.create('ws1', 'w', { type: 'pane', sessionId: 41 }, [
       { sessionId: 41, name: 'lead', role: 'agent', createdAt: 1, updatedAt: 1 },
       { sessionId: 42, name: 'logs', role: 'shell', createdAt: 1, updatedAt: 1 },
     ]);
@@ -339,7 +338,7 @@ describe('WorkspaceStore', () => {
     const created = store.create('ws1', 'w', {
       type: 'split', axis: 'row', sizes: [0.5, 0.5],
       children: [{ type: 'pane', sessionId: 1 }, { type: 'pane', sessionId: 2 }],
-    }, 'proj', [
+    }, [
       { sessionId: 1, name: 'claude', createdAt: 1, updatedAt: 1 },
       { sessionId: 2, name: 'claude', createdAt: 1, updatedAt: 1 },
     ]);
@@ -354,7 +353,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     const store = new WorkspaceStore(dir);
-    const created = store.create('ws1', 'w', { type: 'pane', sessionId: 7 }, 'proj', [
+    const created = store.create('ws1', 'w', { type: 'pane', sessionId: 7 }, [
       { sessionId: 7, name: 'only', createdAt: 1, updatedAt: 1 },
     ]);
     expect(store.diagnostics(created.id)).toEqual([]);
@@ -364,7 +363,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     const store = new WorkspaceStore(dir);
-    let ws = store.create('ws1', 'w', { type: 'pane', sessionId: 1 }, 'proj', [
+    let ws = store.create('ws1', 'w', { type: 'pane', sessionId: 1 }, [
       { sessionId: 1, name: 'a', createdAt: 1, updatedAt: 1 },
     ]);
 
@@ -402,7 +401,7 @@ describe('WorkspaceStore', () => {
 
     const ws = store.get('ws1');
     expect(ws).toBeDefined();
-    expect(ws!.project).toBe('myproj');
+    expect('project' in ws!).toBe(false); // v2의 project는 마이그레이션에서 폐기
     expect(ws!.members[0].name).toBe('lead');
     expect(ws!.members[0].role).toBe('agent');
   });
@@ -453,7 +452,7 @@ describe('WorkspaceStore', () => {
 
     const raw = readFileSync(join(dir, 'workspaces.json'), 'utf8');
     const data = JSON.parse(raw);
-    expect(data.version).toBe(2);
+    expect(data.version).toBe(3);
     expect(data.workspaces).toHaveLength(1);
     expect(data.workspaces[0].id).toBe('ws1');
     // tmp file should not remain
@@ -475,39 +474,16 @@ describe('WorkspaceStore', () => {
     expect(existsSync(join(dir, 'workspaces.json.tmp'))).toBe(false);
   });
 
-  it('scheduleSave batches rapid mutations into a single write', async () => {
+  it('workspace names are addresses now: duplicates are refused', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     const store = new WorkspaceStore(dir);
-    const saveSpy = vi.spyOn(store, 'save');
-
-    store.create('ws1', 'a', { type: 'pane', sessionId: 1 });
-    store.create('ws2', 'b', { type: 'pane', sessionId: 2 });
-    store.create('ws3', 'c', { type: 'pane', sessionId: 3 });
-
-    // Wait for microtask to flush
-    await new Promise<void>((resolve) => queueMicrotask(resolve));
-    // One extra tick to let the save microtask run
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    // scheduleSave should batch: only 1 save despite 3 creates
-    expect(saveSpy).toHaveBeenCalledTimes(1);
-    saveSpy.mockRestore();
-  });
-
-  it('save persists data that can be reloaded', async () => {
-    const dir = runtimeDir();
-    dirs.push(dir);
-    const store1 = new WorkspaceStore(dir);
-    store1.create('ws1', 'roundtrip', { type: 'pane', sessionId: 7 }, 'proj');
-    await store1.save();
-
-    const store2 = new WorkspaceStore(dir);
-    await store2.load();
-    const ws = store2.get('ws1');
-    expect(ws).toBeDefined();
-    expect(ws!.name).toBe('roundtrip');
-    expect(ws!.project).toBe('proj');
+    store.create('ws1', 'work', { type: 'pane', sessionId: 1 });
+    expect(() => store.create('ws2', 'work', { type: 'pane', sessionId: 2 })).toThrow(/already exists/);
+    store.create('ws2', 'other', { type: 'pane', sessionId: 2 });
+    expect(() => store.update('ws2', { name: 'work' })).toThrow(/already exists/);
+    // 자기 자신으로의 개명은 충돌이 아니다
+    expect(store.update('ws2', { name: 'other' })!.name).toBe('other');
   });
 
   // ───── get / delete / list ─────
@@ -545,39 +521,8 @@ describe('WorkspaceStore', () => {
 
   // ───── listProjects ─────
 
-  it('listProjects aggregates across multiple projects sorted by name', () => {
-    const dir = runtimeDir();
-    dirs.push(dir);
-    const store = new WorkspaceStore(dir);
-    store.create('ws1', 'a', { type: 'pane', sessionId: 1 }, 'bravo');
-    store.create('ws2', 'b', {
-      type: 'split', axis: 'row', sizes: [0.5, 0.5],
-      children: [{ type: 'pane', sessionId: 2 }, { type: 'pane', sessionId: 3 }],
-    }, 'alpha');
-    store.create('ws3', 'c', { type: 'pane', sessionId: 4 }, 'bravo');
-
-    expect(store.listProjects()).toEqual([
-      { name: 'alpha', workspaceCount: 1, memberCount: 2 },
-      { name: 'bravo', workspaceCount: 2, memberCount: 2 },
-    ]);
-  });
-
-  it('listProjects returns empty array for empty store', () => {
-    const dir = runtimeDir();
-    dirs.push(dir);
-    const store = new WorkspaceStore(dir);
-    expect(store.listProjects()).toEqual([]);
-  });
 
   // ───── create edge cases ─────
-
-  it('create defaults project to "default" when omitted', () => {
-    const dir = runtimeDir();
-    dirs.push(dir);
-    const store = new WorkspaceStore(dir);
-    const ws = store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
-    expect(ws.project).toBe('default');
-  });
 
   it('create normalizes workspace with missing members to empty array', () => {
     const dir = runtimeDir();
@@ -599,15 +544,6 @@ describe('WorkspaceStore', () => {
     expect(store.update('nope', { name: 'x' })).toBeNull();
   });
 
-  it('update can change project', () => {
-    const dir = runtimeDir();
-    dirs.push(dir);
-    const store = new WorkspaceStore(dir);
-    store.create('ws1', 'test', { type: 'pane', sessionId: 1 }, 'old');
-    const updated = store.update('ws1', { project: 'new' });
-    expect(updated!.project).toBe('new');
-  });
-
   // ───── addMember edge cases ─────
 
   it('addMember returns null for non-existing workspace', () => {
@@ -621,7 +557,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     const store = new WorkspaceStore(dir);
-    store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, 'proj', []);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, []);
     store.addMember('ws1', { sessionId: 50, name: 'first', role: 'agent', tags: ['a'] });
     const ws = store.addMember('ws1', { sessionId: 50, name: 'updated', role: 'executor' });
     // Should not duplicate — still one member with that sessionId
@@ -634,7 +570,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     const store = new WorkspaceStore(dir);
-    store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, 'proj', []);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, []);
     store.addMember('ws1', { sessionId: 50, name: 'lead' });
     expect(() => store.addMember('ws1', { sessionId: 51, name: 'lead' }))
       .toThrow('member name already exists: lead');
@@ -644,7 +580,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     const store = new WorkspaceStore(dir);
-    store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, 'proj', []);
+    store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, []);
     store.addMember('ws1', { sessionId: 60, name: 'worker' });
     const ws = store.addMember('ws1', { sessionId: 60, name: 'worker-v2' });
     // sessionId 60 should appear only once in layout
@@ -676,7 +612,7 @@ describe('WorkspaceStore', () => {
     store.create('ws1', 'test', {
       type: 'split', axis: 'row', sizes: [0.5, 0.5],
       children: [{ type: 'pane', sessionId: 1 }, { type: 'pane', sessionId: 2 }],
-    }, 'proj', [
+    }, [
       { sessionId: 1, name: 'alpha', createdAt: 1, updatedAt: 1 },
       { sessionId: 2, name: 'beta', createdAt: 1, updatedAt: 1 },
     ]);
@@ -712,7 +648,7 @@ describe('WorkspaceStore', () => {
     const ws = store.create('ws1', 'test', {
       type: 'split', axis: 'row', sizes: [0.5, 0.5],
       children: [{ type: 'pane', sessionId: 1 }, { type: 'pane', sessionId: 2 }],
-    }, 'proj', [
+    }, [
       { sessionId: 1, name: 'dupe', createdAt: 1, updatedAt: 1 },
       { sessionId: 2, name: 'dupe', createdAt: 1, updatedAt: 1 },
     ]);

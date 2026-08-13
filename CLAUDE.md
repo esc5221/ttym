@@ -95,14 +95,6 @@ Codex도 Stop hook을 지원한다 (v0.114.0+, `codex_hooks` feature flag 필요
 - `~/.codex/hooks.json`에 Stop 이벤트 등록 (`scripts/ttym-codex-stop-hook.sh`)
 - await 명령은 Claude/Codex 모두 동작. Node.js 내부에서 CR 바이트를 직접 전송하므로 shell escaping 문제 없음.
 
-### Fully Qualified Address
-
-`project/workspace` 형태로 다른 workspace 멤버 접근:
-```sh
-ttym workspace send demo/onboard claude-sub -- $'hello\r'
-ttym workspace screen demo/onboard claude-sub --json
-```
-
 ## 작업 지도 (map)
 
 메인 화면의 두 번째 모드(settings → main view → map). 세션별 AI 요약 + workspace 줄기 배치.

@@ -2,8 +2,8 @@ import { request, type BaseUrl } from './transport.js';
 import { layoutFromSessionIds, type LayoutNode } from '@ttym/shared';
 import type { SessionInfo, WorkspaceInfo, WorkspaceMemberInfo } from './types.js';
 
-export function listWorkspaces(base: BaseUrl, project?: string): Promise<WorkspaceInfo[]> {
-  return request(base, '/api/workspaces', { query: { project } });
+export function listWorkspaces(base: BaseUrl): Promise<WorkspaceInfo[]> {
+  return request(base, '/api/workspaces');
 }
 
 export function getWorkspace(base: BaseUrl, id: string): Promise<WorkspaceInfo> {
@@ -12,14 +12,13 @@ export function getWorkspace(base: BaseUrl, id: string): Promise<WorkspaceInfo> 
 
 export function createWorkspace(
   base: BaseUrl,
-  options: { name: string; project?: string; id?: string; sessionIds?: number[]; layout?: LayoutNode },
+  options: { name: string; id?: string; sessionIds?: number[]; layout?: LayoutNode },
 ): Promise<WorkspaceInfo> {
-  const { name, project = 'default', sessionIds = [], layout } = options;
+  const { name, sessionIds = [], layout } = options;
   return request(base, '/api/workspaces', {
     method: 'POST',
     body: {
       id: options.id ?? crypto.randomUUID().slice(0, 8),
-      project,
       name,
       // Only used when there is no prior tree to preserve.
       layout: layout ?? layoutFromSessionIds(sessionIds),
@@ -30,7 +29,7 @@ export function createWorkspace(
 export function updateWorkspace(
   base: BaseUrl,
   id: string,
-  patch: { name?: string; project?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: 'even-h' | 'even-v' | 'main-v' | 'tiled' | 'auto' },
+  patch: { name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: 'even-h' | 'even-v' | 'main-v' | 'tiled' | 'auto' },
 ): Promise<WorkspaceInfo> {
   return request(base, `/api/workspaces/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch });
 }

@@ -20,7 +20,7 @@
  * during the last swap a v2 CLI ran against a v3 server for hours with no way
  * to tell.
  */
-export const API_VERSION = 2;
+export const API_VERSION = 3;
 
 export const CMD = {
   DATA: 0x00,

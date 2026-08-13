@@ -67,7 +67,7 @@ export async function cmdAttach() {
 
   const targetToken = positional[0];
   if (!targetToken) {
-    console.error('usage: ttym attach <session-id|project/workspace/member|workspace/member>');
+    console.error('usage: ttym attach <session-id | workspace | workspace/member> [--new]');
     console.error('            [--readonly] [--prefix C-<key>]');
     console.error('            [--new [--cmd <cmd...>] [--cwd <path>] [--role <role>] [--name <name>]]');
     process.exit(EXIT.USAGE);

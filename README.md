@@ -108,7 +108,8 @@ dist/
 ```bash
 ./dist/ttym start                       # server in the background (port 7690)
 
-./dist/ttym new claude -- claude        # a session, named in the default workspace
+./dist/ttym attach work --new           # tmux-style: create workspace + shell, drop in
+./dist/ttym new claude -- claude        # or headless: a session in the default workspace
 ./dist/ttym split :claude logs          # a real split beside it — nesting and ratios survive
 ./dist/ttym attach default/claude       # TUI (C-b d to detach)
 
@@ -250,8 +251,10 @@ ttym log [-f]              # ~/.ttym/ttym.log
 
 ```bash
 ttym attach <session-id>
+ttym attach <workspace>                  # sole member, or the first (C-b n/p to cycle)
 ttym attach <workspace>/<member>
-ttym attach <ws>/<member> --new --cmd claude --dangerously-skip-permissions
+ttym attach work --new                   # create workspace + "main" member, attach — tmux-style
+ttym attach work/ai --new --cmd claude --dangerously-skip-permissions
 ttym attach <target> --readonly          # observe only
 ttym attach <target> --prefix C-a        # change the prefix key (default C-b)
 ```
@@ -270,11 +273,10 @@ C-]           alternate detach
 ### Workspace control plane
 
 ```bash
-ttym current [--json]                       # this session's project/workspace/member
-ttym project list [--json]
-ttym workspace list [project] [--json]
+ttym current [--json]                       # this session's workspace/member
+ttym workspace list [--json]
 ttym workspace info <ws|--current> [--json]
-ttym workspace create <project> --name <name>
+ttym workspace create <name>
 ttym workspace rename <ws|--current> --name <new>
 ttym workspace delete <ws|--current>
 
@@ -349,9 +351,8 @@ GET|PUT /api/map/prompt                     summarizer instructions (empty PUT =
 POST   /api/map/refresh                     run the summarizer ({note?}; single-flighted)
 GET|POST /api/map/api-key                   write-only key store; GET answers {set} only
 
-GET    /api/projects                        project aggregation
-GET    /api/workspaces[?project=<p>]        list workspaces
-POST   /api/workspaces                      create {id, name, layout, project?}
+GET    /api/workspaces                      list workspaces
+POST   /api/workspaces                      create {id, name, layout} — names are unique addresses
 GET|PATCH|DELETE /api/workspaces/:id        PATCH accepts {map} placement too
 POST   /api/workspaces/:id/members          add member {sessionId, name, role?, tags?}
 PATCH|DELETE /api/workspaces/:id/members/:sid

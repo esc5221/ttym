@@ -19,7 +19,6 @@ export interface WorkspaceMemberLike {
 
 export interface WorkspaceLike<TMember extends WorkspaceMemberLike = WorkspaceMemberLike> {
   id: string;
-  project: string;
   name: string;
   layout: LayoutNode;
   members: TMember[];
@@ -63,8 +62,8 @@ export function memberNameBySession<TMember extends WorkspaceMemberLike>(members
   return new Map(members.map((member) => [member.sessionId, member.name]));
 }
 
-export function workspaceLabel(project: string, name: string): string {
-  return project && project !== 'default' ? `${project}/${name}` : name;
+export function workspaceLabel(name: string): string {
+  return name;
 }
 
 export function formatCwd(cwd?: string | null): string | null {

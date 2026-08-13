@@ -39,7 +39,7 @@ export function createApi(base: BaseUrl) {
       resize: (id: number, cols: number, rows: number) => sessions.resizeSession(base, id, cols, rows),
     },
     workspaces: {
-      list: (project?: string) => workspaces.listWorkspaces(base, project),
+      list: () => workspaces.listWorkspaces(base),
       get: (id: string) => workspaces.getWorkspace(base, id),
       create: (o: Parameters<typeof workspaces.createWorkspace>[1]) => workspaces.createWorkspace(base, o),
       update: (id: string, patch: Parameters<typeof workspaces.updateWorkspace>[2]) =>

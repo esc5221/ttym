@@ -7,13 +7,8 @@ import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
-export async function listProjects(port) {
-  return await fetchJson(port, '/api/projects');
-}
-
-export async function listWorkspaces(port, project = null) {
-  const suffix = project ? `?project=${encodeURIComponent(project)}` : '';
-  return await fetchJson(port, `/api/workspaces${suffix}`);
+export async function listWorkspaces(port) {
+  return await fetchJson(port, '/api/workspaces');
 }
 
 export async function getWorkspaceById(port, id) {
@@ -66,19 +61,8 @@ export async function resolveWorkspace(port, token) {
   if (direct?.id) return direct;
 
   const workspaces = await listWorkspaces(port);
-  const slash = normalized.indexOf('/');
-  if (slash !== -1) {
-    const [project, name] = [normalized.slice(0, slash), normalized.slice(slash + 1)];
-    const match = workspaces.find((workspace) => workspace.project === project && workspace.name === name);
-    if (match) return match;
-  } else {
-    const exact = workspaces.filter((workspace) => workspace.name === normalized);
-    if (exact.length === 1) return exact[0];
-    if (exact.length > 1) {
-      console.error(`workspace name is ambiguous: ${normalized}`);
-      process.exit(EXIT.NOT_FOUND);
-    }
-  }
+  const match = workspaces.find((workspace) => workspace.name === normalized);
+  if (match) return match;
 
   console.error(`workspace not found: ${token}`);
   process.exit(EXIT.NOT_FOUND);
@@ -110,20 +94,30 @@ export async function resolveAttachTarget(port, token, options: Record<string, a
   let workspace = null;
   let memberToken = null;
 
-  if (parts.length >= 3) {
-    workspace = await resolveWorkspace(port, `${parts[0]}/${parts[1]}`);
-    memberToken = parts.slice(2).join('/');
-  } else if (parts.length === 2) {
+  const workspaces = await listWorkspaces(port);
+  if (parts.length === 2) {
     const [workspaceName, rest] = parts;
-    const workspaces = await listWorkspaces(port);
-    const matches = workspaces.filter((ws) => ws.name === workspaceName);
-    if (matches.length > 1) {
-      console.error(`workspace name is ambiguous: ${workspaceName}`);
-      process.exit(EXIT.NOT_FOUND);
-    }
-    if (matches.length === 1) {
-      workspace = matches[0];
-      memberToken = rest;
+    workspace = workspaces.find((ws) => ws.name === workspaceName) ?? null;
+    memberToken = rest;
+  } else if (parts.length === 1) {
+    // tmux 문법: `ttym attach work` — 이름만으로 도달하고, --new 면 만들어서 들어간다.
+    workspace = workspaces.find((ws) => ws.name === normalized) ?? null;
+    if (workspace) {
+      const members = workspace.members || [];
+      if (members.length === 0 && !createIfMissing) {
+        console.error(`workspace has no members: ${normalized}`);
+        process.exit(EXIT.NOT_FOUND);
+      }
+      // 멤버 하나면 그것, 여럿이면 첫 멤버 — 이후 C-b n/p 로 순회
+      memberToken = members[0]?.name ?? 'main';
+    } else if (createIfMissing) {
+      workspace = await fetchPost(port, '/api/workspaces', {
+        id: randomUUID().slice(0, 8),
+        name: normalized,
+        layout: { type: 'pane', sessionId: 0 },
+        members: [],
+      });
+      memberToken = 'main';
     }
   }
 
@@ -206,7 +200,6 @@ export async function createWorkspaceMember(port, workspace, opts: Record<string
     tags: [],
   });
   await patchSessionMeta(port, created.id, {
-    project: updated.project,
     workspaceId: updated.id,
     workspaceName: updated.name,
     memberName,
@@ -246,13 +239,13 @@ export async function patchSessionMeta(port, sessionId, patch) {
 }
 
 export function memberAddress(workspace, member) {
-  return `${workspace.project}/${workspace.name}/${member.name}`;
+  return `${workspace.name}/${member.name}`;
 }
 // ───── Colon addresses and the top-level verbs (D2, expand phase) ─────
 //
 // One address grammar for the daily verbs:
 //   ws:name    member "name" in workspace "ws" (workspace resolved by name,
-//              or project/name when names collide across projects)
+//              — 이름이 전역 유일이라 그대로 주소다)
 //   :name      member "name" in the current workspace ($TTYM_SESSION_ID)
 //   #42        session 42 directly — the only address an unattached session
 //              has, per ADR-0001
@@ -286,8 +279,8 @@ export async function resolveMatches(port, expr) {
         name: member.name ?? '',
         role: member.role ?? '',
         tags: member.tags ?? [],
-        ws: `${ws.project}/${ws.name}`,
-        label: `${ws.project}/${ws.name}:${member.name}`,
+        ws: ws.name,
+        label: `${ws.name}:${member.name}`,
       });
     }
   }
@@ -353,7 +346,7 @@ export async function resolveAddress(port, token) {
   const member = requireMember(workspace, memberToken);
   return {
     sessionId: member.sessionId,
-    label: `${workspace.project}/${workspace.name}:${member.name}`,
+    label: `${workspace.name}:${member.name}`,
     workspace,
     member,
   };
@@ -362,11 +355,10 @@ export async function resolveAddress(port, token) {
 /** The workspace `ttym new` files sessions under when none is named. */
 export async function ensureDefaultWorkspace(port) {
   const workspaces = await listWorkspaces(port);
-  const existing = workspaces.find((ws) => ws.project === 'default' && ws.name === 'default');
+  const existing = workspaces.find((ws) => ws.name === 'default');
   if (existing) return existing;
   return await fetchPost(port, '/api/workspaces', {
     id: randomUUID().slice(0, 8),
-    project: 'default',
     name: 'default',
     layout: { type: 'pane', sessionId: 0 },
     members: [],

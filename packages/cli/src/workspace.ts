@@ -7,7 +7,7 @@ import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, shellAwait, stripAnsi, cleanShellOutput, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 import { isRuntimeMetaKey } from '@ttym/protocol';
-import { listProjects, listWorkspaces, resolveCurrentWorkspace, resolveWorkspace, findMemberInWorkspace, createWorkspaceMember, requireMember, patchSessionMeta, memberAddress, normalizeAddressToken, getWorkspaceById, findWorkspaceBySessionId, getSessionIdsFromLayout } from './addresses.js';
+import { listWorkspaces, resolveCurrentWorkspace, resolveWorkspace, findMemberInWorkspace, createWorkspaceMember, requireMember, patchSessionMeta, memberAddress, normalizeAddressToken, getWorkspaceById, findWorkspaceBySessionId, getSessionIdsFromLayout } from './addresses.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 export async function cmdMeta() {
   const sessionId = process.argv[3];
@@ -126,11 +126,10 @@ export async function cmdCurrent() {
   const sessionId = parseInt(process.env.TTYM_SESSION_ID, 10);
   const member = (workspace.members || []).find((entry) => entry.sessionId === sessionId) || null;
   const result = {
-    project: workspace.project,
     workspace: {
       id: workspace.id,
       name: workspace.name,
-      address: `${workspace.project}/${workspace.name}`,
+      address: workspace.name,
     },
     member: member ? {
       name: member.name,
@@ -141,29 +140,9 @@ export async function cmdCurrent() {
     sessionId,
   };
   if (asJson) return printOutput(result, true);
-  console.log(`project:   ${result.project}`);
   console.log(`workspace: ${result.workspace.address}`);
   if (result.member) console.log(`member:    ${result.member.name} (#${result.member.sessionId})`);
   console.log(`session:   #${result.sessionId}`);
-}
-
-export async function cmdProject() {
-  const action = process.argv[3];
-  const port = getPort();
-  await ensureCompatibleServer(port);
-  const asJson = hasFlag('--json');
-
-  if (action === 'list') {
-    const projects = await listProjects(port);
-    if (asJson) return printOutput(projects, true);
-    for (const project of projects) {
-      console.log(`${project.name}  workspaces=${project.workspaceCount} members=${project.memberCount}`);
-    }
-    return;
-  }
-
-  console.log('usage: ttym project list [--json]');
-  process.exit(EXIT.USAGE);
 }
 
 export async function cmdWorkspace() {
@@ -174,11 +153,10 @@ export async function cmdWorkspace() {
   const asJson = hasFlag('--json');
 
   if (action === 'list') {
-    const targetProject = args[0] && !args[0].startsWith('--') ? args[0] : null;
-    const workspaces = await listWorkspaces(port, targetProject);
+    const workspaces = await listWorkspaces(port);
     if (asJson) return printOutput(workspaces, true);
     for (const workspace of workspaces) {
-      console.log(`${workspace.project}/${workspace.name}  id=${workspace.id}  members=${workspace.members.length}`);
+      console.log(`${workspace.name}  id=${workspace.id}  members=${workspace.members.length}`);
     }
     return;
   }
@@ -188,9 +166,8 @@ export async function cmdWorkspace() {
     const workspace = await resolveWorkspace(port, token);
     const result = {
       workspaceId: workspace.id,
-      project: workspace.project,
-      name: workspace.name,
-      address: `${workspace.project}/${workspace.name}`,
+        name: workspace.name,
+      address: workspace.name,
       members: (workspace.members || []).map((member) => ({
         name: member.name,
         role: member.role || null,
@@ -214,22 +191,27 @@ export async function cmdWorkspace() {
   }
 
   if (action === 'create') {
-    const project = args[0] && !args[0].startsWith('--') ? args[0] : 'default';
-    const name = readOption(args, '--name');
+    // 이름이 곧 주소다: ttym workspace create mathking
+    const positional = args[0] && !args[0].startsWith('--') ? args[0] : null;
+    const flagged = readOption(args, '--name');
+    if (positional && flagged && positional !== flagged) {
+      console.error(`conflicting names: "${positional}" vs --name "${flagged}" (projects are gone — one name is the address)`);
+      process.exit(EXIT.USAGE);
+    }
+    const name = positional || flagged;
     if (!name) {
-      console.error('usage: ttym workspace create <project> --name <name> [--json]');
+      console.error('usage: ttym workspace create <name> [--json]');
       process.exit(EXIT.USAGE);
     }
     const id = randomUUID().slice(0, 8);
     const workspace = await fetchPost(port, '/api/workspaces', {
       id,
-      project,
       name,
       layout: { type: 'pane', sessionId: 0 },
       members: [],
     });
     if (asJson) return printOutput(workspace, true);
-    console.log(`${workspace.project}/${workspace.name} (${workspace.id})`);
+    console.log(`${workspace.name} (${workspace.id})`);
     return;
   }
 
@@ -240,7 +222,7 @@ export async function cmdWorkspace() {
     }
     await fetchDelete(port, `/api/workspaces/${encodeURIComponent(workspace.id)}`);
     if (asJson) return printOutput({ ok: true, deleted: workspace.id }, true);
-    console.log(`deleted ${workspace.project}/${workspace.name}`);
+    console.log(`deleted ${workspace.name}`);
     return;
   }
 
@@ -256,7 +238,7 @@ export async function cmdWorkspace() {
     const patch = presets.includes(spec) ? { preset: spec } : { layout: JSON.parse(spec) };
     const next = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(workspace.id)}`, patch);
     if (asJson) return printOutput(next, true);
-    console.log(`${next.project}/${next.name} layout updated`);
+    console.log(`${next.name} layout updated`);
     return;
   }
 
@@ -269,7 +251,7 @@ export async function cmdWorkspace() {
     }
     const next = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(workspace.id)}`, { name });
     if (asJson) return printOutput(next, true);
-    console.log(`${next.project}/${next.name}`);
+    console.log(`${next.name}`);
     return;
   }
 
@@ -284,7 +266,7 @@ export async function cmdWorkspace() {
         name, role, cmd,
       });
       const result = {
-        workspace: `${updated.project}/${updated.name}`,
+        workspace: `${updated.name}`,
         member: { ...member, address: memberAddress(updated, member) },
         session,
       };
@@ -310,7 +292,6 @@ export async function cmdWorkspace() {
     await fetchDelete(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members/${member.sessionId}`);
     if (action === 'detach') {
       await patchSessionMeta(port, member.sessionId, {
-        project: null,
         workspaceId: null,
         workspaceName: null,
       });
@@ -318,9 +299,9 @@ export async function cmdWorkspace() {
     if (action === 'remove') {
       await fetchDelete(port, `/api/sessions/${member.sessionId}`);
     }
-    const result = { ok: true, action, workspace: `${workspace.project}/${workspace.name}`, member: member.name, sessionId: member.sessionId };
+    const result = { ok: true, action, workspace: `${workspace.name}`, member: member.name, sessionId: member.sessionId };
     if (asJson) return printOutput(result, true);
-    console.log(`${action}d ${workspace.project}/${workspace.name}/${member.name} (#${member.sessionId})`);
+    console.log(`${action}d ${workspace.name}/${member.name} (#${member.sessionId})`);
     return;
   }
 
@@ -335,7 +316,7 @@ export async function cmdWorkspace() {
     }
     const result = await fetchPost(port, `/api/sessions/${member.sessionId}/send`, { data: payload });
     if (asJson) return printOutput(result, true);
-    console.log(`sent to ${workspace.project}/${workspace.name}/${member.name}`);
+    console.log(`sent to ${workspace.name}/${member.name}`);
     return;
   }
 
@@ -356,7 +337,7 @@ export async function cmdWorkspace() {
     if (shell) {
       const output = shell.output === null ? null : (hasFlag('--raw') ? shell.output : cleanShellOutput(shell.output));
       const result = {
-        workspace: `${workspace.project}/${workspace.name}`,
+        workspace: `${workspace.name}`,
         member: member.name,
         sessionId: member.sessionId,
         interaction: null,
@@ -402,7 +383,7 @@ export async function cmdWorkspace() {
     }
 
     const result = {
-      workspace: `${workspace.project}/${workspace.name}`,
+      workspace: `${workspace.name}`,
       member: member.name,
       sessionId: member.sessionId,
       interaction: interaction ? {
@@ -433,7 +414,7 @@ export async function cmdWorkspace() {
     const member = requireMember(workspace, args[1]);
     const result = await fetchJson(port, `/api/sessions/${member.sessionId}/screen`);
     if (asJson) return printOutput({
-      workspace: `${workspace.project}/${workspace.name}`,
+      workspace: `${workspace.name}`,
       member: member.name,
       sessionId: member.sessionId,
       screen: result?.screen ?? '',
@@ -452,7 +433,6 @@ export async function cmdWorkspace() {
     }
     const updated = await fetchPatch(port, `/api/workspaces/${encodeURIComponent(workspace.id)}/members/${member.sessionId}`, { name });
     await patchSessionMeta(port, member.sessionId, {
-      project: updated.project,
       workspaceId: updated.id,
       workspaceName: updated.name,
       memberName: name,
@@ -460,16 +440,16 @@ export async function cmdWorkspace() {
     });
     const renamed = updated.members.find((entry) => entry.sessionId === member.sessionId);
     if (asJson) return printOutput(renamed, true);
-    console.log(`${updated.project}/${updated.name}/${renamed.name}`);
+    console.log(`${updated.name}/${renamed.name}`);
     return;
   }
 
   console.log('usage: ttym workspace <command>');
   console.log('');
   console.log('commands:');
-  console.log('  list [project] [--json]');
+  console.log('  list [--json]');
   console.log('  info <workspace|--current> [--json]');
-  console.log('  create <project> --name <name> [--json]');
+  console.log('  create <name> [--json]');
   console.log('  rename <workspace|--current> --name <name>');
   console.log('  delete <workspace|--current> [--json]');
   console.log('  add <workspace|--current> [--name <name>] [--role <role>] [--cmd ...] [--json]');

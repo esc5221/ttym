@@ -24,7 +24,6 @@ export interface WorkspaceMemberInfo {
 
 export interface WorkspaceInfo {
   id: string;
-  project: string;
   name: string;
   layout: LayoutNode;
   members: WorkspaceMemberInfo[];
