@@ -17,19 +17,19 @@
 ### 프로세스 구성
 
 ```
-         Clients (viewers)                     Server                  PTY backend
-         ─────────────────                    ────────                ───────────────
+Clients (viewers)                     Server                  PTY backend
+─────────────────                    ────────                ───────────────
 
-         ttym attach        (Node TUI)       ┌──────────┐             ┌─ Holder #1 ─► zsh
-                                             │          │         UDS │
-         @ttym/web          (browser)   ───► │  server  │ ──────────► ├─ Holder #2 ─► claude
-                                             │  (Node)  │  frame      │
-         @ttym/desktop      (Tauri)          │          │  protocol   └─ Holder #N ─► codex
-                                             └──────────┘
-                                                  ▲                   Rust · ~1MB · 세션당 1개
-         ttym new/split/send/await  ────────────┘                    서버가 죽어도 생존
-         ttym start/stop/status       HTTP only
-         (CLI control-plane)
+ttym attach        (Node TUI)       ┌──────────┐             ┌─ Holder #1 ─► zsh
+                                    │          │         UDS │
+@ttym/web          (browser)   ───► │  server  │ ──────────► ├─ Holder #2 ─► claude
+                                    │  (Node)  │  frame      │
+@ttym/desktop      (Tauri)          │          │  protocol   └─ Holder #N ─► codex
+                                    └──────────┘
+                                         ▲                   Rust · ~1MB · 세션당 1개
+ttym new/split/send/await  ────────────┘                    서버가 죽어도 생존
+ttym start/stop/status       HTTP only
+(CLI control-plane)
 ```
 
 핵심:

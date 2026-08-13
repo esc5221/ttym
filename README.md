@@ -20,19 +20,19 @@ processes, same screens.
 ### Processes
 
 ```
-         Clients (viewers)                     Server                  PTY backend
-         ─────────────────                    ────────                ───────────────
+Clients (viewers)                     Server                  PTY backend
+─────────────────                    ────────                ───────────────
 
-         ttym attach        (Node TUI)       ┌──────────┐             ┌─ Holder #1 ─► zsh
-                                             │          │         UDS │
-         @ttym/web          (browser)   ───► │  server  │ ──────────► ├─ Holder #2 ─► claude
-                                             │  (Node)  │  frame      │
-         @ttym/desktop      (Tauri)          │          │  protocol   └─ Holder #N ─► codex
-                                             └──────────┘
-                                                  ▲                   Rust · ~1MB · one per session
-         ttym new/split/send/await  ────────────┘                    outlives the server
-         ttym start/stop/status       HTTP only
-         (CLI control-plane)
+ttym attach        (Node TUI)       ┌──────────┐             ┌─ Holder #1 ─► zsh
+                                    │          │         UDS │
+@ttym/web          (browser)   ───► │  server  │ ──────────► ├─ Holder #2 ─► claude
+                                    │  (Node)  │  frame      │
+@ttym/desktop      (Tauri)          │          │  protocol   └─ Holder #N ─► codex
+                                    └──────────┘
+                                         ▲                   Rust · ~1MB · one per session
+ttym new/split/send/await  ────────────┘                    outlives the server
+ttym start/stop/status       HTTP only
+(CLI control-plane)
 ```
 
 Key points:
