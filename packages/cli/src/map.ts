@@ -113,13 +113,22 @@ export async function cmdMap() {
     }
   }
 
-  // 모델이 응답에서 뺀 stale 세션(대개 빈 셸)은 빈 요약으로 마킹한다 —
-  // "요약했고 내용 없음"도 결론이다. 안 그러면 매 주기 재프롬프트되는 영원한 stale.
+  // 모델이 응답에서 뺀 stale 세션은 신선 처리하되 내용은 지키지 않는다 —
+  // 기존 요약이 있으면 그대로 두고 atSeq만 올린다(모델이 한 판을 통째로
+  // 빼먹어도 멀쩡한 요약이 빈 것으로 덮이지 않는다). 없던 세션만 빈 요약.
   const answered = new Set(Object.keys((sessionOut as Record<string, unknown>) ?? {}).map((k) => parseInt(k, 10)));
   for (const row of stale) {
     if (answered.has(row.id)) continue;
+    const prev = (row.summary ?? {}) as Record<string, unknown>;
     await fetchPatch(port, `/api/sessions/${row.id}/annotations`, {
-      mapSummary: { title: '', note: '', status: null, statusNote: '', atSeq: row.lastSeq, updatedAt: Date.now() },
+      mapSummary: {
+        title: typeof prev.title === 'string' ? prev.title : '',
+        note: typeof prev.note === 'string' ? prev.note : '',
+        status: typeof prev.status === 'string' ? prev.status : null,
+        statusNote: typeof prev.statusNote === 'string' ? prev.statusNote : '',
+        atSeq: row.lastSeq,
+        updatedAt: Date.now(),
+      },
     });
   }
 
