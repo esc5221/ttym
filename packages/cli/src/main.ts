@@ -6,7 +6,7 @@ import { cmdStart, cmdStop, cmdRestart, cmdStatus, cmdLog } from './lifecycle.js
 import { cmdAttach } from './attach.js';
 import { cmdMeta, cmdCurrent, cmdProject, cmdWorkspace } from './workspace.js';
 import { cmdAgent, cmdReportStop } from './agent.js';
-import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr } from './sessions.js';
+import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr, cmdCommandsAddr, cmdOutputAddr } from './sessions.js';
 
 // ───── Main ─────
 
@@ -30,6 +30,8 @@ switch (cmd) {
   case 'resize':  await cmdResizeAddr(); break;
   case 'kill':    await cmdKillAddr(); break;
   case 'await':   await cmdAwaitAddr(); break;
+  case 'commands': await cmdCommandsAddr(); break;
+  case 'output':  await cmdOutputAddr(); break;
   case 'start':   cmdStart(); break;
   case 'stop':    cmdStop(); break;
   case 'restart': cmdRestart(); break;
@@ -60,7 +62,9 @@ switch (cmd) {
   console.log('  screen <addr>                Read the screen');
   console.log('  resize <addr> <cols> <rows>  Resize a session');
   console.log('  kill <addr>                  Kill a session (holder included)');
-  console.log('  await <addr> -- "prompt"     Ask an agent and wait for its answer');
+  console.log('  await <addr> -- "prompt"     Ask an agent (or run a shell command) and wait');
+  console.log('  commands <addr>              Command history with exit codes (shell integration)');
+  console.log('  output <addr> [--cmd N]      One command output, precisely sliced');
     console.log('  status                       Show server & session info');
     console.log('  current                      Show current project/workspace/member context');
     console.log('  project list                 List projects');

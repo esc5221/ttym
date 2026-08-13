@@ -35,16 +35,25 @@ export function decode633E(payload: string): string {
     tok === '\\\\' ? '\\' : tok === '\\x3b' ? ';' : '\n');
 }
 
+interface Waiter {
+  afterN: number;
+  resolve: (record: CommandRecord | null) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 export class CommandIndex {
   private records: CommandRecord[] = [];
   private open: CommandRecord | null = null;
   private pendingCmdline: string | null = null;
   private counter = 0;
+  private waiters: Waiter[] = [];
+  private _signalsSeen = false;
 
   /** @param seq 현재 ring 위치를 물어보는 콜백 — 신호 수신 시점의 스트림 좌표 */
   constructor(private readonly seq: () => number, private readonly now: () => number = Date.now) {}
 
   osc133(data: string): void {
+    this._signalsSeen = true;
     const kind = data[0];
     switch (kind) {
       case 'A': {
@@ -90,9 +99,40 @@ export class CommandIndex {
     this.open.exitCode = exitCode;
     this.open.endedAt = this.now();
     this.open.endSeq = this.seq();
-    this.records.push(this.open);
+    const closed = this.open;
+    this.records.push(closed);
     this.open = null;
     if (this.records.length > CAP) this.records.splice(0, this.records.length - CAP);
+    for (const w of this.waiters.splice(0)) {
+      if (closed.n > w.afterN) { clearTimeout(w.timer); w.resolve(closed); }
+      else this.waiters.push(w);
+    }
+  }
+
+  /** counter가 afterN을 넘는 명령이 "마감"될 때까지 대기. 타임아웃이면 null. */
+  waitForClose(afterN: number, timeoutMs: number): Promise<CommandRecord | null> {
+    return new Promise((resolve) => {
+      const waiter: Waiter = {
+        afterN,
+        resolve,
+        timer: setTimeout(() => {
+          this.waiters = this.waiters.filter((w) => w !== waiter);
+          resolve(null);
+        }, timeoutMs),
+      };
+      this.waiters.push(waiter);
+    });
+  }
+
+  /** 일련번호로 조회 — 진행 중(open) 명령도 잡힌다. */
+  get(n: number): CommandRecord | undefined {
+    if (this.open?.n === n) return this.open;
+    return this.records.find((r) => r.n === n);
+  }
+
+  /** 쉘 통합 신호(133)를 한 번이라도 봤는가 — await의 경로 선택 기준. */
+  get signalsSeen(): boolean {
+    return this._signalsSeen;
   }
 
   /** 시간순(오래된 → 최신). 진행 중 명령은 endedAt=null로 맨 뒤에 포함. */

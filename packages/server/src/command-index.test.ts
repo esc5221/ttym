@@ -59,6 +59,17 @@ describe('CommandIndex', () => {
     expect(idx.list(500)[0].n).toBe(11);
   });
 
+  it('waitForClose — afterN 이후의 마감만 깨우고, 타임아웃이면 null', async () => {
+    const { idx } = makeIndex();
+    idx.osc133('C'); idx.osc133('D;0'); // n=1 (이미 지나감)
+    const wait = idx.waitForClose(1, 500);
+    idx.osc633('E;next');
+    idx.osc133('C');
+    idx.osc133('D;3'); // n=2 — 이게 깨워야 한다
+    await expect(wait).resolves.toMatchObject({ n: 2, exitCode: 3 });
+    await expect(idx.waitForClose(2, 30)).resolves.toBeNull(); // 아무도 안 옴
+  });
+
   it('decode633E — 이중 이스케이프가 한 번에 풀리지 않는다', () => {
     expect(decode633E('echo a\\x3bb')).toBe('echo a;b');
     expect(decode633E('printf \\\\x3b')).toBe('printf \\x3b'); // \\ 먼저: 리터럴 \x3b 보존

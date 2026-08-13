@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
-import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
+import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, shellAwait, stripAnsi, cleanShellOutput, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 import { resolveAddress, resolveMatches, ensureDefaultWorkspace, createWorkspaceMember, requireMember, resolveWorkspace, patchSessionMeta, memberAddress } from './addresses.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 export async function cmdNew() {
@@ -152,6 +152,59 @@ export async function cmdScreenAddr() {
   process.stdout.write(result?.screen ?? '');
 }
 
+export async function cmdCommandsAddr() {
+  const args = process.argv.slice(3);
+  const token = args[0];
+  if (!token) {
+    console.error('usage: ttym commands <ws:name|:name|#id> [--limit N] [--json]');
+    process.exit(EXIT.USAGE);
+  }
+  const port = getPort();
+  await ensureCompatibleServer(port);
+  const target = await resolveAddress(port, token);
+  const limit = parseInt(readOption(args, '--limit') || '50', 10);
+  const result = await fetchJson(port, `/api/sessions/${target.sessionId}/commands?limit=${limit}`);
+  if (hasFlag('--json')) return printOutput({ target: target.label, ...result }, true);
+  if (!result.integration) {
+    console.error('no shell integration signals — source scripts/ttym-shell-integration.zsh in that pane');
+    return;
+  }
+  for (const c of result.commands) {
+    const t = new Date(c.startedAt).toTimeString().slice(0, 8);
+    const mark = c.endedAt === null ? '…' : c.exitCode === null ? '?' : c.exitCode === 0 ? '✓' : '✗';
+    const dur = c.endedAt === null ? 'running' : `${((c.endedAt - c.startedAt) / 1000).toFixed(1)}s`;
+    const code = c.exitCode === null ? '' : String(c.exitCode);
+    console.log(`${t}  ${mark} ${code.padStart(3)}  ${dur.padStart(8)}  ${c.cmdline ?? '(unknown)'}`);
+  }
+  if (result.total > result.commands.length) {
+    console.error(`(${result.total - result.commands.length} earlier commands not shown — --limit)`);
+  }
+}
+
+export async function cmdOutputAddr() {
+  const args = process.argv.slice(3);
+  const token = args[0];
+  if (!token) {
+    console.error('usage: ttym output <ws:name|:name|#id> [--cmd N] [--raw] [--json]');
+    process.exit(EXIT.USAGE);
+  }
+  const port = getPort();
+  await ensureCompatibleServer(port);
+  const target = await resolveAddress(port, token);
+  const which = readOption(args, '--cmd') || 'last';
+  const result = await fetchJson(port, `/api/sessions/${target.sessionId}/commands/${which}/output`).catch(() => null);
+  if (!result || result.error) {
+    console.error(`no such command in #${target.sessionId} — see: ttym commands ${token}`);
+    process.exit(EXIT.NOT_FOUND);
+  }
+  const output = hasFlag('--raw') ? result.output : cleanShellOutput(result.output);
+  if (hasFlag('--json')) return printOutput({ target: target.label, ...result, output }, true);
+  if (result.truncated) console.error('warning: output partially evicted from the ring — head is missing');
+  if (result.running) console.error('note: command still running — output so far');
+  process.stdout.write(output);
+  if (output && !output.endsWith('\n')) process.stdout.write('\n');
+}
+
 export async function cmdAwaitAddr() {
   const args = process.argv.slice(3);
   const sep = args.indexOf('--');
@@ -185,6 +238,35 @@ export async function cmdAwaitAddr() {
     return;
   }
   const target = await resolveAddress(port, token);
+
+  // 쉘 통합 신호가 보이는 세션이면 명령으로 실행한다 — Stop hook 없이
+  // 133;D가 완료 신호이고, 답은 그 명령의 출력 구간이다.
+  const shell = await shellAwait(port, target.sessionId, prompt.replace(/[\r\n]+$/, ''), timeoutMs);
+  if (shell) {
+    const output = shell.output === null ? null : (hasFlag('--raw') ? shell.output : cleanShellOutput(shell.output));
+    if (hasFlag('--json')) {
+      return printOutput({
+        target: target.label,
+        interaction: null,
+        shell: shell.command ? {
+          n: shell.command.n, cmdline: shell.command.cmdline,
+          exitCode: shell.command.exitCode, durationMs: (shell.command.endedAt ?? 0) - shell.command.startedAt,
+          truncated: shell.truncated,
+        } : null,
+        completed: shell.completed === true,
+        output,
+      }, true);
+    }
+    if (!shell.completed) {
+      console.error(`timeout: command still running after ${timeoutMs}ms`);
+      process.exit(EXIT.FAIL);
+    }
+    if (shell.command.exitCode !== null && shell.command.exitCode !== 0) {
+      console.error(`exit ${shell.command.exitCode}`);
+    }
+    if (output) process.stdout.write(output.endsWith('\n') ? output : output + '\n');
+    return;
+  }
 
   const response = await fetchRequest(port, 'POST', `/api/sessions/${target.sessionId}/interactions`, {
     prompt: prompt.replace(/[\r\n]+$/, ''),

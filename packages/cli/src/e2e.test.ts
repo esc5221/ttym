@@ -152,9 +152,14 @@ suite('cli end to end', () => {
     expect(ws.layout.children.length).toBe(2);
   }, 30_000);
 
-  it('reports a pending await instead of hanging on a hookless session', () => {
-    const out = ttym(['await', 'default:g1', '--timeout', '1500', '--', 'hello'], { canFail: true });
+  it('reports a pending await instead of hanging on a signal-less session', () => {
+    // g1은 대화형 zsh라 개발 머신의 ~/.zshrc가 shell integration을 켜면
+    // await가 (의도대로) 명령 경로를 타 즉답한다. 이 테스트의 관심사는
+    // "완료 신호가 전혀 없는 세션"이므로 dotfile을 안 읽는 /bin/sh로 밀폐한다.
+    ttym(['new', 'mute', '--', '/bin/sh']);
+    const out = ttym(['await', 'default:mute', '--timeout', '1500', '--', 'hello'], { canFail: true });
     expect(out).toContain('timeout: still running');
+    ttym(['workspace', 'remove', 'default/default', 'mute']);
   }, 20_000);
 
   it('restart keeps the sessions alive — the holder guarantee through the CLI', async () => {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
-import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
+import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, shellAwait, stripAnsi, cleanShellOutput, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 import { isRuntimeMetaKey } from '@ttym/protocol';
 import { listProjects, listWorkspaces, resolveCurrentWorkspace, resolveWorkspace, findMemberInWorkspace, createWorkspaceMember, requireMember, patchSessionMeta, memberAddress, normalizeAddressToken, getWorkspaceById, findWorkspaceBySessionId, getSessionIdsFromLayout } from './addresses.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
@@ -350,6 +350,33 @@ export async function cmdWorkspace() {
     // submits the prompt, and holds the reply until the agent's hook settles
     // it. Nothing polls, so a fast answer comes back as fast as it lands.
     const text = payload.replace(/[\r\n]+$/, '');
+
+    // 쉘 통합 세션이면 명령 실행 경로 — 완료 신호는 hook이 아니라 133;D다.
+    const shell = await shellAwait(port, member.sessionId, text, timeoutMs);
+    if (shell) {
+      const output = shell.output === null ? null : (hasFlag('--raw') ? shell.output : cleanShellOutput(shell.output));
+      const result = {
+        workspace: `${workspace.project}/${workspace.name}`,
+        member: member.name,
+        sessionId: member.sessionId,
+        interaction: null,
+        shell: shell.command ? {
+          n: shell.command.n, cmdline: shell.command.cmdline,
+          exitCode: shell.command.exitCode, durationMs: (shell.command.endedAt ?? 0) - shell.command.startedAt,
+          truncated: shell.truncated,
+        } : null,
+        completed: shell.completed === true,
+        screen: output,
+      };
+      if (asJson) return printOutput(result, true);
+      if (!shell.completed) {
+        console.error(`timeout: command still running after ${timeoutMs}ms`);
+        process.exit(EXIT.FAIL);
+      }
+      if (shell.command.exitCode !== null && shell.command.exitCode !== 0) console.error(`exit ${shell.command.exitCode}`);
+      if (output) process.stdout.write(output.endsWith('\n') ? output : output + '\n');
+      return;
+    }
     // The server holds this request open until the agent's hook settles it, so
     // the socket timeout has to outlast the interaction timeout, not the
     // default 5s meant for ordinary calls.

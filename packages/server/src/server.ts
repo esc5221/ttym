@@ -533,7 +533,67 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     if (!session || session.isDead) { json(404, { error: 'not found' }); return true; }
     const limitRaw = url.searchParams.get('limit');
     const limit = limitRaw && /^\d+$/.test(limitRaw) ? Math.min(parseInt(limitRaw, 10), 500) : 50;
-    json(200, { total: session.commands.total, commands: session.commands.list(limit) });
+    json(200, {
+      integration: session.commands.signalsSeen,
+      total: session.commands.total,
+      commands: session.commands.list(limit),
+    });
+    return true;
+  }
+
+  // GET /api/sessions/:id/commands/:n/output — 그 명령의 출력 구간만 절취.
+  // 출력 바이트의 수명은 ring이 정한다 — 밀려났으면 truncated로 정직하게.
+  const cmdOutputMatch = path.match(/^\/api\/sessions\/(\d+)\/commands\/(\d+|last)\/output$/);
+  if (cmdOutputMatch && req.method === 'GET') {
+    const id = parseInt(cmdOutputMatch[1], 10);
+    const session = manager.get(id);
+    if (!session || session.isDead) { json(404, { error: 'not found' }); return true; }
+    const record = cmdOutputMatch[2] === 'last'
+      ? session.commands.list(1)[0]
+      : session.commands.get(parseInt(cmdOutputMatch[2], 10));
+    if (!record) { json(404, { error: 'no such command' }); return true; }
+    const endSeq = record.endSeq ?? session.lastSeq + 1; // 진행 중이면 현재까지
+    const { data, truncated } = session.ring.slice(record.startSeq, endSeq);
+    json(200, {
+      n: record.n, cmdline: record.cmdline, exitCode: record.exitCode,
+      running: record.endedAt === null, truncated,
+      output: data.toString('utf8'),
+    });
+    return true;
+  }
+
+  // POST /api/sessions/:id/commands — 명령 실행 + 완료 blocking 대기 (shell-await).
+  // 쉘 통합 신호가 없는 세션은 완료를 알 길이 없으므로 409로 거절한다.
+  if (commandsMatch && req.method === 'POST') {
+    const id = parseInt(commandsMatch[1], 10);
+    readBody().then(async (body) => {
+      const session = manager.get(id);
+      if (!session || session.isDead) { json(404, { error: 'not found' }); return; }
+      if (!session.commands.signalsSeen) {
+        json(409, { error: 'no shell integration signals from this session' });
+        return;
+      }
+      let command: string; let timeoutMs: number;
+      try {
+        const parsed = JSON.parse(body);
+        if (typeof parsed.command !== 'string' || !parsed.command.trim()) throw new Error('bad');
+        command = parsed.command.replace(/[\r\n]+$/, '');
+        timeoutMs = Number.isFinite(parsed.timeoutMs) ? Math.min(parsed.timeoutMs, 600_000) : 120_000;
+      } catch {
+        json(400, { error: 'body must be {command, timeoutMs?}' });
+        return;
+      }
+      const afterN = session.commands.total;
+      session.write(Buffer.from(command + '\n'));
+      log(`HTTP CMD-RUN session=${id} len=${command.length}`);
+      const record = await session.commands.waitForClose(afterN, timeoutMs);
+      if (!record) {
+        json(200, { completed: false, command: null, output: null, truncated: false });
+        return;
+      }
+      const { data, truncated } = session.ring.slice(record.startSeq, record.endSeq ?? session.lastSeq + 1);
+      json(200, { completed: true, command: record, truncated, output: data.toString('utf8') });
+    });
     return true;
   }
 

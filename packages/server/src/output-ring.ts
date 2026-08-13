@@ -51,6 +51,15 @@ export class OutputRing {
     }
   }
 
+  /** [fromSeq, toSeqExclusive) 구간 바이트 — 명령 출력 절취용. truncated = 앞부분이 ring에서 밀려남. */
+  slice(fromSeq: number, toSeqExclusive: number): { data: Buffer; truncated: boolean } {
+    const parts: Buffer[] = [];
+    for (const c of this.chunks) {
+      if (c.seq >= fromSeq && c.seq < toSeqExclusive) parts.push(c.data);
+    }
+    return { data: Buffer.concat(parts), truncated: fromSeq < this._baseSeq };
+  }
+
   /** fromSeq가 ring에 남아있는지 (delta replay 가능 여부) */
   canReplaySince(fromSeq: number): boolean {
     return fromSeq >= this._baseSeq - 1;

@@ -151,6 +151,36 @@ export async function ensureCompatibleServer(port) {
   }
 }
 
+/**
+ * 쉘 통합 세션이면 명령을 서버 blocking 엔드포인트로 실행하고 결과를 반환.
+ * 통합 신호가 없는 세션이면 null — 호출부가 에이전트(interaction) 경로로 간다.
+ */
+export async function shellAwait(port, sessionId, command, timeoutMs) {
+  const probe = await fetchJson(port, `/api/sessions/${sessionId}/commands?limit=1`).catch(() => null);
+  if (!probe || probe.integration !== true) return null;
+  return fetchRequest(port, 'POST', `/api/sessions/${sessionId}/commands`, { command, timeoutMs }, timeoutMs + 15_000);
+}
+
+/** CSI·OSC·제어문자 제거 — 개행·탭은 살린다. 명령 출력의 사람용 기본 표시. */
+export function stripAnsi(text) {
+  return text
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b\[[0-9;?]*[0-9A-Za-z]/g, '')
+    .replace(/\x1b[()][0-9A-Za-z]/g, '')
+    .replace(/\r/g, '')
+    .replace(/[\x00-\x08\x0b-\x1f]/g, '');
+}
+
+/**
+ * 명령 출력의 사람용 정리 — ANSI 제거 + zsh partial-line 마크 잔재 절단.
+ * zsh는 매 프롬프트 전에 '%'+패딩+CR+지우개(ESC[K])를 찍는데, 스트립이
+ * 지우개만 없애면 '%'와 패딩이 꼬리에 남는다. 줄머리의 '%'만 자르므로
+ * "100%" 같은 실데이터는 건드리지 않는다.
+ */
+export function cleanShellOutput(text) {
+  return stripAnsi(text).replace(/(?:\n|^)%[ ]*$/, '').replace(/\s+$/, '');
+}
+
 export function hasFlag(flag) {
   if (flag === '--json') return GLOBAL.json;
   return process.argv.includes(flag);
