@@ -34,6 +34,8 @@ export interface WorkspaceChangeEvent {
   /** Full workspace state — the server never sends diffs. */
   workspace?: { id: string; [key: string]: unknown };
   deletedId?: string;
+  /** 탭 재배치: 전체 id 순열 (diff 아님 — 순서 전체를 다시 말한다). */
+  order?: string[];
 }
 
 export interface AgentStateEvent {

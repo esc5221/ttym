@@ -867,6 +867,25 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
+  // PATCH /api/workspaces/order — 탭 재배치. 전체 순열, 집합 불일치는 409.
+  if (path === '/api/workspaces/order' && req.method === 'PATCH') {
+    readBody().then((body) => {
+      try {
+        const { ids } = JSON.parse(body);
+        if (!Array.isArray(ids) || !ids.every((x) => typeof x === 'string')) {
+          json(400, { error: 'body must be {ids: string[]}' }); return;
+        }
+        if (!workspaceStore.reorder(ids)) {
+          json(409, { error: 'ids do not match the current workspace set' }); return;
+        }
+        json(200, { ok: true });
+      } catch {
+        json(400, { error: 'invalid body' });
+      }
+    });
+    return true;
+  }
+
   // POST /api/workspaces
   if (path === '/api/workspaces' && req.method === 'POST') {
     readBody().then((body) => {

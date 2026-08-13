@@ -15,7 +15,7 @@ import {
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
-import { actionBtnStyle, tabStyle, AGENT_COLORS, API_BASE, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { actionBtnStyle, tabStyle, AGENT_COLORS, API_BASE, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
 import { MapPage } from './MapPage.js';
 import { SettingsModal } from './SettingsModal.js';
@@ -884,6 +884,13 @@ function App() {
     if (!mux) return;
     return mux.onWorkspace((event) => {
       setWorkspaces((prev) => {
+        if (event.order) {
+          // 서버가 부른 순서 전체 — 모르는 id(경합 생성분)는 꼬리에 보존
+          const byId = new Map(prev.map((w) => [w.id, w]));
+          const ordered = (event.order as string[]).map((id) => byId.get(id)).filter(Boolean) as Workspace[];
+          const rest = prev.filter((w) => !(event.order as string[]).includes(w.id));
+          return [...ordered, ...rest];
+        }
         if (event.deletedId) return prev.filter((w) => w.id !== event.deletedId);
         const next = event.workspace as unknown as Workspace | undefined;
         if (!next) return prev;
@@ -918,6 +925,55 @@ function App() {
     }) : undefined;
     return () => { cancelled = true; window.clearInterval(fallback); unsubscribe?.(); };
   }, [connected, workspaces.map((w) => w.id + ':' + layoutToSessionIds(w.layout).join('.')).join('|')]);
+
+  // ── 탭 드래그 재배치 — 4px 문턱 전까지는 클릭/더블클릭 문법 그대로 ──
+  const [dragTabId, setDragTabId] = useState<string | null>(null);
+  const suppressTabClick = useRef(false);
+  const beginTabDrag = useCallback((id: string, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const startX = e.clientX;
+    let moved = false;
+    const onMove = (ev: MouseEvent) => {
+      if (!moved && Math.abs(ev.clientX - startX) < 4) return;
+      if (!moved) { moved = true; suppressTabClick.current = true; setDragTabId(id); }
+      // 삽입 위치: 형제 탭들의 중점을 넘었는가. 상태 재배열 → 리렌더 → 다음
+      // move가 새 DOM을 재측정 — 반복 수렴이라 좌우 어느 방향도 자연스럽다.
+      const tabs = [...document.querySelectorAll('[data-ws-tab]')] as HTMLElement[];
+      const ids = tabs.map((t) => t.dataset.wsTab!);
+      const from = ids.indexOf(id);
+      if (from === -1) return;
+      let to = from;
+      tabs.forEach((el, i) => {
+        const r = el.getBoundingClientRect();
+        const mid = r.left + r.width / 2;
+        if (i < from && ev.clientX < mid) to = Math.min(to, i);
+        else if (i > from && ev.clientX > mid) to = Math.max(to, i);
+      });
+      if (to !== from) {
+        setWorkspaces((prev) => {
+          const arr = prev.slice();
+          const at = arr.findIndex((w) => w.id === id);
+          if (at === -1) return prev;
+          const [item] = arr.splice(at, 1);
+          arr.splice(to, 0, item);
+          return arr;
+        });
+      }
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setDragTabId(null);
+      if (moved) {
+        setWorkspaces((prev) => {
+          void apiReorderWorkspaces(prev.map((w) => w.id));
+          return prev;
+        });
+      }
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, []);
 
   const createWorkspaceTab = useCallback(async () => {
     const id = uuid().slice(0, 8);
@@ -1092,9 +1148,18 @@ function App() {
           return (
             <button
               key={ws.id}
-              onClick={() => navigate({ page: 'workspace', id: ws.id })}
-              style={{ ...tabStyle, ...(active ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}
-              title={`${workspaceDisplayLabel(ws)}${IS_NATIVE ? ` · ⌘${i + 2}` : ''} · 더블클릭: 이름 변경`}
+              data-ws-tab={ws.id}
+              onMouseDown={(e) => beginTabDrag(ws.id, e)}
+              onClick={() => {
+                if (suppressTabClick.current) { suppressTabClick.current = false; return; }
+                navigate({ page: 'workspace', id: ws.id });
+              }}
+              style={{
+                ...tabStyle,
+                ...(active ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null),
+                ...(dragTabId === ws.id ? { opacity: 0.55, cursor: 'grabbing' } : null),
+              }}
+              title={`${workspaceDisplayLabel(ws)}${IS_NATIVE ? ` · ⌘${i + 2}` : ''} · 더블클릭: 이름 변경 · 드래그: 재배치`}
               onDoubleClick={() => { setRenamingId(ws.id); setRenameDraft(ws.name); }}
             >
               {dotColor ? (

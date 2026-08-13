@@ -817,6 +817,9 @@ describe('meta ownership over HTTP', () => {
 
   beforeEach(async () => {
     process.env.TTYM_RUNTIME_DIR = runtimeDir;
+    // TTYM_HOME 미설정이면 getHomeDir()가 진짜 ~/.ttym으로 떨어진다 —
+    // map-api-key 테스트가 개발 머신의 실키를 읽고(즉시 red) 최악엔 지운다.
+    process.env.TTYM_HOME = runtimeDir;
     server = await createServer(0);
   });
 
@@ -829,6 +832,7 @@ describe('meta ownership over HTTP', () => {
     await new Promise((r) => setTimeout(r, 200));
     try { rmSync(runtimeDir, { recursive: true }); } catch {}
     delete process.env.TTYM_RUNTIME_DIR;
+    delete process.env.TTYM_HOME;
   });
 
   async function createSession(port: number): Promise<number> {

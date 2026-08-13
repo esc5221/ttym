@@ -79,6 +79,8 @@ export interface WorkspaceChangeEvent {
   generation: number;
   workspace?: WorkspaceInfo;
   deletedId?: string;
+  /** 탭 재배치: 전체 id 순열. 부분 diff가 아니라 순서 전체를 다시 말한다. */
+  order?: string[];
 }
 
 export class WorkspaceStore {
@@ -155,7 +157,7 @@ export class WorkspaceStore {
     return () => this.changeListeners.delete(listener);
   }
 
-  private emitChange(change: { workspace?: WorkspaceInfo; deletedId?: string }): void {
+  private emitChange(change: { workspace?: WorkspaceInfo; deletedId?: string; order?: string[] }): void {
     const event: WorkspaceChangeEvent = { generation: ++this.changeGeneration, ...change };
     for (const listener of this.changeListeners) {
       try { listener(event); } catch {}
@@ -174,6 +176,22 @@ export class WorkspaceStore {
 
   list(): WorkspaceInfo[] {
     return Array.from(this.workspaces.values());
+  }
+
+  /**
+   * 탭 순서 = Map 삽입순 = workspaces.json 배열순. 재배치는 순열 전체를 받아
+   * Map을 다시 짓는다 — id 집합이 현재와 정확히 일치하지 않으면 거부
+   * (동시 생성/삭제와 교차한 낡은 순열이 workspace를 증발시키는 사고 방지).
+   */
+  reorder(ids: string[]): boolean {
+    const current = new Set(this.workspaces.keys());
+    if (ids.length !== current.size || !ids.every((id) => current.has(id))) return false;
+    const rebuilt = new Map<string, WorkspaceInfo>();
+    for (const id of ids) rebuilt.set(id, this.workspaces.get(id)!);
+    this.workspaces = rebuilt;
+    this.scheduleSave();
+    this.emitChange({ order: ids });
+    return true;
   }
 
   listProjects(): Array<{ name: string; workspaceCount: number; memberCount: number }> {

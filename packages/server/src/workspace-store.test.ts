@@ -93,6 +93,32 @@ describe('WorkspaceStore', () => {
     expect(store.listProjects()).toEqual([{ name: 'ttym', workspaceCount: 1, memberCount: 3 }]);
   });
 
+  it('reorder rewrites tab order, rejects stale permutations, survives reload', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = new WorkspaceStore(dir);
+    const pane = { type: 'pane', sessionId: 0 } as const;
+    for (const n of ['a', 'b', 'c']) store.create(n, n, pane, 'p', []);
+    const events: unknown[] = [];
+    store.onChange((e) => events.push(e));
+
+    expect(store.reorder(['c', 'a', 'b'])).toBe(true);
+    expect(store.list().map((w) => w.id)).toEqual(['c', 'a', 'b']);
+    expect((events.at(-1) as { order?: string[] }).order).toEqual(['c', 'a', 'b']);
+
+    // 집합 불일치(누락·과잉·미지 id)는 전부 거부 — workspace 증발 방지
+    expect(store.reorder(['a', 'b'])).toBe(false);
+    expect(store.reorder(['a', 'b', 'c', 'd'])).toBe(false);
+    expect(store.reorder(['a', 'b', 'x'])).toBe(false);
+    expect(store.list().map((w) => w.id)).toEqual(['c', 'a', 'b']);
+
+    // 디스크에 남는가: save 디바운스 대기 후 재로드
+    await new Promise((r) => setTimeout(r, 50));
+    const reloaded = new WorkspaceStore(dir);
+    await reloaded.load();
+    expect(reloaded.list().map((w) => w.id)).toEqual(['c', 'a', 'b']);
+  });
+
   it('supports atomic member add, rename, and remove without clobbering siblings', () => {
     const dir = runtimeDir();
     dirs.push(dir);

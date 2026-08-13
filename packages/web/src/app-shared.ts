@@ -152,6 +152,14 @@ export async function fetchWorkspaces(): Promise<Workspace[]> {
   } catch { return []; }
 }
 
+export async function apiReorderWorkspaces(ids: string[]): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/api/workspaces/order`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }),
+    });
+  } catch { /* 실패 시 다음 push가 서버 순서로 되돌린다 — 낙관적 UI의 안전망 */ }
+}
+
 export async function apiCreateWorkspace(ws: { id: string; name: string; layout: LayoutNode }): Promise<Workspace | null> {
   try {
     return await api.createWorkspace(API_BASE, { id: ws.id, name: ws.name, layout: ws.layout }) as Workspace;
