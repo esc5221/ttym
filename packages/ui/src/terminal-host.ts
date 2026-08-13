@@ -143,6 +143,8 @@ export class TerminalHost {
   private readonly fit: FitAddon;
   private webgl: WebglAddon | undefined;
   private searchAddon: SearchAddon | undefined;
+  /** 쉘 통합(OSC 133;A)이 심는 프롬프트 경계 marker — ⌘↑/⌘↓ 점프의 좌표계. */
+  private commandMarkers: import('@xterm/xterm').IMarker[] = [];
   /** 찾기바가 구독한다: (activeIndex, total). 인덱스는 0-기준, 결과 없으면 (-1, 0). */
   onSearchResults: ((index: number, count: number) => void) | undefined;
   private opts: HostOptions;
@@ -190,6 +192,13 @@ export class TerminalHost {
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
+
+    // 서버와 같은 신호를 클라도 직접 읽는다 — 와이어 변경 없이 명령 경계를 안다.
+    // A(프롬프트 시작)마다 marker 하나. 스크롤백에서 잘려나가면 xterm이 알아서 폐기.
+    this.term.parser.registerOscHandler(133, (data) => {
+      if (data === 'A') this.commandMarkers.push(this.term.registerMarker(0));
+      return true;
+    });
 
     this.localEcho = new LocalEchoController({
       writeOptimistic: (text) => this.term.write(text),
@@ -393,6 +402,53 @@ export class TerminalHost {
   clearSearch() {
     this.searchAddon?.clearDecorations();
     this.onSearchResults?.(-1, 0);
+  }
+
+  /** ⌘↑/⌘↓: 이전/다음 명령 경계로 스크롤. 경계 = OSC 133;A 프롬프트 줄. */
+  jumpCommand(dir: -1 | 1) {
+    this.commandMarkers = this.commandMarkers.filter((m) => !m.isDisposed);
+    const markers = [...this.commandMarkers].sort((a, b) => a.line - b.line);
+    if (markers.length === 0) return;
+    const here = this.term.buffer.active.viewportY;
+    const target = dir === -1
+      ? [...markers].reverse().find((m) => m.line < here)
+      : markers.find((m) => m.line > here);
+    if (target) {
+      this.term.scrollToLine(target.line);
+      this.flashLine(target);
+    } else if (dir === 1) {
+      this.term.scrollToBottom();
+      const last = markers[markers.length - 1];
+      if (last) this.flashLine(last);
+    }
+  }
+
+  /** 착지 표시 — 없으면 점프했는지 화면이 말해주지 않는다. 줄 전체를 잠깐 물들이고 페이드아웃. */
+  private flashLine(marker: import('@xterm/xterm').IMarker) {
+    try {
+      const deco = this.term.registerDecoration({ marker, width: this.term.cols, layer: 'top' });
+      if (!deco) return;
+      deco.onRender((el) => {
+        if (el.dataset.flash) return; // onRender는 프레임마다 불린다 — 연출은 1회만
+        el.dataset.flash = '1';
+        // 앱 전역이 transition:none!important라 인라인으론 못 이긴다 —
+        // index.html의 .jump-flash 화이트리스트가 트랜지션의 실소유자.
+        el.classList.add('jump-flash');
+        el.style.background = 'rgba(0, 122, 204, 0.42)';
+        el.style.pointerEvents = 'none';
+        el.style.opacity = '0';
+        // reflow로 시작점(0)을 먼저 커밋 — 같은 프레임에 0→1을 쓰면
+        // 브라우저가 트랜지션 없이 1로 직행한다
+        void el.offsetHeight;
+        el.style.opacity = '1';
+      });
+      // in 160ms → hold ~340ms → out 600ms: 펄스 하나로 읽히는 리듬
+      setTimeout(() => {
+        const el = deco.element;
+        if (el) { el.classList.add('jump-flash-out'); el.style.opacity = '0'; }
+      }, 500);
+      setTimeout(() => { try { deco.dispose(); } catch {} }, 1200);
+    } catch {}
   }
 
   focusTerminal() {

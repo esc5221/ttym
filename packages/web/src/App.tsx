@@ -974,6 +974,11 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
       const meta = e.metaKey || e.ctrlKey;
       // ⌘F: 포커스 pane 검색. 브라우저 찾기는 이 페이지에선 캔버스라 무용 —
       // 가로채도 잃는 것이 없다. pane이 없으면 브라우저 기본 동작 유지.
+      if (meta && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && focusedSid !== null && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        getHost(focusedSid)?.jumpCommand(e.key === 'ArrowUp' ? -1 : 1);
+        return;
+      }
       if (meta && e.key === 'f' && !e.shiftKey && focusedSid !== null) {
         e.preventDefault();
         setSearch({ sid: focusedSid, query: '', index: -1, count: 0 });

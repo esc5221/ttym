@@ -12,6 +12,9 @@
       /* 행동 버튼은 hover에서만 — 상태 표시(점·bell)는 항상 보인다. */
       .reveal { opacity: 0; pointer-events: none; transition: opacity .12s ease !important; }
       .reveal-parent:hover .reveal { opacity: 1; pointer-events: auto; }
+      /* 명령 점프 착지 펄스 — 전역 transition:none의 화이트리스트 예외 */
+      .jump-flash { transition: opacity 160ms ease-in !important; }
+      .jump-flash.jump-flash-out { transition: opacity 600ms ease-out !important; }
       .morph-hl { transition: top .18s cubic-bezier(.2,.8,.25,1), left .18s cubic-bezier(.2,.8,.25,1), width .18s cubic-bezier(.2,.8,.25,1), height .18s cubic-bezier(.2,.8,.25,1), opacity .15s ease, background .18s ease, border-color .18s ease, border-radius .18s ease !important; }
       @keyframes agent-pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
     html, body { min-height: 100%; background: var(--bg0, #1e1e1e); overflow-x: hidden; overflow-y: auto; }

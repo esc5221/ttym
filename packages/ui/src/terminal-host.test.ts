@@ -16,6 +16,11 @@ vi.mock('@xterm/xterm', () => {
     open() {}
     loadAddon() {}
     attachCustomKeyEventHandler() {}
+    parser = { registerOscHandler() { return { dispose() {} }; } };
+    buffer = { active: { viewportY: 0 } };
+    registerMarker() { return { line: 0, isDisposed: false, dispose() {} }; }
+    scrollToLine() {}
+    scrollToBottom() {}
     dispose() {}
     refresh() {}
     onBell() { return { dispose() {} }; }
