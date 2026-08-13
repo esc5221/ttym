@@ -7,7 +7,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>ttym map refresh</string>
+    <string>"$HOME/.local/bin/ttym" map refresh</string>
   </array>
   <key>StartInterval</key><integer>600</integer>
   <key>RunAtLoad</key><false/>
