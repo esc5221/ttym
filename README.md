@@ -361,8 +361,21 @@ pnpm test                     # vitest — spawns real holders, real PTYs, repla
 pnpm test:e2e                 # Playwright
 pnpm --dir packages/server dev
 pnpm --dir packages/web dev   # browser app (Vite, separate port)
-pnpm desktop:dev              # Tauri app
+pnpm desktop:dev              # Tauri app (dev shell; point it with TTYM_PORT)
 ```
+
+### Desktop release
+
+```bash
+pnpm desktop:build            # tauri build → .app  (runs scripts/build.sh first,
+                              #  so the bundled fallback dist ships current)
+ditto packages/desktop/src-tauri/target/release/bundle/macos/ttym.app /Applications/ttym.app
+```
+
+When to rebuild: the app is a native shell around the *served* web UI, so web
+changes reach it through a normal server deploy — no rebuild. Rebuild only when
+`packages/desktop/src-tauri` changes, or to refresh the bundled `dist/` the app
+uses to bootstrap a server when none is running.
 
 pnpm workspace members: the 8 `packages/*` plus the Rust `holder/`.
 
