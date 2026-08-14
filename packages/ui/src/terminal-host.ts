@@ -44,8 +44,10 @@ export interface HostOptions {
    * fit(기본): 이 뷰가 pane 크기로 PTY를 리사이즈하는 주도자다.
    * follow: 서버 기하가 진실이고 이 뷰는 추종만 한다 — attach에 cols를 안 싣고,
    * fit도 resize 전송도 안 한다. 모바일이 데스크톱 화면을 깨지 않는 조건.
+   * borrow: fit처럼 굴되 resize에 빌림 플래그를 실어, 서버가 이전 기하를
+   * 기억한다 — follow로 돌아가거나 떠나면 자동 복원 (폰의 [맞춤] 토글).
    */
-  geometry?: 'fit' | 'follow';
+  geometry?: 'fit' | 'follow' | 'borrow';
 }
 
 const registry = new Map<number, TerminalHost>();
@@ -374,7 +376,17 @@ export class TerminalHost {
     }
     if (prev.geometry !== opts.geometry) {
       this.syncWrapperSizing();
+      if (prev.geometry === 'borrow' && opts.geometry === 'follow') {
+        // 반납 — 서버가 이전 기하 복원 + 브로드캐스트, follow가 그걸 받아 입는다
+        this.mux.releaseGeometry(this.sessionId);
+      }
       if (opts.geometry !== 'follow') this.scheduleFit();
+      // follow↔borrow 는 resize 구독 유무가 달라진다 — 입력 배선을 다시 짠다
+      if (this.stream === 'attached' || this.stream === 'paused') {
+        for (const d of this.inputDisposables) d.dispose();
+        this.inputDisposables = [];
+        this.wireInput();
+      }
     }
     if (prev.enableWebgl !== opts.enableWebgl && this.opened) {
       if (opts.enableWebgl) this.maybeEnableWebgl();
@@ -751,7 +763,8 @@ export class TerminalHost {
       this.mux.send(this.sessionId, bytes);
     }));
     if (this.opts.geometry !== 'follow') {
-      this.inputDisposables.push(this.term.onResize(({ cols, rows }) => this.mux.resize(this.sessionId, cols, rows)));
+      this.inputDisposables.push(this.term.onResize(({ cols, rows }) =>
+        this.mux.resize(this.sessionId, cols, rows, this.opts.geometry === 'borrow')));
     }
   }
 }

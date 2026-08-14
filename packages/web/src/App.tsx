@@ -89,6 +89,8 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   const [focusedSid, setFocusedSid] = useState<number | null>(null);
   const [zoomedSid, setZoomedSid] = useState<number | null>(null);
   const narrowLayout = useNarrow();
+  // 폰의 [맞춤] 토글: 이 pane의 PTY를 폰 크기로 빌려 쓴다 (떠나면 자동 반납)
+  const [fitSids, setFitSids] = useState<Set<number>>(new Set);
   const [attachOpen, setAttachOpen] = useState(false);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [standaloneSessions, setStandaloneSessions] = useState<Array<{ id: number; cwd?: string }>>([]);
@@ -522,6 +524,17 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             ) : null}
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('right', sid); }} style={miniLinkBtnStyle} title="split right">│</button>
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('down', sid); }} style={miniLinkBtnStyle} title="split down">─</button>
+            {IS_COARSE ? (
+              <button
+                className="reveal"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setFitSids((prev) => { const next = new Set(prev); if (next.has(sid)) next.delete(sid); else next.add(sid); return next; });
+                }}
+                style={{ ...miniLinkBtnStyle, ...(fitSids.has(sid) ? { color: 'var(--accent)' } : null) }}
+                title="이 화면 크기로 빌려쓰기 (떠나면 원상복구)"
+              >{fitSids.has(sid) ? '원본' : '맞춤'}</button>
+            ) : null}
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={miniLinkBtnStyle} title="detach (세션 유지)">detach</button>
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void copySessionUrl(sid); }} style={miniLinkBtnStyle}>copy</button>
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
@@ -533,7 +546,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
               mux={mux}
               attachId={sid}
               fontSize={IS_COARSE ? 14 : fontSize}
-              geometry={IS_COARSE ? 'follow' : 'fit'}
+              geometry={IS_COARSE ? (fitSids.has(sid) ? 'borrow' : 'follow') : 'fit'}
               enableWebgl={!IS_COARSE}
               localEcho={localEchoEnabled}
               onExit={() => setDeadSessions((prev) => new Set(prev).add(sid))}
@@ -551,7 +564,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, fileDropSid, search, bells, mux, localEchoEnabled, fontSize, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (

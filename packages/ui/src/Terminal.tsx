@@ -20,8 +20,8 @@ export interface TerminalProps {
    */
   enableWebgl?: boolean;
   localEcho?: boolean;
-  /** fit(기본) | follow — follow는 서버 기하 추종, resize를 절대 보내지 않는다 (모바일). */
-  geometry?: 'fit' | 'follow';
+  /** fit(기본) | follow(서버 기하 추종) | borrow(빌려쓰기 — 반납 시 자동 복원). */
+  geometry?: 'fit' | 'follow' | 'borrow';
   className?: string;
   style?: React.CSSProperties;
   onCreated?: (sessionId: number) => void;
@@ -116,7 +116,7 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
 
   useEffect(() => {
     hostRef.current?.applyOptions({ mode, fontSize, enableWebgl, localEcho, geometry });
-  }, [mode, fontSize, enableWebgl, localEcho]);
+  }, [mode, fontSize, enableWebgl, localEcho, geometry]);
 
   return (
     <div

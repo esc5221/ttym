@@ -1725,13 +1725,17 @@ export async function createServer(port: number): Promise<TtymServer> {
           if (payload.length >= 4) {
             const cols = (payload[0] | (payload[1] << 8));
             const rows = (payload[2] | (payload[3] << 8));
-            if (cols > 0 && rows > 0) {
-              const session = manager.get(sessionId);
-              if (session && !session.isDead) {
-                // readonly viewer는 resize 무시
-                const viewer = session.getViewer(viewerId);
-                if (viewer && viewer.mode === 'readwrite') {
-                  session.resize(cols, rows);
+            // 5번째 바이트(선택): 0/부재 = 보통 resize · 1 = 빌림 · 2 = 반납.
+            // 구 클라이언트는 4바이트만 보내므로 완전 하위호환.
+            const flag = payload.length >= 5 ? payload[4] : 0;
+            const session = manager.get(sessionId);
+            if (session && !session.isDead) {
+              const viewer = session.getViewer(viewerId);
+              if (viewer && viewer.mode === 'readwrite') {
+                if (flag === 2) session.releaseBorrow(viewerId);
+                else if (cols > 0 && rows > 0) {
+                  if (flag === 1) session.borrowResize(viewerId, cols, rows);
+                  else session.resize(cols, rows);
                 }
               }
             }

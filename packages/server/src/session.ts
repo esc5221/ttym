@@ -713,9 +713,28 @@ export class Session {
 
   removeViewer(viewerId: string): void {
     this.viewers.delete(viewerId);
+    this.releaseBorrow(viewerId); // 빌린 채 떠나면 자동 반납 — 데스크톱 원상복구
     if (this.viewers.size === 0) {
       this._detachedAt = Date.now();
     }
+  }
+
+  // ── 기하 빌림 장부 — 폰의 [맞춤] 토글이 PTY를 빌려 쓰고 돌려놓는다 ──
+  private borrow: { prevCols: number; prevRows: number; viewerId: string } | null = null;
+
+  /** 빌림 resize: 최초 1회 이전 기하를 기억한다. 같은/다른 viewer의 재빌림은 장부 갱신만. */
+  borrowResize(viewerId: string, cols: number, rows: number): void {
+    if (!this.borrow) this.borrow = { prevCols: this._cols, prevRows: this._rows, viewerId };
+    else this.borrow.viewerId = viewerId;
+    this.resize(cols, rows);
+  }
+
+  /** 반납: 그 viewer가 빌린 상태일 때만 이전 기하로 복원 (브로드캐스트는 resize가 한다). */
+  releaseBorrow(viewerId: string): void {
+    if (!this.borrow || this.borrow.viewerId !== viewerId) return;
+    const { prevCols, prevRows } = this.borrow;
+    this.borrow = null;
+    this.resize(prevCols, prevRows);
   }
 
   hasViewer(viewerId: string): boolean { return this.viewers.has(viewerId); }

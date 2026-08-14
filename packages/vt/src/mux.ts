@@ -479,13 +479,20 @@ export class TerminalMux {
     }
   }
 
-  resize(sessionId: number, cols: number, rows: number) {
+  resize(sessionId: number, cols: number, rows: number, borrow = false) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
-    const payload = new Uint8Array([
+    const bytes = [
       cols & 0xff, (cols >>> 8) & 0xff,
       rows & 0xff, (rows >>> 8) & 0xff,
-    ]);
-    this.sendRaw(encode(sessionId, CMD.RESIZE, payload));
+    ];
+    if (borrow) bytes.push(1); // 5번째 바이트 = 빌림 플래그 (서버가 이전 기하를 기억)
+    this.sendRaw(encode(sessionId, CMD.RESIZE, new Uint8Array(bytes)));
+  }
+
+  /** 빌림 반납 — 서버가 기억해둔 이전 기하로 복원하고 전 뷰어에 브로드캐스트한다. */
+  releaseGeometry(sessionId: number) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.sendRaw(encode(sessionId, CMD.RESIZE, new Uint8Array([0, 0, 0, 0, 2])));
   }
 
   pause(sessionId: number) {
