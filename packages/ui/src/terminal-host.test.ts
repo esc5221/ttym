@@ -93,6 +93,8 @@ function fakeElement(): HTMLElement {
     isConnected: false,
     parentElement: null,
     appendChild(child: Record<string, unknown>) { child.parentElement = el; },
+    querySelector() { return null; },
+    addEventListener() {},
     remove() {},
   };
   return el as unknown as HTMLElement;
