@@ -18,7 +18,7 @@ import { execFile } from 'node:child_process';
 let mapRefreshInFlight = false;
 import { readFileSync as readFileSyncFs, writeFileSync as writeFileSyncFs, unlinkSync, chmodSync, mkdirSync } from 'node:fs';
 import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
-import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
+import { API_VERSION, MIN_API_VERSION, PRODUCT_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
@@ -320,7 +320,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
 
   // GET /api/version — lets a client refuse an incompatible server
   if (path === '/api/version' && req.method === 'GET') {
-    json(200, { apiVersion: API_VERSION, role: 'ttym-server', ...(bootSafeMode ? { safeMode: true } : {}) });
+    json(200, { apiVersion: API_VERSION, minApiVersion: MIN_API_VERSION, version: PRODUCT_VERSION, role: 'ttym-server', ...(bootSafeMode ? { safeMode: true } : {}) });
     return true;
   }
 

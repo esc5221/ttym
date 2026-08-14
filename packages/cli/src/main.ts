@@ -8,6 +8,7 @@ import { cmdMeta, cmdCurrent, cmdWorkspace } from './workspace.js';
 import { cmdAgent, cmdReportStop } from './agent.js';
 import { cmdMap } from './map.js';
 import { cmdService } from './service.js';
+import { cmdUpgrade, cmdVersion } from './upgrade.js';
 import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr, cmdCommandsAddr, cmdOutputAddr } from './sessions.js';
 
 // ───── Main ─────
@@ -35,6 +36,8 @@ function printHelp() {
   console.log('  meta <id> [--set k=v]        Session metadata (get/set)');
   console.log('  agent install <agent>        Install agent hook (claude, codex)');
   console.log('  service install|uninstall|status  Supervised residency: boot at login, restart on crash');
+  console.log('  upgrade [--check|--rollback]  Swap in a new build, sessions stay alive');
+  console.log('  version [--json]             CLI + server versions');
   console.log('  start / stop / restart / log Server lifecycle (start is one-shot; entry verbs autostart)');
   console.log('  help                         This text');
 }
@@ -76,6 +79,8 @@ switch (cmd) {
     break;
   case 'map':     await cmdMap(); break;
   case 'service': await cmdService(); break;
+  case 'upgrade': await cmdUpgrade(); break;
+  case 'version': await cmdVersion(); break;
   case 'log':     cmdLog(); break;
   default: {
     const interactive = process.stdin.isTTY && process.stdout.isTTY;

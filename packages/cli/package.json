@@ -1,9 +1,11 @@
 {
   "name": "@ttym/cli",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
-  "bin": { "ttym": "./src/main.js" },
+  "bin": {
+    "ttym": "./src/main.js"
+  },
   "dependencies": {
     "@ttym/api": "workspace:*",
     "@ttym/protocol": "workspace:*",

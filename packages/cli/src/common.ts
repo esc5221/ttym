@@ -147,10 +147,15 @@ export async function ensureCompatibleServer(port) {
     }
     return; // unreachable server: let the command fail with its own message
   }
-  if (info && typeof info.apiVersion === 'number' && info.apiVersion !== API_VERSION) {
-    console.error(`error: server speaks api v${info.apiVersion}, this CLI speaks v${API_VERSION}`);
-    console.error('       restart the server from the same build as this CLI');
-    process.exit(EXIT.VERSION);
+  if (info && typeof info.apiVersion === 'number') {
+    // 정확일치가 아니라 범위: 서버는 [minApiVersion, apiVersion]을 이해한다.
+    // 비파괴 업그레이드(min 유지, api만 상승)에 구 CLI가 죽지 않게.
+    const min = typeof info.minApiVersion === 'number' ? info.minApiVersion : info.apiVersion;
+    if (API_VERSION < min || API_VERSION > info.apiVersion) {
+      console.error(`error: server speaks api v${min}..v${info.apiVersion}, this CLI speaks v${API_VERSION}`);
+      console.error('       restart the server from the same build as this CLI');
+      process.exit(EXIT.VERSION);
+    }
   }
 }
 

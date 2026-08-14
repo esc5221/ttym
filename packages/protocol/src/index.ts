@@ -21,6 +21,12 @@
  * to tell.
  */
 export const API_VERSION = 3;
+/** 서버가 아직 이해하는 가장 오래된 클라이언트 계약 — 비파괴 업그레이드는
+ *  API_VERSION만 올리고 이 값은 유지해, 직전 CLI가 exit 5로 죽지 않게 한다. */
+export const MIN_API_VERSION = 3;
+
+/** 제품 버전 — 전 패키지 단일 원천. 릴리즈는 이 값과 태그를 함께 올린다. */
+export const PRODUCT_VERSION = '0.3.0';
 
 export const CMD = {
   DATA: 0x00,

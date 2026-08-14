@@ -2,7 +2,7 @@
 set -eo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DIST="$ROOT/dist"
+DIST="${TTYM_DIST:-$ROOT/dist}"
 
 echo "=== ttym build ==="
 

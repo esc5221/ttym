@@ -22,5 +22,6 @@
     "esbuild": "^0.27.3",
     "playwright": "^1.58.2",
     "vitest": "^3.2.4"
-  }
+  },
+  "version": "0.3.0"
 }
