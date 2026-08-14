@@ -17,6 +17,7 @@ import {
 } from '@ttym/shared';
 import { actionBtnStyle, tabStyle, AGENT_COLORS, API_BASE, IS_COARSE, useNarrow, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
+import { KeyBar } from './KeyBar.js';
 import { MapPage } from './MapPage.js';
 import { SettingsModal } from './SettingsModal.js';
 
@@ -536,7 +537,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
               enableWebgl={!IS_COARSE}
               localEcho={localEchoEnabled}
               onExit={() => setDeadSessions((prev) => new Set(prev).add(sid))}
-              onBell={() => setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid)))}
+              onBell={() => { if (IS_COARSE) navigator.vibrate?.(60); setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid))); }}
             />
           ) : (
             <div style={emptyPaneStyle}>
@@ -611,6 +612,12 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
           <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'var(--mono)' }}>loading…</div>
         )}
       </div>
+      {IS_COARSE && focusedSid !== null ? (
+        <KeyBar
+          sid={focusedSid}
+          onSearch={() => setSearch({ sid: focusedSid, query: '', index: -1, count: 0 })}
+        />
+      ) : null}
 
     </div>
   );

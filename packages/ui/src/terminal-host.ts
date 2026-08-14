@@ -468,6 +468,40 @@ export class TerminalHost {
     } catch {}
   }
 
+  // ── 모바일 키바용 입력 합성 — 소프트키보드가 못 내는 키를 와이어로 직접 ──
+
+  private ctrlArmed: (() => void) | null = null;
+
+  /** 다음 1글자 입력을 Ctrl 코드로 변환한다 (래치). onDone은 소비/해제 시 호출. */
+  armCtrl(onDone?: () => void) {
+    this.ctrlArmed = onDone ?? (() => {});
+  }
+
+  disarmCtrl() {
+    const done = this.ctrlArmed;
+    this.ctrlArmed = null;
+    done?.();
+  }
+
+  /** TUI의 application cursor mode(DECCKM)까지 존중하는 특수키 전송. */
+  sendKey(key: 'esc' | 'tab' | 'up' | 'down' | 'left' | 'right' | 'enter') {
+    if (this.opts.mode === 'readonly') return;
+    const modes = (this.term as unknown as { modes?: { applicationCursorKeysMode?: boolean } }).modes;
+    const app = modes?.applicationCursorKeysMode === true;
+    const arrows: Record<string, string> = { up: 'A', down: 'B', right: 'C', left: 'D' };
+    const bytes =
+      key === 'esc' ? '\x1b' :
+      key === 'tab' ? '\t' :
+      key === 'enter' ? '\r' :
+      (app ? '\x1bO' : '\x1b[') + arrows[key];
+    this.mux.send(this.sessionId, bytes);
+  }
+
+  sendText(text: string) {
+    if (this.opts.mode === 'readonly' || !text) return;
+    this.mux.send(this.sessionId, text);
+  }
+
   focusTerminal() {
     try { this.term.focus(); } catch {}
   }
@@ -633,6 +667,12 @@ export class TerminalHost {
       return false;
     });
     this.inputDisposables.push(this.term.onData((data) => {
+      // Ctrl 래치: 키바의 Ctrl 다음 첫 글자를 제어문자로 (a→^A). 대상이 아니면 해제만.
+      if (this.ctrlArmed !== null && data.length === 1) {
+        const code = data.toUpperCase().charCodeAt(0);
+        if (code >= 63 && code <= 95) data = String.fromCharCode(code & 0x1f);
+        this.disarmCtrl();
+      }
       this.localEcho.handleLocalInput(data);
       this.mux.send(this.sessionId, data);
     }));
