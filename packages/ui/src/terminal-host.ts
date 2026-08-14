@@ -305,6 +305,8 @@ export class TerminalHost {
       this.attachRetries = 0;
       this.applyFollowGeometry(info.cols, info.rows);
       this.wireInput();
+      // 초기 카메라: 좌상단 모서리가 아니라 커서(=일이 벌어지는 곳)에서 시작
+      requestAnimationFrame(() => this.followCursor());
     }).catch(() => {
       if (this.disposed || this.stream !== 'attaching') return;
       // Transient failure (timeout, reconnect race) — back to idle and retry
@@ -468,6 +470,66 @@ export class TerminalHost {
     } catch {}
   }
 
+  // ── 커서 카메라 (follow 모드) ──
+  // 서버 기하 그대로의 큰 화면에서 폰 pane은 조각만 본다. 커서가 있는 곳이
+  // "일어나는 곳"이니, 출력이 흐를 때마다 스크롤 컨테이너를 커서로 데려간다.
+  // 사용자가 방금 손으로 훑는 중이면 잠시 양보 — 카메라는 하인이지 주인이 아니다.
+
+  private cameraYieldUntil = 0;
+  private cameraWired = false;
+  private cameraProgrammatic = false;
+
+  private scrollParentEl(): HTMLElement | null {
+    let el: HTMLElement | null = this.wrapper.parentElement;
+    while (el) {
+      const cs = getComputedStyle(el);
+      if (/(auto|scroll)/.test(cs.overflowX + cs.overflowY)) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  private wireCamera() {
+    if (this.cameraWired || this.opts.geometry !== 'follow') return;
+    const sp = this.scrollParentEl();
+    if (!sp) return;
+    this.cameraWired = true;
+    const yieldNow = () => { this.cameraYieldUntil = Date.now() + 3000; };
+    sp.addEventListener('touchstart', yieldNow, { passive: true });
+    sp.addEventListener('wheel', yieldNow, { passive: true });
+    sp.addEventListener('scroll', () => {
+      // 우리가 움직인 스크롤은 양보 사유가 아니다
+      if (this.cameraProgrammatic) { this.cameraProgrammatic = false; return; }
+      yieldNow();
+    }, { passive: true });
+  }
+
+  followCursor() {
+    if (this.opts.geometry !== 'follow' || this.disposed) return;
+    if (Date.now() < this.cameraYieldUntil) return;
+    this.wireCamera();
+    const sp = this.scrollParentEl();
+    const screen = this.wrapper.querySelector('.xterm-screen') as HTMLElement | null;
+    if (!sp || !screen || this.term.cols === 0 || this.term.rows === 0) return;
+    const cellW = screen.clientWidth / this.term.cols;
+    const cellH = screen.clientHeight / this.term.rows;
+    if (!(cellW > 0) || !(cellH > 0)) return;
+    const buf = this.term.buffer.active;
+    const cx = buf.cursorX * cellW;
+    const cy = buf.cursorY * cellH;
+    const mW = 2 * cellW, mH = 2 * cellH;
+    let sl = sp.scrollLeft, st = sp.scrollTop;
+    if (cx < sl + mW) sl = Math.max(0, cx - mW);
+    else if (cx > sl + sp.clientWidth - mW) sl = cx - sp.clientWidth + mW;
+    if (cy < st + mH) st = Math.max(0, cy - mH);
+    else if (cy > st + sp.clientHeight - mH) st = cy - sp.clientHeight + mH;
+    if (Math.abs(sl - sp.scrollLeft) > 1 || Math.abs(st - sp.scrollTop) > 1) {
+      this.cameraProgrammatic = true;
+      sp.scrollLeft = sl;
+      sp.scrollTop = st;
+    }
+  }
+
   // ── 모바일 키바용 입력 합성 — 소프트키보드가 못 내는 키를 와이어로 직접 ──
 
   private ctrlArmed: (() => void) | null = null;
@@ -599,7 +661,10 @@ export class TerminalHost {
     if (this.writeRaf === null && this.writeBytes === 0 && data.length <= IMMEDIATE_WRITE_BYTES) {
       const seq = this.pendingAckSeq;
       this.pendingAckSeq = null;
-      this.term.write(data, () => { if (seq !== null) this.mux.ack(this.sessionId, seq); });
+      this.term.write(data, () => {
+        if (seq !== null) this.mux.ack(this.sessionId, seq);
+        this.followCursor();
+      });
       return;
     }
     this.writeChunks.push(data);
@@ -617,7 +682,10 @@ export class TerminalHost {
     this.writeBytes = 0;
     const seq = this.pendingAckSeq;
     this.pendingAckSeq = null;
-    this.term.write(merged, () => { if (seq !== null) this.mux.ack(this.sessionId, seq); });
+    this.term.write(merged, () => {
+      if (seq !== null) this.mux.ack(this.sessionId, seq);
+      this.followCursor();
+    });
   }
 
   private flushAckIfIdle() {

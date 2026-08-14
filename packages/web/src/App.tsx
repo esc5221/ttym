@@ -532,7 +532,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             <Terminal
               mux={mux}
               attachId={sid}
-              fontSize={IS_COARSE ? 12 : fontSize}
+              fontSize={IS_COARSE ? 14 : fontSize}
               geometry={IS_COARSE ? 'follow' : 'fit'}
               enableWebgl={!IS_COARSE}
               localEcho={localEchoEnabled}
