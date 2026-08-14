@@ -100,7 +100,7 @@ suite('cli end to end', () => {
     expect(out[0].target).toContain('suite');
   });
   it('sends input and reads it back from the screen', async () => {
-    ttym(['workspace', 'send', 'suite', 'sh', '--', 'echo E2E_ROUNDTRIP\n']);
+    ttym(['send', 'suite:sh', '--', 'echo E2E_ROUNDTRIP\n']);
     await until(async () => {
       const sessions = (await api('/api/sessions')) ?? [];
       if (sessions.length === 0) return false;
@@ -109,7 +109,7 @@ suite('cli end to end', () => {
     });
     // Poll the CLI path too: under load the render can land between the API
     // confirmation above and a single-shot read here.
-    await until(() => ttym(['workspace', 'screen', 'suite', 'sh']).includes('E2E_ROUNDTRIP'));
+    await until(() => ttym(['screen', 'suite:sh']).includes('E2E_ROUNDTRIP'));
   }, 20_000);
 
   it('structured output stays parseable', () => {

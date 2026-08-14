@@ -106,10 +106,9 @@ suite('CLI 계약', () => {
     expect(r.out).toContain('usage:');
   });
 
-  it('§2 terminate는 죽었고, 후계자를 알려준다', () => {
-    const r = run(['workspace', 'terminate', 'x', 'y']);
-    expect(r.code).toBe(2);
-    expect(r.out).toContain('workspace remove');
+  it('§2 사어들은 usage로 떨어진다 — terminate·workspace send 부활 금지', () => {
+    expect(run(['workspace', 'terminate', 'x', 'y']).code).toBe(2);
+    expect(run(['workspace', 'send', 'x', 'y', '--', 'z']).code).toBe(2);
   });
 
   // ── §3 주소의 의미 ────────────────────────────────────────────

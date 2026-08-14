@@ -142,8 +142,9 @@ export async function ensureCompatibleServer(port) {
     info = await apiRequest(apiBase(port), '/api/version', { signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
   } catch (err) {
     if (err instanceof ApiError) {
-      console.error('warning: server predates version reporting; upgrade it when convenient');
-      return;
+      // /api/version이 없다면 그건 ttym 서버가 아니거나 화석이다 — 호환 불가.
+      console.error('error: no version endpoint — not a ttym server this CLI can talk to');
+      process.exit(EXIT.VERSION);
     }
     return; // unreachable server: let the command fail with its own message
   }

@@ -68,19 +68,6 @@ interface V2StoreFile {
   workspaces: V2WorkspaceInfo[];
 }
 
-interface LegacyWorkspaceInfo {
-  id: string;
-  name: string;
-  layout: LayoutNode;
-  createdAt: number;
-  updatedAt: number;
-}
-
-interface LegacyStoreFile {
-  version: 1;
-  workspaces: LegacyWorkspaceInfo[];
-}
-
 // ───── WorkspaceStore ─────
 
 
@@ -108,16 +95,13 @@ export class WorkspaceStore {
   async load(): Promise<void> {
     try {
       const raw = await readFile(this.filePath, 'utf8');
-      const data = JSON.parse(raw) as StoreFile | V2StoreFile | LegacyStoreFile;
+      const data = JSON.parse(raw) as StoreFile | V2StoreFile;
       let entries: Array<WorkspaceInfo & { project?: string }> = [];
       if ((data as StoreFile).version === 3 && Array.isArray((data as StoreFile).workspaces)) {
         entries = (data as StoreFile).workspaces;
       } else if ((data as V2StoreFile).version === 2 && Array.isArray((data as V2StoreFile).workspaces)) {
         entries = (data as V2StoreFile).workspaces; // project 필드는 아래에서 폐기
         this.dirty = true; // 첫 save가 v3로 승격
-      } else if ((data as LegacyStoreFile).version === 1 && Array.isArray((data as LegacyStoreFile).workspaces)) {
-        entries = (data as LegacyStoreFile).workspaces.map((ws) => ({ ...ws, members: [] as WorkspaceMemberInfo[] }));
-        this.dirty = true;
       }
       for (const entry of entries) {
         const { project: _dropped, ...ws } = entry;

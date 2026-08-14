@@ -304,7 +304,6 @@ ttym workspace member rename <ws|--current> <m> --name <new>
 
 ttym workspace detach    <ws|--current> <m>   # drop membership, keep the session
 ttym workspace remove    <ws|--current> <m>   # drop membership, kill the session
-ttym workspace send/screen/await ...          # legacy syntax — coexists with colon addresses
 # `terminate` is gone — it was `remove` under a second name.
 ```
 

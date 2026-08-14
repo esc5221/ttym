@@ -5,7 +5,7 @@ import { EXIT, getPort } from './common.js';
 import { cmdStart, cmdStop, cmdRestart, cmdStatus, cmdLog } from './lifecycle.js';
 import { cmdAttach } from './attach.js';
 import { cmdMeta, cmdCurrent, cmdWorkspace } from './workspace.js';
-import { cmdAgent, cmdReportStop } from './agent.js';
+import { cmdAgent } from './agent.js';
 import { cmdMap } from './map.js';
 import { cmdService } from './service.js';
 import { cmdUpgrade, cmdVersion } from './upgrade.js';
@@ -71,12 +71,6 @@ switch (cmd) {
   case 'workspace': await cmdWorkspace(); break;
   case 'meta':    await cmdMeta(); break;
   case 'agent':   await cmdAgent(); break;
-  case 'hook':
-    // `hook report-stop` is the agent hook entry point; anything else is the
-    // legacy alias for `agent`.
-    if (process.argv[3] === 'report-stop') { await cmdReportStop(); break; }
-    await cmdAgent();
-    break;
   case 'map':     await cmdMap(); break;
   case 'service': await cmdService(); break;
   case 'upgrade': await cmdUpgrade(); break;

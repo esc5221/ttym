@@ -319,25 +319,3 @@ export async function cmdAgent() {
 
 // ───── Agent hook entry point ─────
 
-/**
- * Report that an agent finished a turn.
- *
- * Called by the installed hook scripts, not by hand — it exists so the hook
- * does not have to rediscover the server port or the internal endpoint. The
- * event name comes straight from the agent: Claude sends Stop when it answered
- * and StopFailure / SessionEnd when it did not, and the server settles the
- * waiting interaction accordingly.
- */
-export async function cmdReportStop() {
-  const sessionId = process.argv[4] || process.env.TTYM_SESSION_ID;
-  if (!sessionId) { console.error('session id required'); process.exit(EXIT.USAGE); }
-  const eventIdx = process.argv.indexOf('--event');
-  const event = eventIdx > 0 ? process.argv[eventIdx + 1] : 'Stop';
-  const port = getPort();
-  try {
-    await fetchPost(port, `/api/internal/sessions/${sessionId}/stop`, { event });
-  } catch (err) {
-    // A hook must never fail the agent's turn.
-    if (process.env.TTYM_HOOK_DEBUG) console.error(`stop report failed: ${err.message}`);
-  }
-}

@@ -269,7 +269,6 @@ ttym workspace member rename <ws|--current> <m> --name <new>
 
 ttym workspace detach    <ws|--current> <m>   # 멤버십만 해제, 세션 유지
 ttym workspace remove    <ws|--current> <m>   # 멤버십 해제 + 세션 종료
-ttym workspace send/screen/await ...          # 구 문법 — 콜론 주소와 공존
 # `terminate` 는 없어졌다 — `remove` 의 다른 이름이었다.
 ```
 

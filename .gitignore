@@ -1,11 +1,17 @@
 node_modules/
 dist/
+dist.prev/
+dist.next/
+dist.rolledback/
 .DS_Store
 *.tsbuildinfo
 holder/target/
 .omx/
 packages/desktop/node_modules/
 packages/desktop/dist/
+dist.prev/
+dist.next/
+dist.rolledback/
 packages/desktop/src-tauri/target/
 packages/desktop/src-tauri/gen/
 

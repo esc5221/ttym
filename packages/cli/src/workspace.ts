@@ -280,12 +280,6 @@ export async function cmdWorkspace() {
     return;
   }
 
-  if (action === 'terminate') {
-    // 처음부터 remove와 동일 동작이었다(v2 잔재). 이름 하나, 동작 하나.
-    console.error("`terminate` is gone — use: ttym workspace remove <workspace|--current> <member>");
-    process.exit(EXIT.USAGE);
-  }
-
   if (action === 'remove' || action === 'detach') {
     const workspace = await resolveWorkspace(port, args[0]);
     const member = requireMember(workspace, args[1]);
@@ -302,124 +296,6 @@ export async function cmdWorkspace() {
     const result = { ok: true, action, workspace: `${workspace.name}`, member: member.name, sessionId: member.sessionId };
     if (asJson) return printOutput(result, true);
     console.log(`${action}d ${workspace.name}/${member.name} (#${member.sessionId})`);
-    return;
-  }
-
-  if (action === 'send') {
-    const sep = args.indexOf('--');
-    const payload = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
-    const workspace = await resolveWorkspace(port, args[0]);
-    const member = requireMember(workspace, args[1]);
-    if (!payload) {
-      console.error('usage: ttym workspace send <workspace|--current> <member> -- "command\\n"');
-      process.exit(EXIT.USAGE);
-    }
-    const result = await fetchPost(port, `/api/sessions/${member.sessionId}/send`, { data: payload });
-    if (asJson) return printOutput(result, true);
-    console.log(`sent to ${workspace.name}/${member.name}`);
-    return;
-  }
-
-  if (action === 'await') {
-    const workspace = await resolveWorkspace(port, args[0]);
-    const member = requireMember(workspace, args[1]);
-    const sep = args.indexOf('--');
-    const payload = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
-    const timeoutMs = parseInt(readOption(args, '--timeout') || '120000', 10);
-
-    // The server owns the request/response pairing now: it marks the buffer,
-    // submits the prompt, and holds the reply until the agent's hook settles
-    // it. Nothing polls, so a fast answer comes back as fast as it lands.
-    const text = payload.replace(/[\r\n]+$/, '');
-
-    // 쉘 통합 세션이면 명령 실행 경로 — 완료 신호는 hook이 아니라 133;D다.
-    const shell = await shellAwait(port, member.sessionId, text, timeoutMs);
-    if (shell) {
-      const output = shell.output === null ? null : (hasFlag('--raw') ? shell.output : cleanShellOutput(shell.output));
-      const result = {
-        workspace: `${workspace.name}`,
-        member: member.name,
-        sessionId: member.sessionId,
-        interaction: null,
-        shell: shell.command ? {
-          n: shell.command.n, cmdline: shell.command.cmdline,
-          exitCode: shell.command.exitCode, durationMs: (shell.command.endedAt ?? 0) - shell.command.startedAt,
-          truncated: shell.truncated,
-        } : null,
-        completed: shell.completed === true,
-        screen: output,
-      };
-      if (asJson) return printOutput(result, true);
-      if (!shell.completed) {
-        console.error(`timeout: command still running after ${timeoutMs}ms`);
-        process.exit(EXIT.FAIL);
-      }
-      if (shell.command.exitCode !== null && shell.command.exitCode !== 0) console.error(`exit ${shell.command.exitCode}`);
-      if (output) process.stdout.write(output.endsWith('\n') ? output : output + '\n');
-      return;
-    }
-    // The server holds this request open until the agent's hook settles it, so
-    // the socket timeout has to outlast the interaction timeout, not the
-    // default 5s meant for ordinary calls.
-    const response = await fetchRequest(port, 'POST', `/api/sessions/${member.sessionId}/interactions`, {
-      prompt: text,
-      timeoutMs,
-      submit: 'cr',
-    }, timeoutMs + 15_000);
-    const interaction = response?.interaction ?? null;
-    const completed = interaction?.status === 'completed';
-
-    // A transcript read off a degraded screen (gap recovery, not yet
-    // repainted) is approximate — say so instead of letting it pass as exact.
-    if (interaction?.integrity === 'degraded') {
-      process.stderr.write('warning: screen integrity is degraded — transcript may be approximate\n');
-    }
-    // `--raw` predates transcripts and meant "the screen with its escapes".
-    // Keep that meaning, and fall back to it when the marked rows are gone.
-    let output = interaction?.transcript ?? null;
-    if (hasFlag('--raw') || output === null) {
-      const screen = await fetchJson(port, `/api/sessions/${member.sessionId}/screen`).catch(() => null);
-      output = screen?.screen ?? '';
-    }
-
-    const result = {
-      workspace: `${workspace.name}`,
-      member: member.name,
-      sessionId: member.sessionId,
-      interaction: interaction ? {
-        id: interaction.id,
-        status: interaction.status,
-        // 추출 품질은 숨기지 않는다 — 어디서 온 답인지, 화면이 온전했는지.
-        transcriptSource: interaction.transcriptSource ?? null,
-        integrity: interaction.integrity ?? null,
-      } : null,
-      completed,
-      screen: output,
-    };
-    if (asJson) return printOutput(result, true);
-    if (interaction?.status === 'pending') {
-      console.error(`timeout: still running after ${timeoutMs}ms — resume with id ${interaction.id}`);
-    } else if (interaction?.status === 'failed') {
-      console.error('agent ended the turn without answering');
-    } else if (interaction && interaction.transcript === null) {
-      console.error('transcript unavailable: the marked rows scrolled out of the buffer');
-    }
-    process.stdout.write(output);
-    if (output && !output.endsWith('\n')) process.stdout.write('\n');
-    return;
-  }
-
-  if (action === 'screen') {
-    const workspace = await resolveWorkspace(port, args[0]);
-    const member = requireMember(workspace, args[1]);
-    const result = await fetchJson(port, `/api/sessions/${member.sessionId}/screen`);
-    if (asJson) return printOutput({
-      workspace: `${workspace.name}`,
-      member: member.name,
-      sessionId: member.sessionId,
-      screen: result?.screen ?? '',
-    }, true);
-    process.stdout.write(result?.screen ?? '');
     return;
   }
 

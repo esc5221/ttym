@@ -18,7 +18,7 @@ scripts/           빌드·hook·fixture 캡처 스크립트
 docs/              architecture.md · adr-0001-membership.md (docs/local/은 비추적 산출물)
 ```
 
-새 CLI 문법(콜론 주소, 구 문법과 공존): `ttym new <name>` · `ttym split <ws:name> <name>` ·
+CLI 문법(콜론 주소가 유일한 문법): `ttym new <name>` · `ttym split <ws:name> <name>` ·
 `ttym send|await|screen <ws:name|:name|#id>`. 자세한 것은 docs/architecture.md.
 
 서버 기본 포트: 7690. PID/로그: `~/.ttym/`
@@ -49,11 +49,11 @@ ttym workspace detach --current <member>
 ### 명령 전송
 ```sh
 # zsh에는 \n
-ttym workspace send --current runner -- $'echo hello\n'
+ttym send :runner -- $'echo hello\n'
 
 # Claude/Codex TUI에는 텍스트 + \r (두 번 나눠 보내기)
-ttym workspace send --current claude-sub -- $'프롬프트 내용'
-ttym workspace send --current claude-sub -- $'\r'
+ttym send :claude-sub -- $'프롬프트 내용'
+ttym send :claude-sub -- $'\r'
 ```
 
 핵심: 인터랙티브 TUI(raw mode)는 Enter = CR(0x0d). 일반 쉘은 LF(0x0a).
@@ -68,9 +68,9 @@ send API(`POST /api/sessions/:id/send`)는 `Buffer.from(data)` — 이스케이�
 프롬프트 보내고 응답 완료까지 blocking 대기. `\r` 자동 append — 직접 붙일 필요 없음.
 
 ```sh
-ttym workspace await --current claude-sub --json -- '질문'
-ttym workspace await --current claude-sub --json --raw -- '질문'       # ANSI 원본
-ttym workspace await --current claude-sub --timeout 60000 --json -- '질문'
+ttym await :claude-sub --json -- '질문'
+ttym await :claude-sub --json --raw -- '질문'       # ANSI 원본
+ttym await :claude-sub --timeout 60000 --json -- '질문'
 ```
 
 동작 원리: meta.seq bump → send → Stop hook이 stopSeq 기록 → 폴링 감지 → screen 반환.

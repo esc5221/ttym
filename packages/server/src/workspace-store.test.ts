@@ -22,39 +22,6 @@ describe('WorkspaceStore', () => {
     }
   });
 
-  it('migrates legacy workspaces into default project with generated members', async () => {
-    const dir = runtimeDir();
-    dirs.push(dir);
-    writeFileSync(join(dir, 'workspaces.json'), JSON.stringify({
-      version: 1,
-      workspaces: [
-        {
-          id: 'ws1',
-          name: 'workspace 1',
-          layout: {
-            type: 'split',
-            axis: 'row',
-            sizes: [0.5, 0.5],
-            children: [
-              { type: 'pane', sessionId: 11 },
-              { type: 'pane', sessionId: 12 },
-            ],
-          },
-          createdAt: 1,
-          updatedAt: 2,
-        },
-      ],
-    }));
-
-    const store = new WorkspaceStore(dir);
-    await store.load();
-
-    const [workspace] = store.list();
-    expect('project' in workspace).toBe(false); // v3: project는 로드에서 폐기된다
-    expect(workspace.members.map((member) => member.sessionId)).toEqual([11, 12]);
-    expect(workspace.members.map((member) => member.name)).toEqual(['term-1', 'term-2']);
-  });
-
   it('reconciles members when layout changes and preserves existing names', () => {
     const dir = runtimeDir();
     dirs.push(dir);
