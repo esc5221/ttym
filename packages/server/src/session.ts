@@ -4,7 +4,7 @@ import { createConnection, Socket } from 'node:net';
 import { existsSync, openSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
+import { createRequire as nodeCreateRequire } from 'node:module';
 import headless from '@xterm/headless';
 const { Terminal } = headless;
 import { SerializeAddon } from '@xterm/addon-serialize';
@@ -229,7 +229,7 @@ function holderBin(): string {
   // 2. npm install: the platform package (esbuild pattern — optionalDependencies,
   //    never a postinstall download)
   try {
-    const req = createRequire(import.meta.url);
+    const req = nodeCreateRequire(import.meta.url);
     return req.resolve(`@ttym/holder-${process.platform}-${process.arch}/ttym-holder`);
   } catch {}
   // 3. Dev: relative to packages/server/src/
@@ -809,6 +809,14 @@ export class Session {
     };
   }
 
+  private geometryListeners = new Set<(cols: number, rows: number) => void>();
+
+  /** PTY 기하가 바뀔 때 — follow 모드 뷰어(모바일)가 서버 기하를 추종하는 통로. */
+  onGeometry(cb: (cols: number, rows: number) => void): () => void {
+    this.geometryListeners.add(cb);
+    return () => this.geometryListeners.delete(cb);
+  }
+
   onExit(cb: ExitCb): void {
     if (this.closed) { cb(-1); return; }
     this.exitCbs.push(cb);
@@ -829,6 +837,9 @@ export class Session {
     payload.writeUInt16LE(rows, 2);
     writeFrame(this.sock, H_CMD_RESIZE, payload);
     try { this.term.resize(cols, rows); } catch {}
+    for (const listener of this.geometryListeners) {
+      try { listener(cols, rows); } catch {}
+    }
   }
 
   pause(): void {
