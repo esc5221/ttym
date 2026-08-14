@@ -70,6 +70,7 @@ export async function resolveWorkspace(port, token) {
 
 export async function resolveAttachTarget(port, token, options: Record<string, any> = {}) {
   const { createIfMissing = false, createOptions = {} } = options;
+  let confirmCreate = options.confirmCreate ?? null;
   const normalized = normalizeAddressToken(token);
   if (!normalized) {
     console.error('attach target is required');
@@ -111,6 +112,10 @@ export async function resolveAttachTarget(port, token, options: Record<string, a
       // 멤버 하나면 그것, 여럿이면 첫 멤버 — 이후 C-b n/p 로 순회
       memberToken = members[0]?.name ?? 'main';
     } else if (createIfMissing) {
+      if (confirmCreate && !(await confirmCreate(`workspace "${normalized}" (+ member "main")`))) {
+        process.exit(EXIT.OK);
+      }
+      confirmCreate = null; // workspace 승인이 곧 main 멤버 승인 — 두 번 묻지 않는다
       workspace = await fetchPost(port, '/api/workspaces', {
         id: randomUUID().slice(0, 8),
         name: normalized,
@@ -139,6 +144,9 @@ export async function resolveAttachTarget(port, token, options: Record<string, a
   if (!createIfMissing) {
     console.error(`member not found: ${memberToken}`);
     process.exit(EXIT.NOT_FOUND);
+  }
+  if (confirmCreate && !(await confirmCreate(`member "${memberToken}" in workspace "${workspace.name}"`))) {
+    process.exit(EXIT.OK);
   }
 
   if (/^\d+$/.test(normalizeAddressToken(memberToken) || '')) {

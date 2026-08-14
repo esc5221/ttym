@@ -10,6 +10,41 @@ import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPa
 import {} from './common.js';
 // ───── Commands ─────
 
+/** 서버가 없으면 조용히 띄운다 — 진입 동사(attach/new/split)의 게으른 자동 기동.
+ *  조회 동사들의 exit 4 계약은 건드리지 않는다: 이 함수는 진입 경로에서만 불린다. */
+export async function ensureServerRunning(port) {
+  try {
+    const res = await fetch(`${apiBase(port)}/api/version`, { signal: AbortSignal.timeout(1500) });
+    if (res.ok) return false;
+  } catch {}
+  if (!existsSync(SERVER_JS)) {
+    console.error(`server not found: ${SERVER_JS} — run scripts/build.sh first`);
+    process.exit(EXIT.FAIL);
+  }
+  mkdirSync(HOME_DIR, { recursive: true });
+  const logFd = openSync(LOG_FILE, 'a');
+  const child = spawn('node', [SERVER_JS], {
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
+    env: { ...process.env, PORT: String(port), TTYM_HOLDER_BIN: process.env.TTYM_HOLDER_BIN || HOLDER_BIN },
+  });
+  child.unref();
+  writeFileSync(PID_FILE, String(child.pid));
+  const t0 = Date.now();
+  while (Date.now() - t0 < 15000) {
+    try {
+      const res = await fetch(`${apiBase(port)}/api/version`, { signal: AbortSignal.timeout(1000) });
+      if (res.ok) {
+        console.error(`ttym server started (pid ${child.pid}, port ${port})`);
+        return true;
+      }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  console.error(`server failed to start — see ${LOG_FILE}`);
+  process.exit(EXIT.NO_SERVER);
+}
+
 export function cmdStart() {
   const pid = readPid();
   if (pid) {

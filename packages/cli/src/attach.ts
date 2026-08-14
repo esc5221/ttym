@@ -5,10 +5,20 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
-import wsPkg from 'ws';
-const { WebSocket } = wsPkg;
+import { WebSocket as WsWebSocket } from 'ws';
+const WebSocket = WsWebSocket;
 import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 import { resolveAttachTarget, listWorkspaces, memberAddress } from './addresses.js';
+import { ensureServerRunning } from './lifecycle.js';
+import { createInterface } from 'node:readline/promises';
+
+/** TTY에서 생성 전 확인 — 동사 오타가 워크스페이스가 되는 사고의 방어선. Enter=예. */
+async function confirmCreate(what) {
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const answer = (await rl.question(`${what} — create? [Y/n] `)).trim().toLowerCase();
+  rl.close();
+  return answer === '' || answer === 'y' || answer === 'yes';
+}
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 function parsePrefixKey(spec) {
   if (!spec) return 0x02; // default C-b
@@ -75,14 +85,18 @@ export async function cmdAttach() {
   const prefixByte = parsePrefixKey(prefixSpec);
   const pfxLabel = prefixLabel(prefixByte);
   const port = getPort();
-  let currentTarget = await resolveAttachTarget(port, targetToken, {
-    createIfMissing: createNew,
-    createOptions: { name: memberName, role, cmd: tailCmd, cwd },
-  });
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error('ttym attach requires an interactive TTY');
     process.exit(EXIT.FAIL);
   }
+  // 진입 동사는 서버가 없으면 띄운다 — tmux의 근육. 조회 동사들은 여전히 exit 4.
+  await ensureServerRunning(port);
+  // TTY에서는 생성이 기본이되 확인을 거친다. --new는 확인 생략(스크립트·확신용).
+  let currentTarget = await resolveAttachTarget(port, targetToken, {
+    createIfMissing: true,
+    confirmCreate: createNew ? null : confirmCreate,
+    createOptions: { name: memberName, role, cmd: tailCmd, cwd },
+  });
   const attachMode = readonly ? 'readonly' : 'readwrite';
   const wsUrl = `ws://127.0.0.1:${port}/ws`;
 

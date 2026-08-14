@@ -4,12 +4,12 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
-import wsPkg from 'ws';
+import { WebSocket as WsWebSocket } from 'ws';
 import { request as apiRequest, ApiError } from '@ttym/api';
 import { API_VERSION, isRuntimeMetaKey } from '@ttym/protocol';
 
 export const __dirname = dirname(fileURLToPath(import.meta.url));
-export const { WebSocket } = wsPkg;
+export const WebSocket = WsWebSocket;
 // `env TTYM_HOME=~/x`처럼 셸이 틸드를 안 편 채 도달하는 경우가 실재한다 —
 // 그대로 resolve하면 cwd 아래 '~' 디렉터리라는 유령 경로가 된다. 여기서 편다.
 const rawHome = process.env.TTYM_HOME?.replace(/^~(?=$|\/)/, process.env.HOME || '');

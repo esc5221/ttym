@@ -7,6 +7,7 @@ import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, shellAwait, stripAnsi, cleanShellOutput, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 import { resolveAddress, resolveMatches, ensureDefaultWorkspace, createWorkspaceMember, requireMember, resolveWorkspace, patchSessionMeta, memberAddress } from './addresses.js';
+import { ensureServerRunning } from './lifecycle.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 export async function cmdNew() {
   const args = process.argv.slice(3);
@@ -16,6 +17,7 @@ export async function cmdNew() {
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
+  await ensureServerRunning(port); // 진입 동사 — 서버 없으면 띄운다
   await ensureCompatibleServer(port);
   const sep = args.indexOf('--');
   const cmd = sep !== -1 ? args.slice(sep + 1) : null;
@@ -43,6 +45,7 @@ export async function cmdSplit() {
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
+  await ensureServerRunning(port); // 진입 동사 — 서버 없으면 띄운다
   await ensureCompatibleServer(port);
   const sep = args.indexOf('--');
   const cmd = sep !== -1 ? args.slice(sep + 1) : null;
