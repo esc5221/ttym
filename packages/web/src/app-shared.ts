@@ -104,6 +104,10 @@ export function getTtymHost(): string {
   const h = window.location.hostname;
   // ttym-ui.lullu.lan → ttym.lullu.lan (Caddy proxy, port 80)
   if (h.startsWith('ttym-ui.')) return `ttym.${h.slice(8)}`;
+  // https = 터널/프록시 뒤라는 뜻이다 — 원 서버(7690)는 TLS를 말하지 않으니
+  // 프리픽스가 뭐든 same-origin이 유일한 정답. (ttym-pro.mainpy.dev가
+  // 프리픽스 매칭에 안 걸려 :7690 직결을 시도하던 구멍의 원칙적 폐쇄)
+  if (window.location.protocol === 'https:') return window.location.host;
   // tunnel or same-origin proxy → use current host (Vite proxies /api and /ws)
   if (h.startsWith('ttym.') || h === 'localhost' || h === '127.0.0.1') return window.location.host;
   // fallback: same host, port 7690
@@ -117,6 +121,8 @@ export function getTtymUiBase(): string {
   const { protocol, hostname } = window.location;
   if (hostname.startsWith('ttym-ui.')) return `${protocol}//${hostname}`;
   if (hostname.startsWith('ttym.')) return `${protocol}//ttym-ui.${hostname.slice(5)}`;
+  // 터널(https) 뒤에선 UI도 같은 주소다 — 복사한 세션 링크가 lan으로 새지 않게
+  if (protocol === 'https:') return `${protocol}//${hostname}`;
   return 'http://ttym-ui.lullu.lan';
 }
 
