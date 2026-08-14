@@ -4,6 +4,7 @@ import { createConnection, Socket } from 'node:net';
 import { existsSync, openSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import headless from '@xterm/headless';
 const { Terminal } = headless;
 import { SerializeAddon } from '@xterm/addon-serialize';
@@ -221,11 +222,17 @@ export function getRuntimeDir(): string {
 
 function holderBin(): string {
   if (process.env.TTYM_HOLDER_BIN) return process.env.TTYM_HOLDER_BIN;
-  // 1. Same directory as this script (bundled dist/)
+  // 1. Same directory as this script (bundled dist/, source checkout)
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const samedir = resolve(__dirname, 'ttym-holder');
   if (existsSync(samedir)) return samedir;
-  // 2. Dev: relative to packages/server/src/
+  // 2. npm install: the platform package (esbuild pattern — optionalDependencies,
+  //    never a postinstall download)
+  try {
+    const req = createRequire(import.meta.url);
+    return req.resolve(`@ttym/holder-${process.platform}-${process.arch}/ttym-holder`);
+  } catch {}
+  // 3. Dev: relative to packages/server/src/
   return resolve(__dirname, '../../../holder/target/release/ttym-holder');
 }
 

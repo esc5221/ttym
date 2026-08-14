@@ -83,6 +83,15 @@ holder           Rust         PTY fd + ring buffer. 영속성 담당.         ho
 
 ## 설치
 
+```bash
+npm i -g ttym          # 전제조건은 Node ≥ 20 하나
+```
+
+네이티브 PTY holder 는 플랫폼 패키지(`@ttym/holder-*`)로 `optionalDependencies` 를 타고 온다 — postinstall 다운로드 없음, Rust 툴체인 불필요. 체크섬 딸린 사전 빌드 tarball 은 GitHub Releases 에 있다.
+
+<details>
+<summary>소스에서 (개발)</summary>
+
 전제: Node.js, Rust, pnpm.
 
 ```bash
@@ -98,6 +107,10 @@ dist/
 ├── ttym-server.js    # 번들된 서버 + web 정적 리소스
 └── ttym-holder       # Rust 바이너리
 ```
+
+`ttym upgrade` 는 `dist.next` 로 빌드해 rename 으로 스왑한다 — 돌아가는 세션의 프로세스는 그대로다.
+
+</details>
 
 ## 빠른 시작
 

@@ -1,0 +1,54 @@
+# 태그 v*.*.* 푸시 → 플랫폼별 빌드 → npm publish + GitHub Release 부산물.
+# holder는 optionalDependencies 플랫폼 패키지로 배포된다 — postinstall 다운로드 금지.
+# 필요 시크릿: NPM_TOKEN (automation token, @ttym org publish 권한)
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-14
+            platform: darwin-arm64
+            publish_main: true   # 플랫폼 무관 메인 패키지는 한 러너만 publish
+          - os: ubuntu-latest
+            platform: linux-x64
+            publish_main: false
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write   # release 업로드
+      id-token: write   # npm --provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, registry-url: 'https://registry.npmjs.org' }
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/build.sh
+      - run: ./scripts/assemble-npm.sh
+        env: { TTYM_NPM_PLATFORM: '${{ matrix.platform }}' }
+
+      - name: publish holder package
+        run: cd npm-staging/holder-${{ matrix.platform }} && npm publish --provenance --access public
+        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
+
+      - name: publish main package
+        if: matrix.publish_main
+        run: cd npm-staging/ttym && npm publish --provenance --access public
+        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
+
+      - name: tarball for the release page
+        run: |
+          tar -czf ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz -C dist ttym ttym-server.js ttym-holder
+          shasum -a 256 ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz > ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz.sha256
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz
+            ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz.sha256

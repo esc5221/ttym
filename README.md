@@ -87,6 +87,17 @@ server restart:
 
 ## Install
 
+```bash
+npm i -g ttym          # Node ≥ 20 is the only prerequisite
+```
+
+The native PTY holder ships as a platform package (`@ttym/holder-*`) via
+`optionalDependencies` — no postinstall downloads, no Rust toolchain.
+Prebuilt tarballs with checksums live on the GitHub Releases page.
+
+<details>
+<summary>From source (development)</summary>
+
 Prerequisites: Node.js, Rust, pnpm.
 
 ```bash
@@ -102,6 +113,11 @@ dist/
 ├── ttym-server.js    # bundled server + web static assets
 └── ttym-holder       # Rust binary
 ```
+
+`ttym upgrade` rebuilds into `dist.next` and swaps by rename — running
+sessions keep their processes.
+
+</details>
 
 ## Quick start
 
