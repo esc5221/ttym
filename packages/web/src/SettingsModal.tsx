@@ -142,6 +142,7 @@ function AppearanceSection({ uiStyle, onUiStyleChange, fontSize, onFontSizeChang
 function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }) {
   const [model, setModel] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  const [interval, setIntervalValue] = useState('');
   const [keySet, setKeySet] = useState<boolean | null>(null);
   const [keyDraft, setKeyDraft] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -154,6 +155,7 @@ function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }
     void fetch(`${API_BASE}/api/config`).then((r) => r.json()).then(({ values }) => {
       setModel(values['map-model'] ?? '');
       setBaseUrl(values['map-base-url'] ?? '');
+      setIntervalValue(values['map-interval'] ?? '');
     }).catch(() => {});
     void fetch(`${API_BASE}/api/map/api-key`).then((r) => r.json()).then((r) => setKeySet(!!r.set)).catch(() => {});
     void fetch(`${API_BASE}/api/map/prompt`).then((r) => r.json()).then((r) => {
@@ -168,7 +170,11 @@ function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }
   };
 
   const saveBackend = () => {
-    onPatchConfig({ 'map-model': model.trim() || null, 'map-base-url': baseUrl.trim() || null });
+    onPatchConfig({
+      'map-model': model.trim() || null,
+      'map-base-url': baseUrl.trim() || null,
+      'map-interval': interval.trim() || null,
+    });
     flash('saved');
   };
 
@@ -219,6 +225,9 @@ function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }
       </Field>
       <Field label="base url" hint="set → OpenAI-compatible HTTP · empty → claude CLI">
         <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://…/v1 (optional)" style={{ ...inputStyle, width: 260 }} />
+      </Field>
+      <Field label="auto refresh" hint="server-side cadence, e.g. 10m · empty = off (summaries leave your machine — opt in deliberately)">
+        <input value={interval} onChange={(e) => setIntervalValue(e.target.value)} placeholder="off" style={{ ...inputStyle, width: 80 }} />
       </Field>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
         <span style={flashStyle}>{savedFlash}</span>

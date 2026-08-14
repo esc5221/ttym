@@ -102,15 +102,16 @@ dist/
 ## 빠른 시작
 
 ```bash
-./dist/ttym start                       # 서버 백그라운드 실행 (port 7690)
+./dist/ttym work                 # 이게 전부다 — 서버는 알아서 뜨고, workspace "work" +
+                                 # 셸이 만들어지고([Y/n] 한 번), 그대로 진입한다
+./dist/ttym split :main ai -- claude    # 옆에 분할 — 중첩과 비율이 유지된다
+open http://localhost:7690       # 같은 세션이 브라우저에 살아있다
+```
 
-./dist/ttym attach work --new           # tmux 식: workspace + 셸 만들고 바로 진입
-./dist/ttym new claude -- claude        # 또는 headless: default workspace 에 세션 생성
-./dist/ttym split :claude logs          # 옆에 분할 — 중첩과 비율이 유지된다
-./dist/ttym attach default/claude       # TUI 로 붙기 (C-b d 로 빠져나옴)
+`C-b d` 로 나와도 전부 계속 돈다. 재부팅·크래시까지 버티게 하려면 선택 동사 하나:
 
-# 브라우저로도 같은 서버에 접속:
-open http://localhost:7690
+```bash
+ttym service install             # 로그인 시 기동, 죽으면 자동 재기동 (launchd/systemd)
 ```
 
 ## 에이전트를 함수처럼
@@ -151,7 +152,7 @@ ttym await :build -- "make test"   # 보내고, 완료까지 막고, exit code +
 ttym map refresh              # 출력이 움직인 세션만 요약 — 신선한 세션은 비용 0
 ```
 
-모델 백엔드 규칙은 하나다: `~/.ttym/config` 에 `map-base-url` 을 넣으면 OpenAI 호환 HTTP(로컬이든 원격이든 아무 게이트웨이), 비워두면 `claude -p`(기본 모델 `haiku`). 프롬프트는 settings 에서 편집할 수 있고 — 데이터 블록(화면 꼬리, workspace 목록)은 자동으로 뒤에 붙는다 — 일회성 지시 한 줄로 저장 없이 이번 정리만 조종할 수도 있다. 상시 주기는 `scripts/com.lullu.ttym-map-refresh.plist`(launchd 10분 간격). 요약은 정직하게 낡는다: 요약 이후 출력이 흐른 세션은 다음 갱신까지 나이와 함께 stale 로 표시된다.
+모델 백엔드 규칙은 하나다: `~/.ttym/config` 에 `map-base-url` 을 넣으면 OpenAI 호환 HTTP(로컬이든 원격이든 아무 게이트웨이), 비워두면 `claude -p`(기본 모델 `haiku`). 프롬프트는 settings 에서 편집할 수 있고 — 데이터 블록(화면 꼬리, workspace 목록)은 자동으로 뒤에 붙는다 — 일회성 지시 한 줄로 저장 없이 이번 정리만 조종할 수도 있다. 상시 주기는 settings(또는 config)의 `map-interval = 10m` — 서버가 직접 돌리며, **기본은 꺼짐**이다: 화면이 기계 밖으로 나가는 건 명시적 선택이어야 한다. 연속 5회 실패하면 타이머가 스스로 멈춘다(interval 재저장으로 재개). 요약은 정직하게 낡는다: 요약 이후 출력이 흐른 세션은 다음 갱신까지 나이와 함께 stale 로 표시된다.
 
 ## 웹 터미널
 
@@ -208,21 +209,35 @@ ttym map refresh [--model M] [--base-url URL] [--note TEXT] [--force] [--dry-run
 
 ### 서버 수명
 
+이야기는 하나다: **진입 동사(이름 단독, attach, new, split)는 서버가 없으면
+띄운다** — 시작하려고 `start` 를 칠 일이 없다. 조회 동사(screen, send,
+await, …)는 exit 4 계약을 지키고 아무것도 띄우지 않는다.
+
 ```bash
-ttym start [--port 7690]   # 백그라운드 기동. PID: ~/.ttym/ttym.pid
-ttym stop                  # 서버 중지. holder 는 생존
-ttym restart               # 재시작 → 세션 자동 복구. launchd 가 먼저 살리면 양보
+ttym service install       # 상주: 로그인 시 기동, 죽으면 자동 재기동
+ttym service status        # 감독 여부·pid·마지막 종료 사유 [--json]
+ttym service uninstall     # 게으른 자동기동 세계로 복귀 (세션은 생존)
+
+ttym stop                  # 비감독 서버 중지. holder 는 생존
+ttym restart               # 감독 중이면 launchd/systemd 에 위임, 아니면 stop+start
 ttym status                # 서버 + 세션 목록
 ttym log [-f]              # ~/.ttym/ttym.log
+ttym start [--port] [--bind]  # 일회성 수동 기동 (개발용; 감독 중엔 거부)
 ```
+
+감독 사실은 `~/.ttym/service.json` 마커에 산다 — restart 는 추측이 아니라
+그 마커로 위임을 판단한다. 생성되는 plist 는 재기동을 10초로 스로틀하고,
+직전 3회 부팅이 전부 수초 내 사망이면 다음 부팅은 **safe mode** — 세션
+복구를 건너뛰어(holder 는 무접촉) poison 세션이 감독자를 크래시 루프에
+빠뜨리지 못한다. `/api/version` 이 `safeMode: true` 로 보고한다.
 
 ### attach — 인터랙티브 TUI
 
 ```bash
+ttym <workspace>                         # attach 의 축약 — 일상의 진입
 ttym attach <session-id>
 ttym attach <workspace>                  # 멤버 하나면 그것, 여럿이면 첫 멤버 (C-b n/p 순회)
-ttym attach <workspace>/<member>
-ttym attach work --new                   # workspace + "main" 멤버 만들고 진입 — tmux 식
+ttym attach <workspace>/<member>         # 없으면 [Y/n] 확인 후 생성; --new 는 확인 생략(스크립트용)
 ttym attach work/ai --new --cmd claude --dangerously-skip-permissions
 ttym attach <target> --readonly          # 관찰만
 ttym attach <target> --prefix C-a        # prefix 키 변경 (기본 C-b)
@@ -367,6 +382,7 @@ local-echo   = true | false         낙관적 local echo (실험적)
 zoom         = 1.0                  데스크톱 창 zoom (앱이 쓴다)
 map-model    = haiku                요약기 모델 (작업 지도 참조)
 map-base-url =                      있으면 OpenAI 호환 HTTP; 없으면 claude CLI
+map-interval =                      서버 내장 주기 (10m, 1h) — 비우면 off (기본)
 ```
 
 의도적으로 이 파일 밖에 있는 것: 요약기 API 키는 `~/.ttym/map-api-key`(chmod 600) 또는 `OPENAI_API_KEY` 에 산다.
@@ -378,6 +394,8 @@ map-base-url =                      있으면 OpenAI 호환 HTTP; 없으면 clau
 
 ```
 PORT                   서버 포트 (기본 7690)
+TTYM_BIND              listen 호스트 (기본 127.0.0.1 — API 가 무인증이라
+                       인터페이스 개방은 부팅 시점의 의도적 결정이다)
 TTYM_HOME              ~/.ttym 루트 교체 (테스트 격리)
 TTYM_RUNTIME_DIR       holder socket/manifest 디렉토리 (기본 ~/.ttym/run)
 TTYM_HOLDER_BIN        holder 바이너리 경로 (기본: dist/ 에서 자동 탐지)
@@ -413,10 +431,13 @@ TTYM_ATTACH_RETRY_MS   attach 재접속 간격 (기본 1000)
 holder 가 별도 프로세스라서 PTY 는 서버보다 오래 산다.
 
 ```bash
-ttym start
-ttym new work
+ttym work                     # 세션 하나
 ttym restart                  # 서버가 내려갔다 올라와도
 ttym status                   # 세션은 그대로다. 같은 pid — 붙어서 계속하면 된다
+
+# 감독 중이라면 강제 kill 조차 스스로 낫는다:
+ttym service install
+kill -9 "$(cat ~/.ttym/ttym.pid)"   # 감독자가 수초 내 되살린다 — 세션 무사
 ```
 
 복구는 세 겹이다:

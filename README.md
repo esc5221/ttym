@@ -106,15 +106,17 @@ dist/
 ## Quick start
 
 ```bash
-./dist/ttym start                       # server in the background (port 7690)
+./dist/ttym work                 # that's it — the server autostarts, workspace "work" +
+                                 # a shell are created (one [Y/n]), and you're attached
+./dist/ttym split :main ai -- claude    # a real split beside it — nesting and ratios survive
+open http://localhost:7690       # the same session, live in the browser
+```
 
-./dist/ttym attach work --new           # tmux-style: create workspace + shell, drop in
-./dist/ttym new claude -- claude        # or headless: a session in the default workspace
-./dist/ttym split :claude logs          # a real split beside it — nesting and ratios survive
-./dist/ttym attach default/claude       # TUI (C-b d to detach)
+`C-b d` detaches; everything keeps running. Want it to survive reboots and
+crashes too? One optional verb:
 
-# the browser sees the same server:
-open http://localhost:7690
+```bash
+ttym service install             # boots at login, restarts on crash (launchd/systemd)
 ```
 
 ## Agents in the loop
@@ -171,8 +173,10 @@ summarizer speaks OpenAI-compatible HTTP (any gateway, local or remote);
 leave it unset and it shells out to `claude -p` (default model `haiku`). The
 prompt is editable in settings — data blocks (screen tails, workspace lists)
 are appended automatically, and a one-off instruction line steers a single
-refresh without being saved. For a standing cadence, install
-`scripts/com.lullu.ttym-map-refresh.plist` (10-minute launchd interval).
+refresh without being saved. For a standing cadence set `map-interval = 10m`
+in settings (or the config file) — the server runs the summarizer itself,
+**off by default**: your screens leaving the machine is an explicit choice.
+Five consecutive failures suspend the timer until you re-save the interval.
 Summaries age honestly: once a session outputs past its summary, the row is
 marked stale with its age until the next refresh.
 
@@ -239,21 +243,36 @@ ttym map refresh [--model M] [--base-url URL] [--note TEXT] [--force] [--dry-run
 
 ### Server lifecycle
 
+One story: **entry verbs (a bare name, attach, new, split) start the server
+if it is down** — you never run `start` to get going. Query verbs (screen,
+send, await, …) keep their exit-4 contract and never start anything.
+
 ```bash
-ttym start [--port 7690]   # background start. PID: ~/.ttym/ttym.pid
-ttym stop                  # stop the server. Holders survive
-ttym restart               # restart → sessions auto-recover. Yields if launchd respawns first
+ttym service install       # supervised residency: boot at login, restart on crash
+ttym service status        # supervised? pid? last exit? [--json]
+ttym service uninstall     # back to the lazy-autostart world (sessions survive)
+
+ttym stop                  # stop an unsupervised server. Holders survive
+ttym restart               # supervised → delegated to launchd/systemd; else stop+start
 ttym status                # server + session list
 ttym log [-f]              # ~/.ttym/ttym.log
+ttym start [--port] [--bind]  # one-shot manual start (dev; refused when supervised)
 ```
+
+Supervision facts live in `~/.ttym/service.json` — restart delegates on that
+marker, not on guesswork. The generated launchd plist throttles respawns
+(10s), and if the last three boots all died within seconds, the next boot
+enters **safe mode**: session recovery is skipped (holders untouched) so a
+poison session cannot crash-loop the supervisor; `/api/version` reports
+`safeMode: true`.
 
 ### attach — interactive TUI
 
 ```bash
+ttym <workspace>                         # shorthand for attach — the everyday entry
 ttym attach <session-id>
 ttym attach <workspace>                  # sole member, or the first (C-b n/p to cycle)
-ttym attach <workspace>/<member>
-ttym attach work --new                   # create workspace + "main" member, attach — tmux-style
+ttym attach <workspace>/<member>         # creation asks [Y/n]; --new skips the ask (scripts)
 ttym attach work/ai --new --cmd claude --dangerously-skip-permissions
 ttym attach <target> --readonly          # observe only
 ttym attach <target> --prefix C-a        # change the prefix key (default C-b)
@@ -405,6 +424,7 @@ local-echo   = true | false         optimistic local echo (experimental)
 zoom         = 1.0                  desktop window zoom (written by the app)
 map-model    = haiku                summarizer model (see the work map)
 map-base-url =                      set → OpenAI-compatible HTTP; unset → claude CLI
+map-interval =                      server-side cadence (10m, 1h) — empty = off (default)
 ```
 
 Related but deliberately outside this file: the summarizer API key lives in
@@ -417,6 +437,8 @@ Related but deliberately outside this file: the summarizer API key lives in
 
 ```
 PORT                   server port (default 7690)
+TTYM_BIND              listen host (default 127.0.0.1 — the API is unauthenticated;
+                       opening an interface is a boot-time decision, on purpose)
 TTYM_HOME              replaces the ~/.ttym root (test isolation)
 TTYM_RUNTIME_DIR       holder socket/manifest dir (default ~/.ttym/run)
 TTYM_HOLDER_BIN        holder binary path (default: auto-detected in dist/)
@@ -452,10 +474,13 @@ TTYM_ATTACH_RETRY_MS   attach reconnect interval (default 1000)
 The holder is a separate process, so the PTY survives the server.
 
 ```bash
-ttym start
-ttym new work
+ttym work                     # a session
 ttym restart                  # the server goes down and comes back, but
 ttym status                   # the sessions are still there, same pids; attach and continue
+
+# supervised? then even a hard kill heals itself:
+ttym service install
+kill -9 "$(cat ~/.ttym/ttym.pid)"   # the supervisor restarts it in seconds — sessions intact
 ```
 
 Recovery is three layers deep:

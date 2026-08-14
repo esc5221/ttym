@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
+import { readServiceMarker, serviceRestart } from './service.js';
 import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 import {} from './common.js';
@@ -46,6 +47,13 @@ export async function ensureServerRunning(port) {
 }
 
 export function cmdStart() {
+  {
+    const marker = readServiceMarker();
+    if (marker) {
+      console.error(`supervised by ${marker.kind} (${marker.label}) — use \`ttym restart\` or \`ttym service uninstall\``);
+      process.exit(EXIT.FAIL);
+    }
+  }
   const pid = readPid();
   if (pid) {
     console.log(`ttym already running (pid ${pid})`);
@@ -120,7 +128,16 @@ export function cmdStop() {
   console.log(`ttym stopped (pid ${pid})`);
 }
 
-export function cmdRestart() {
+export async function cmdRestart() {
+  // 마커가 있으면 추측 없이 감독자에게 위임한다 — pid 훔쳐보기 폴링의 종언.
+  if (readServiceMarker()) {
+    if (await serviceRestart()) {
+      console.log('ttym restarted by its service manager');
+      return;
+    }
+    console.error('service restart failed — check `ttym service status`');
+    process.exit(EXIT.FAIL);
+  }
   const pid = readPid();
   if (pid) {
     signalSafe(pid, 'SIGTERM');

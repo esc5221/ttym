@@ -16,7 +16,7 @@ import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { execFile } from 'node:child_process';
 
 let mapRefreshInFlight = false;
-import { readFileSync as readFileSyncFs, writeFileSync as writeFileSyncFs, unlinkSync, chmodSync } from 'node:fs';
+import { readFileSync as readFileSyncFs, writeFileSync as writeFileSyncFs, unlinkSync, chmodSync, mkdirSync } from 'node:fs';
 import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
 import { API_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
 
@@ -200,6 +200,8 @@ export interface TtymServer {
 
 // ───── HTTP API ─────
 
+let bootSafeMode = false;
+
 function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
@@ -318,7 +320,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
 
   // GET /api/version — lets a client refuse an incompatible server
   if (path === '/api/version' && req.method === 'GET') {
-    json(200, { apiVersion: API_VERSION, role: 'ttym-server' });
+    json(200, { apiVersion: API_VERSION, role: 'ttym-server', ...(bootSafeMode ? { safeMode: true } : {}) });
     return true;
   }
 
@@ -1084,6 +1086,14 @@ export async function createServer(port: number): Promise<TtymServer> {
   // they can be revived later by adding them back to a workspace.
   const workspaceStore = new WorkspaceStore(manager.runtimeDir);
   await workspaceStore.load();
+  const markCleanExit = () => {
+    try {
+      const p = resolve(getHomeDir(), 'boot.json');
+      const history = JSON.parse(readFileSyncFs(p, 'utf8')) as Array<{ startedAt: number; exitedAt?: number }>;
+      if (history.length) history[history.length - 1].exitedAt = Date.now();
+      writeFileSyncFs(p, JSON.stringify(history));
+    } catch {}
+  };
   const configStore = new ConfigStore(resolve(getHomeDir(), 'config'));
   await configStore.load();
   const interactions = new InteractionStore();
@@ -1092,7 +1102,36 @@ export async function createServer(port: number): Promise<TtymServer> {
     for (const m of ws.members) restoreAllowlist.add(m.sessionId);
   }
 
-  await manager.boot(restoreAllowlist);
+  // safe-mode: KeepAlive 아래에서 복구 자체가 죽음의 원인이면(poison 세션)
+  // 매 재기동이 같은 복구를 반복한다. 직전 부팅들이 전부 조기 사망이면
+  // 이번 부팅은 세션 복구를 건너뛴다 — holder는 살아 있으니 데이터 손실은
+  // 없고, API·로그로 수동 진단이 가능해진다.
+  const bootLogPath = resolve(getHomeDir(), 'boot.json');
+  let safeMode = false;
+  try {
+    const history = JSON.parse(readFileSyncFs(bootLogPath, 'utf8')) as Array<{ startedAt: number; exitedAt?: number }>;
+    const recent = history.slice(-3);
+    // "조기 사망" = 정상 종료 기록 없이, 다음 부팅(마지막은 지금)까지 30초 미만.
+    // 30초인 이유: 수명 + 감독자의 재기동 스로틀(10초)이 간격에 합산되기 때문.
+    safeMode = recent.length === 3 && recent.every((b, i) => {
+      const next = history[history.length - 3 + i + 1];
+      const gap = (next?.startedAt ?? Date.now()) - b.startedAt;
+      return !b.exitedAt && gap < 30_000;
+    });
+  } catch {}
+  try {
+    mkdirSync(getHomeDir(), { recursive: true });
+    let history: Array<{ startedAt: number; exitedAt?: number }> = [];
+    try { history = JSON.parse(readFileSyncFs(bootLogPath, 'utf8')); } catch {}
+    history.push({ startedAt: Date.now() });
+    writeFileSyncFs(bootLogPath, JSON.stringify(history.slice(-10)));
+  } catch {} // 브레드크럼이 부팅을 죽여선 안 된다
+  bootSafeMode = safeMode;
+  if (safeMode) {
+    log('SAFE MODE: last 3 boots died within 10s — skipping session recovery (holders untouched)');
+  }
+
+  await manager.boot(safeMode ? new Set<number>() : restoreAllowlist);
 
   // Sweep the accumulation of dead sessions' files. Live sessions and every
   // workspace member are always kept; the rest gets a two-week grace before
@@ -1174,7 +1213,60 @@ export async function createServer(port: number): Promise<TtymServer> {
     }
   }
 
+  // ── map 요약 주기: 서버 내장 타이머 ──
+  // 별도 launchd plist였던 것을 흡수한다 — 서버가 유일한 상주 프로세스니
+  // 주기의 거처도 여기다. 기본 off: 화면이 모델로 나가는 건 명시적 선택.
+  // 요약 로직은 여전히 동봉 CLI(단일 원천), 실패는 서버 본체에 전파되지 않는다.
+  let mapTimer: ReturnType<typeof setInterval> | null = null;
+  let mapRunning = false;
+  let mapFailures = 0;
+  function parseMapInterval(raw: string | undefined): number {
+    if (!raw) return 0;
+    const m = String(raw).trim().match(/^(\d+)\s*(s|m|h)?$/);
+    if (!m) return 0;
+    const n = parseInt(m[1], 10);
+    const unit = m[2] === 'h' ? 3600 : m[2] === 's' ? 1 : 60; // 단위 없으면 분
+    const seconds = n * unit;
+    return seconds >= 60 ? seconds * 1000 : 0; // 1분 미만은 오설정으로 보고 무시
+  }
+  function runMapRefresh() {
+    if (mapRunning) return;
+    mapRunning = true;
+    const cliPath = resolve(SERVER_DIR, 'ttym');
+    // launchd가 띄운 서버는 최소 PATH라 claude 바이너리를 못 찾는다(실측 회귀).
+    const path = [process.env.PATH, `${process.env.HOME}/.local/bin`, '/opt/homebrew/bin', '/usr/local/bin']
+      .filter(Boolean).join(':');
+    execFile(process.execPath, [cliPath, 'map', 'refresh', '--port', String(port)], {
+      timeout: 200_000,
+      env: { ...process.env, PATH: path },
+    }, (error, _stdout, stderr) => {
+      mapRunning = false;
+      if (error) {
+        mapFailures += 1;
+        log(`MAP timer refresh failed (${mapFailures} in a row): ${(stderr || error.message).trim().slice(0, 160)}`);
+        if (mapFailures >= 5 && mapTimer) {
+          clearInterval(mapTimer);
+          mapTimer = null;
+          log('MAP timer suspended after 5 consecutive failures — fix the backend, then re-save map-interval');
+        }
+      } else {
+        mapFailures = 0;
+      }
+    });
+  }
+  function armMapTimer(values: Record<string, string>) {
+    if (mapTimer) { clearInterval(mapTimer); mapTimer = null; }
+    const ms = parseMapInterval(values['map-interval']);
+    if (ms <= 0) return;
+    mapFailures = 0;
+    mapTimer = setInterval(runMapRefresh, ms);
+    mapTimer.unref();
+    log(`MAP timer armed: every ${Math.round(ms / 1000)}s`);
+  }
+  armMapTimer(configStore.get());
+
   function broadcastConfig(values: Record<string, string>) {
+    armMapTimer(values); // 설정이 바뀌면 즉시 재장전 — 재시작 불필요
     const frame = encode(0, CMD.CONFIG, jsonPayload({ values }));
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) {
@@ -1682,6 +1774,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     wss,
     httpServer,
     close: async () => {
+      markCleanExit();
       clearInterval(agentExpirySweep);
       unsubscribeWorkspaceChanges();
       if (gcTimer) clearInterval(gcTimer);

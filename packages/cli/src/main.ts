@@ -7,6 +7,7 @@ import { cmdAttach } from './attach.js';
 import { cmdMeta, cmdCurrent, cmdWorkspace } from './workspace.js';
 import { cmdAgent, cmdReportStop } from './agent.js';
 import { cmdMap } from './map.js';
+import { cmdService } from './service.js';
 import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr, cmdCommandsAddr, cmdOutputAddr } from './sessions.js';
 
 // ───── Main ─────
@@ -33,6 +34,7 @@ function printHelp() {
   console.log('  workspace <command>          Workspace/member control plane');
   console.log('  meta <id> [--set k=v]        Session metadata (get/set)');
   console.log('  agent install <agent>        Install agent hook (claude, codex)');
+  console.log('  service install|uninstall|status  Supervised residency: boot at login, restart on crash');
   console.log('  start / stop / restart / log Server lifecycle (start is one-shot; entry verbs autostart)');
   console.log('  help                         This text');
 }
@@ -60,7 +62,7 @@ switch (cmd) {
   case 'output':  await cmdOutputAddr(); break;
   case 'start':   cmdStart(); break;
   case 'stop':    cmdStop(); break;
-  case 'restart': cmdRestart(); break;
+  case 'restart': await cmdRestart(); break;
   case 'status':  await cmdStatus(); break;
   case 'current': await cmdCurrent(); break;
   case 'workspace': await cmdWorkspace(); break;
@@ -73,6 +75,7 @@ switch (cmd) {
     await cmdAgent();
     break;
   case 'map':     await cmdMap(); break;
+  case 'service': await cmdService(); break;
   case 'log':     cmdLog(); break;
   default: {
     const interactive = process.stdin.isTTY && process.stdout.isTTY;
