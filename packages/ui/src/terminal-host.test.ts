@@ -21,6 +21,8 @@ vi.mock('@xterm/xterm', () => {
     registerMarker() { return { line: 0, isDisposed: false, dispose() {} }; }
     scrollToLine() {}
     scrollToBottom() {}
+    resized: Array<[number, number]> = [];
+    resize(c: number, r: number) { this.resized.push([c, r]); }
     dispose() {}
     refresh() {}
     onBell() { return { dispose() {} }; }
@@ -48,6 +50,7 @@ import type { TerminalMux } from '@ttym/vt';
 interface FakeMux {
   attachCalls: number;
   attachResults: Array<'ok' | 'fail'>;
+  attachOpts: Array<{ cols?: number; rows?: number }>;
   detached: number[];
   paused: number[];
   resumed: number[];
@@ -58,15 +61,17 @@ function fakeMux(): TerminalMux & FakeMux {
   const mux = {
     attachCalls: 0,
     attachResults: [] as Array<'ok' | 'fail'>,
+    attachOpts: [] as Array<{ cols?: number; rows?: number }>,
     detached: [] as number[],
     paused: [] as number[],
     resumed: [] as number[],
     forgotten: [] as number[],
-    attachSession(this: FakeMux) {
+    attachSession(this: FakeMux, _id: number, _cbs: unknown, opts: { cols?: number; rows?: number }) {
       const result = this.attachResults[this.attachCalls] ?? 'ok';
       this.attachCalls += 1;
+      this.attachOpts.push(opts);
       return result === 'ok'
-        ? Promise.resolve({ id: 9 })
+        ? Promise.resolve({ id: 9, cols: 143, rows: 68 })
         : Promise.reject(new Error('attach timed out'));
     },
     detachSession(this: FakeMux, id: number) { this.detached.push(id); },
@@ -174,6 +179,32 @@ describe('TerminalHost stream state machine', () => {
     await vi.advanceTimersByTimeAsync(50);
     await flushMicrotasks();
     expect(mux.attachCalls).toBe(1);
+  });
+
+  it('follow geometry never announces or sends a size — and wears the server one', async () => {
+    const mux = fakeMux();
+    const host = acquireHost(mux, 9, { mode: 'readwrite', fontSize: 12, enableWebgl: false, localEcho: false, geometry: 'follow' });
+    host.mount(fakeElement(), () => {});
+    host.activate();
+    await vi.advanceTimersByTimeAsync(50);
+    await flushMicrotasks();
+    // ① attach가 기하를 신고하지 않는다 — 신고하는 순간 서버 PTY가 줄어든다
+    expect(mux.attachOpts[0].cols).toBeUndefined();
+    expect(mux.attachOpts[0].rows).toBeUndefined();
+    // ② 서버 기하(143x68)를 입는다
+    const term = host.term as unknown as { resized: Array<[number, number]> };
+    expect(term.resized).toContainEqual([143, 68]);
+  });
+
+  it('fit geometry (default) still announces its size at attach', async () => {
+    const mux = fakeMux();
+    const host = acquireHost(mux, 9, { mode: 'readwrite', fontSize: 14, enableWebgl: false, localEcho: false });
+    host.mount(fakeElement(), () => {});
+    host.activate();
+    await vi.advanceTimersByTimeAsync(50);
+    await flushMicrotasks();
+    expect(mux.attachOpts[0].cols).toBe(80);
+    expect(mux.attachOpts[0].rows).toBe(24);
   });
 
   it('exhausted retries still leave the host recoverable by a later activate', async () => {

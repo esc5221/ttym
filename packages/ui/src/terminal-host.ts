@@ -40,6 +40,12 @@ export interface HostOptions {
   fontSize: number;
   enableWebgl: boolean;
   localEcho: boolean;
+  /**
+   * fit(기본): 이 뷰가 pane 크기로 PTY를 리사이즈하는 주도자다.
+   * follow: 서버 기하가 진실이고 이 뷰는 추종만 한다 — attach에 cols를 안 싣고,
+   * fit도 resize 전송도 안 한다. 모바일이 데스크톱 화면을 깨지 않는 조건.
+   */
+  geometry?: 'fit' | 'follow';
 }
 
 const registry = new Map<number, TerminalHost>();
@@ -228,7 +234,7 @@ export class TerminalHost {
     this.mounted = true;
     this.resizeObserver = new ResizeObserver(() => {
       if (!this.disposed && this.wrapper.isConnected) {
-        try { this.fit.fit(); } catch {}
+        this.fitNow();
       }
     });
     this.resizeObserver.observe(this.wrapper);
@@ -264,7 +270,8 @@ export class TerminalHost {
     try { this.term.loadAddon(new WebFontsAddon()); } catch {}
     try { this.term.loadAddon(new WebLinksAddon()); } catch {}
       try { this.term.loadAddon(new ClipboardAddon()); } catch {}
-      try { this.fit.fit(); } catch {}
+      this.syncWrapperSizing();
+      this.fitNow();
       requestAnimationFrame(() => { if (!this.disposed) this.wrapper.style.visibility = 'visible'; });
     }
     this.stream = 'queued';
@@ -277,21 +284,26 @@ export class TerminalHost {
 
   private doAttach() {
     this.stream = 'attaching';
+    const follow = this.opts.geometry === 'follow';
     this.mux.attachSession(this.sessionId, {
       onData: (data, seq) => this.handleData(data, seq),
       onSnapshot: (snap, seq) => this.handleSnapshot(snap, seq),
+      onResize: (cols, rows) => this.applyFollowGeometry(cols, rows),
       onExit: () => {
         this.cancelPendingWrites();
         this.onAction({ kind: 'session-exit', sessionId: this.sessionId });
       },
     }, {
-      cols: this.term.cols,
-      rows: this.term.rows,
+      // follow는 기하를 신고하지 않는다 — readwrite attach의 cols는 서버 PTY를
+      // 즉시 리사이즈하므로, 모바일 attach 한 번이 데스크톱 화면을 줄여버린다.
+      cols: follow ? undefined : this.term.cols,
+      rows: follow ? undefined : this.term.rows,
       mode: this.opts.mode,
-    }).then(() => {
+    }).then((info) => {
       if (this.disposed || this.stream !== 'attaching') { this.mux.detachSession(this.sessionId); return; }
       this.stream = 'attached';
       this.attachRetries = 0;
+      this.applyFollowGeometry(info.cols, info.rows);
       this.wireInput();
     }).catch(() => {
       if (this.disposed || this.stream !== 'attaching') return;
@@ -347,7 +359,8 @@ export class TerminalHost {
 
   applyOptions(opts: HostOptions) {
     const prev = this.opts;
-    this.opts = { ...opts };
+    // 선택 필드는 병합 — 한 호출부가 geometry를 빼먹어도 모드가 증발하지 않는다
+    this.opts = { ...prev, ...opts };
     this.localEcho.setEnabled(opts.localEcho && opts.mode !== 'readonly');
     if (prev.fontSize !== opts.fontSize) {
       this.term.options.fontSize = opts.fontSize;
@@ -356,6 +369,10 @@ export class TerminalHost {
     if (prev.mode !== opts.mode) {
       this.term.options.disableStdin = opts.mode === 'readonly';
       this.term.options.cursorBlink = opts.mode !== 'readonly';
+    }
+    if (prev.geometry !== opts.geometry) {
+      this.syncWrapperSizing();
+      if (opts.geometry !== 'follow') this.scheduleFit();
     }
     if (prev.enableWebgl !== opts.enableWebgl && this.opened) {
       if (opts.enableWebgl) this.maybeEnableWebgl();
@@ -500,7 +517,13 @@ export class TerminalHost {
     this.scheduleFit();
   }
 
+  private fitNow() {
+    if (this.opts.geometry === 'follow') return;
+    try { this.fit.fit(); } catch {}
+  }
+
   private scheduleFit() {
+    if (this.opts.geometry === 'follow') return;
     requestAnimationFrame(() => {
       if (this.disposed) return;
       try {
@@ -508,6 +531,21 @@ export class TerminalHost {
         this.term.refresh(0, Math.max(0, this.term.rows - 1));
       } catch {}
     });
+  }
+
+  /** follow 모드: 서버 기하를 입는다. 스냅샷/델타가 이 격자를 전제로 온다. */
+  private applyFollowGeometry(cols: number, rows: number) {
+    if (this.opts.geometry !== 'follow') return;
+    if (cols > 0 && rows > 0 && (this.term.cols !== cols || this.term.rows !== rows)) {
+      try { this.term.resize(cols, rows); } catch {}
+    }
+  }
+
+  /** follow는 natural size — pane 컨테이너가 스크롤로 열람한다. */
+  private syncWrapperSizing() {
+    const natural = this.opts.geometry === 'follow';
+    this.wrapper.style.width = natural ? 'max-content' : '100%';
+    this.wrapper.style.height = natural ? 'max-content' : '100%';
   }
 
   // ── stream ──
@@ -604,6 +642,8 @@ export class TerminalHost {
       for (let i = 0; i < data.length; i++) bytes[i] = data.charCodeAt(i);
       this.mux.send(this.sessionId, bytes);
     }));
-    this.inputDisposables.push(this.term.onResize(({ cols, rows }) => this.mux.resize(this.sessionId, cols, rows)));
+    if (this.opts.geometry !== 'follow') {
+      this.inputDisposables.push(this.term.onResize(({ cols, rows }) => this.mux.resize(this.sessionId, cols, rows)));
+    }
   }
 }

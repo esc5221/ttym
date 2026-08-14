@@ -8,6 +8,8 @@ interface SessionCallbacks {
   onData: DataCallback;
   onExit?: ExitCallback;
   onSnapshot?: SnapshotCallback;
+  /** 서버 PTY 기하 변경 통지 — follow 뷰어가 추종하고, fit 뷰어는 무시한다. */
+  onResize?: (cols: number, rows: number) => void;
 }
 
 export interface CreateOptions {
@@ -204,6 +206,16 @@ export class TerminalMux {
         // resync from such a claim replays a hole onto the screen.
         this.sessions.get(sessionId)?.onData(payload, decoded.seq);
         break;
+
+      case CMD.RESIZE: {
+        // 서버→클라 방향의 같은 4바이트 프레임 — 기하의 진실은 서버 하나다.
+        if (payload.length >= 4) {
+          const cols = payload[0] | (payload[1] << 8);
+          const rows = payload[2] | (payload[3] << 8);
+          if (cols > 0 && rows > 0) this.sessions.get(sessionId)?.onResize?.(cols, rows);
+        }
+        break;
+      }
 
       case CMD.SNAPSHOT: {
         // The snapshot's watermark is committed by the consumer's ack after

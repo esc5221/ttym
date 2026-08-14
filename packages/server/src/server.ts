@@ -1289,6 +1289,8 @@ export async function createServer(port: number): Promise<TtymServer> {
     const clientSessions = new Set<number>();
     const batchers = new Map<number, SessionBatcher>();
     const exitWired = new Set<number>(); // prevent duplicate onExit per session
+    // 기하 변경을 이 연결의 viewer에게 밀어주는 구독 — 연결 종료 시 해지
+    const geometryUnsubs = new Map<number, () => void>();
 
     function getBatcher(sessionId: number): SessionBatcher {
       let batcher = batchers.get(sessionId);
@@ -1504,6 +1506,17 @@ export async function createServer(port: number): Promise<TtymServer> {
       session.addViewer(viewerId, dataCb, mode);
       clientSessions.add(sessionId);
 
+      // 서버→클라 RESIZE: PTY 기하의 진실은 서버 하나고, follow 뷰어(모바일)는
+      // 이 프레임으로 추종한다. fit 뷰어는 무시 — 수신은 선언일 뿐 강제가 아니다.
+      if (!geometryUnsubs.has(sessionId)) {
+        geometryUnsubs.set(sessionId, session.onGeometry((cols, rows) => {
+          const geo = Buffer.allocUnsafe(4);
+          geo.writeUInt16LE(cols, 0);
+          geo.writeUInt16LE(rows, 2);
+          safeSend(ws, encode(sessionId, CMD.RESIZE, geo));
+        }));
+      }
+
       if (!exitWired.has(sessionId)) {
         exitWired.add(sessionId);
         session.onExit((code) => {
@@ -1517,6 +1530,8 @@ export async function createServer(port: number): Promise<TtymServer> {
           clientSessions.delete(sessionId);
           batchers.delete(sessionId);
           exitWired.delete(sessionId);
+          geometryUnsubs.get(sessionId)?.();
+          geometryUnsubs.delete(sessionId);
           safeSend(ws, encode(sessionId, CMD.DESTROY));
         });
       }
@@ -1751,6 +1766,8 @@ export async function createServer(port: number): Promise<TtymServer> {
       }
       batchers.clear();
       clientSessions.clear();
+      for (const unsub of geometryUnsubs.values()) unsub();
+      geometryUnsubs.clear();
     });
   });
 

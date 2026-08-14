@@ -8,6 +8,11 @@ export interface LayoutViewProps {
   onResize?: (path: number[], sizes: number[]) => void;
   /** Client-local zoom: render just this pane at full size. Tree untouched. */
   zoomedSessionId?: number | null;
+  /**
+   * 좁은 화면용 1열 스택: 트리를 중위순회한 pane들을 세로로 쌓는다.
+   * 트리와 비율은 불변 — 투영만 바뀐다. 스플리터는 무의미해서 생략.
+   */
+  stacked?: boolean;
   /** Smallest a pane may be dragged to, in px of the split axis. */
   minPanePx?: number;
   splitterPx?: number;
@@ -41,6 +46,7 @@ export function LayoutView({
   renderPane,
   onResize,
   zoomedSessionId = null,
+  stacked = false,
   minPanePx = 90,
   splitterPx = 5,
   splitterColor = 'rgba(148,170,200,.16)',
@@ -54,6 +60,24 @@ export function LayoutView({
   // the tree that contains it; dropping it earlier would snap the divider
   // back for a frame.
   useEffect(() => { setDrag(null); }, [layout]);
+
+  if (stacked && !(zoomedSessionId !== null && findPane(layout, zoomedSessionId))) {
+    const panes: Array<{ sessionId: number; path: number[] }> = [];
+    const collect = (node: LayoutNode, path: number[]) => {
+      if (node.type === 'pane') { panes.push({ sessionId: node.sessionId, path }); return; }
+      node.children.forEach((child, i) => collect(child, [...path, i]));
+    };
+    collect(layout, []);
+    return (
+      <div style={{ width: '100%', height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        {panes.map(({ sessionId, path }) => (
+          <div key={sessionId} style={{ flex: '0 0 clamp(240px, 45dvh, 480px)', display: 'flex', minWidth: 0, overflow: 'hidden' }}>
+            {renderPane(sessionId, path)}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   if (zoomedSessionId !== null && findPane(layout, zoomedSessionId)) {
     // display:flex — pane 루트는 flex:1로 늘어나는 물건이라, 컨테이너가

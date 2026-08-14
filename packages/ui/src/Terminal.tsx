@@ -20,6 +20,8 @@ export interface TerminalProps {
    */
   enableWebgl?: boolean;
   localEcho?: boolean;
+  /** fit(기본) | follow — follow는 서버 기하 추종, resize를 절대 보내지 않는다 (모바일). */
+  geometry?: 'fit' | 'follow';
   className?: string;
   style?: React.CSSProperties;
   onCreated?: (sessionId: number) => void;
@@ -33,7 +35,7 @@ export interface TerminalProps {
  * reparents the DOM out and drops the stream, nothing is disposed. Scrollback
  * and renderer state are wherever the session is next displayed.
  */
-export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, enableWebgl = true, localEcho = false, className, style, onCreated, onExit, onBell }: TerminalProps) {
+export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, enableWebgl = true, localEcho = false, geometry = 'fit', className, style, onCreated, onExit, onBell }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<TerminalHost | null>(null);
   const onExitRef = useRef(onExit);
@@ -42,8 +44,8 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
   onExitRef.current = onExit;
   onBellRef.current = onBell;
   onCreatedRef.current = onCreated;
-  const optsRef = useRef<HostOptions>({ mode, fontSize, enableWebgl, localEcho });
-  optsRef.current = { mode, fontSize, enableWebgl, localEcho };
+  const optsRef = useRef<HostOptions>({ mode, fontSize, enableWebgl, localEcho, geometry });
+  optsRef.current = { mode, fontSize, enableWebgl, localEcho, geometry };
 
   useEffect(() => {
     const el = containerRef.current;
@@ -113,7 +115,7 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
   }, [mux, attachId, cmd, cwd]);
 
   useEffect(() => {
-    hostRef.current?.applyOptions({ mode, fontSize, enableWebgl, localEcho });
+    hostRef.current?.applyOptions({ mode, fontSize, enableWebgl, localEcho, geometry });
   }, [mode, fontSize, enableWebgl, localEcho]);
 
   return (

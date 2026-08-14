@@ -1,4 +1,5 @@
 import type React from 'react';
+import { useEffect, useState } from 'react';
 import * as api from '@ttym/api';
 import { workspaceLabel, memberNameBySession, layoutToSessionIds, type LayoutNode } from '@ttym/shared';
 
@@ -113,6 +114,22 @@ export function getTtymHost(): string {
   // fallback: same host, port 7690
   return `${h}:7690`;
 }
+/** 입력 성격: 터치가 주 입력 수단인가 — 키바·상시 액션·webgl off의 기준.
+ *  공간 성격(useNarrow)과 분리: 아이패드+키보드는 coarse지만 넓다. */
+export const IS_COARSE = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true;
+
+/** 공간 성격: 1열 스택의 기준. 리스너 구독이라 회전/리사이즈에 따라간다. */
+export function useNarrow(maxPx = 720): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia?.(`(max-width: ${maxPx}px)`).matches === true);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${maxPx}px)`);
+    const onChange = () => setNarrow(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [maxPx]);
+  return narrow;
+}
+
 export const TTYM_HOST = getTtymHost();
 export const isSecure = window.location.protocol === 'https:';
 export const API_BASE = `${isSecure ? 'https' : 'http'}://${TTYM_HOST}`;
@@ -290,6 +307,8 @@ export const emptyPaneStyle: React.CSSProperties = {
 };
 
 export const tabStyle: React.CSSProperties = {
+  flexShrink: 0,
+  whiteSpace: 'nowrap',
   display: 'inline-flex',
   alignItems: 'center',
   gap: 7,

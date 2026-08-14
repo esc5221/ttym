@@ -15,7 +15,7 @@ import {
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
-import { actionBtnStyle, tabStyle, AGENT_COLORS, API_BASE, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { actionBtnStyle, tabStyle, AGENT_COLORS, API_BASE, IS_COARSE, useNarrow, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
 import { MapPage } from './MapPage.js';
 import { SettingsModal } from './SettingsModal.js';
@@ -87,6 +87,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   const [deadSessions, setDeadSessions] = useState<Set<number>>(new Set());
   const [focusedSid, setFocusedSid] = useState<number | null>(null);
   const [zoomedSid, setZoomedSid] = useState<number | null>(null);
+  const narrowLayout = useNarrow();
   const [attachOpen, setAttachOpen] = useState(false);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [standaloneSessions, setStandaloneSessions] = useState<Array<{ id: number; cwd?: string }>>([]);
@@ -525,12 +526,14 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
           </span>
         </div>
-        <div style={{ flex: 1, minHeight: 0, padding: U.termPad }}>
+        <div style={{ flex: 1, minHeight: 0, padding: U.termPad, ...(IS_COARSE ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}>
           {!dead ? (
             <Terminal
               mux={mux}
               attachId={sid}
-              fontSize={fontSize}
+              fontSize={IS_COARSE ? 12 : fontSize}
+              geometry={IS_COARSE ? 'follow' : 'fit'}
+              enableWebgl={!IS_COARSE}
               localEcho={localEchoEnabled}
               onExit={() => setDeadSessions((prev) => new Set(prev).add(sid))}
               onBell={() => setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid)))}
@@ -599,6 +602,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             renderPane={renderPane}
             onResize={commitResize}
             zoomedSessionId={zoomedSid}
+            stacked={narrowLayout}
             splitterPx={U.splitterPx}
             splitterColor={U.splitterColor}
             splitterActiveColor="var(--accent)"
@@ -1229,6 +1233,10 @@ const tabStripStyle: React.CSSProperties = {
   background: 'var(--bg0)',
   fontFamily: 'var(--mono)',
   flexShrink: 0,
+  // 좁은 화면에선 탭바가 스스로 가로 스크롤 — 페이지 전체가 밀리는 것의 방지책.
+  // 데스크톱에선 내용이 다 들어가므로 아무 효과 없다.
+  overflowX: 'auto',
+  scrollbarWidth: 'none',
   userSelect: 'none',
 };
 
