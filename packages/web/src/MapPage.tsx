@@ -114,7 +114,7 @@ const MAP_CSS = `
 .wmap .st.run  { color:var(--wm-run); }
 .wmap .st.warn { color:var(--wm-warn); }
 .wmap .agestamp { color:var(--wm-faint); margin-left:calc(var(--wu)*0.5); font-size:calc(var(--wu)*0.78); }
-.wmap .empty-hint { color:var(--wm-dim); margin-top:calc(var(--wu)*4); text-align:center; }
+.wmap .empty-hint { color:var(--wm-dim); font-size:calc(var(--wu)*0.82); margin-left:calc(var(--wu)*1.4); margin-right:calc(var(--wu)*0.6); }
 .wmap .empty-hint code { color:var(--wm-soft); }
 `;
 
@@ -256,6 +256,9 @@ export function MapPage() {
           <i style={{ color: 'var(--wm-wait)' }}>—</i> <span className="w">waiting{'\u00A0'}</span>{view.counts.wait}
           {view.newestSummary > 0 ? <span className="w stamp">{'\u00A0'}· summarized {ago(view.newestSummary, now)}</span> : null}
         </span>
+        {!view.summarized ? (
+          <span className="empty-hint">no summaries yet — <code>ttym map refresh</code> or</span>
+        ) : null}
         <button
           className={`refresh${refreshing ? ' busy' : ''}`}
           onClick={() => void runRefresh()}
@@ -269,12 +272,6 @@ export function MapPage() {
           </svg>
         </button>
       </header>
-
-      {!view.summarized ? (
-        <div className="empty-hint">
-          no summaries yet — run <code>ttym map refresh</code> once to fill this map.
-        </div>
-      ) : null}
 
       <main>
         {view.ordered.map((g) => (
