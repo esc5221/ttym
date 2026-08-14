@@ -795,7 +795,8 @@ function PreviewCard({ mux, sessionId, label, sublabel, status }: {
 const MAIN_VIEW_STORAGE_KEY = 'ttym-main-view';
 type MainView = 'preview' | 'map';
 function readMainView(): MainView {
-  try { return localStorage.getItem(MAIN_VIEW_STORAGE_KEY) === 'map' ? 'map' : 'preview'; } catch { return 'preview'; }
+  // 명시적으로 preview를 고른 적 있을 때만 preview — 신규 설치의 기본은 map.
+  try { return localStorage.getItem(MAIN_VIEW_STORAGE_KEY) === 'preview' ? 'preview' : 'map'; } catch { return 'map'; }
 }
 
 function App() {
