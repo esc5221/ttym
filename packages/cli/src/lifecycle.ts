@@ -28,9 +28,11 @@ export function cmdStart() {
   const port = getPort();
   const logFd = openSync(LOG_FILE, 'a');
 
+  const bind = readOption(process.argv.slice(3), '--bind');
   const env = {
     ...process.env,
     PORT: String(port),
+    ...(bind ? { TTYM_BIND: bind } : {}),
     // Default to the holder next to this CLI so the two stay in step, but let
     // an explicit TTYM_HOLDER_BIN win — session.ts already honours it, and
     // overwriting it here silently ignored anyone pinning a specific holder

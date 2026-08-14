@@ -1074,7 +1074,7 @@ export async function createServer(port: number): Promise<TtymServer> {
   await new Promise<void>((portFree, portTaken) => {
     const probe = createNetServer();
     probe.once('error', portTaken);
-    probe.listen(port, '0.0.0.0', () => probe.close(() => portFree()));
+    probe.listen(port, process.env.TTYM_BIND || '127.0.0.1', () => probe.close(() => portFree()));
   });
 
   const manager = new SessionManager();
@@ -1666,7 +1666,12 @@ export async function createServer(port: number): Promise<TtymServer> {
   httpServer.headersTimeout = 3000;
   httpServer.requestTimeout = 10000;
 
-  await new Promise<void>((resolve) => httpServer.listen(port, resolve));
+  // 기본은 loopback만 — 이 API는 무인증이라 열린 인터페이스가 곧 원격 셸이다.
+  // LAN 노출은 TTYM_BIND=0.0.0.0 (또는 특정 IP)로 부팅 시점에만 선택한다.
+  // config가 아닌 env인 이유: PATCH /api/config가 무인증이라, 파일에 두면
+  // 프록시 너머에서 바인드를 여는 원격 스위치가 된다.
+  const bindHost = process.env.TTYM_BIND || '127.0.0.1';
+  await new Promise<void>((resolve) => httpServer.listen(port, bindHost, resolve));
   // Hooks address the server that owns their session — not a hardcoded 7690.
   const boundPort = (httpServer.address() as { port: number } | null)?.port ?? port;
   manager.setExtraSessionEnv({ TTYM_PORT: String(boundPort) });

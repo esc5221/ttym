@@ -1038,6 +1038,22 @@ describe('meta ownership over HTTP', () => {
     await fetch(`http://127.0.0.1:${port}/api/sessions/${sid}`, { method: 'DELETE' }).catch(() => {});
   });
 
+  it('binds loopback by default; TTYM_BIND opens it deliberately', async () => {
+    // 무인증 API라 기본은 닫혀 있어야 한다 — 열림은 부팅 시점의 명시적 선택.
+    const addr = server!.httpServer.address() as { address: string };
+    expect(addr.address).toBe('127.0.0.1');
+
+    process.env.TTYM_BIND = '0.0.0.0';
+    try {
+      const open = await createServer(0);
+      const openAddr = open.httpServer.address() as { address: string };
+      expect(['0.0.0.0', '::']).toContain(openAddr.address);
+      await open.close();
+    } finally {
+      delete process.env.TTYM_BIND;
+    }
+  });
+
   it('agent states come as one batch — the N+1 sweep is gone', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const created = await fetch(`http://127.0.0.1:${port}/api/sessions`, {
