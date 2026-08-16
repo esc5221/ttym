@@ -78,6 +78,50 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
   );
 }
 
+/** 탭 스트립 우측의 드롭다운 메뉴.
+ *  스트립은 overflowX:auto라 클리핑 박스다 — x가 auto면 y의 visible도 auto로
+ *  승격되므로, 안쪽에 absolute로 띄운 패널은 스트립 높이(42px) 밖에서 잘려
+ *  보이지 않는다. z-index로는 뚫리지 않는다. 그래서 패널은 body 포털 + fixed로
+ *  클리핑 박스 밖에 살고(SettingsModal과 같은 문법), 위치는 버튼 rect가 정한다. */
+function StripMenu({ label, open, onToggle, children }: {
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const anchorRef = useRef<HTMLButtonElement | null>(null);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+
+  useEffect(() => {
+    if (!open) { setRect(null); return; }
+    const measure = () => setRect(anchorRef.current?.getBoundingClientRect() ?? null);
+    measure();
+    window.addEventListener('resize', measure);
+    // capture로 모든 스크롤을 듣는다 — 스트립 자신의 가로 스크롤도 앵커를 옮긴다.
+    window.addEventListener('scroll', measure, true);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure, true);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button ref={anchorRef} onClick={onToggle} style={stripBtnStyle}>{label}</button>
+      {open && rect ? createPortal(
+        <div style={{
+          ...attachDropdownStyle,
+          top: rect.bottom + 6,
+          right: Math.max(6, window.innerWidth - rect.right),
+        }}>
+          {children}
+        </div>,
+        document.body,
+      ) : null}
+    </>
+  );
+}
+
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
 function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number }) {
@@ -570,39 +614,29 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   const stripActions = (
     <>
       <button onClick={() => void doSplit('right')} style={stripBtnStyle} title="split right of focused · ⌘\\">+ split</button>
-      <span style={{ position: 'relative', display: 'inline-block' }}>
-        <button onClick={() => setLayoutMenuOpen((v) => !v)} style={stripBtnStyle}>layout ▾</button>
-        {layoutMenuOpen ? (
-          <div style={attachDropdownStyle}>
-            <div style={attachDropdownTitleStyle}>preset — 멤버는 그대로, 배치만 바뀐다</div>
-            {(['auto', 'even-h', 'even-v', 'main-v', 'tiled'] as const).map((preset) => (
-              <button key={preset} onClick={() => void applyPreset(preset)} style={attachDropdownItemStyle}>
-                {preset}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </span>
-      <span style={{ position: 'relative', display: 'inline-block' }}>
-        <button onClick={toggleAttach} style={stripBtnStyle}>+ attach</button>
-        {attachOpen ? (
-          <div style={attachDropdownStyle}>
-            <div style={attachDropdownTitleStyle}>detached sessions</div>
-            {attachLoading ? (
-              <div style={attachDropdownEmptyStyle}>loading…</div>
-            ) : standaloneSessions.length === 0 ? (
-              <div style={attachDropdownEmptyStyle}>no detached sessions</div>
-            ) : (
-              standaloneSessions.map((s) => (
-                <button key={s.id} onClick={() => void attachSession(s.id)} style={attachDropdownItemStyle} title={s.cwd ?? ''}>
-                  <span style={{ color: 'var(--text)' }}>#{s.id}</span>
-                  {s.cwd ? <span style={{ color: 'var(--text-soft)', marginLeft: 8, fontSize: 10 }}>{s.cwd}</span> : null}
-                </button>
-              ))
-            )}
-          </div>
-        ) : null}
-      </span>
+      <StripMenu label="layout ▾" open={layoutMenuOpen} onToggle={() => setLayoutMenuOpen((v) => !v)}>
+        <div style={attachDropdownTitleStyle}>preset — 멤버는 그대로, 배치만 바뀐다</div>
+        {(['auto', 'even-h', 'even-v', 'main-v', 'tiled'] as const).map((preset) => (
+          <button key={preset} onClick={() => void applyPreset(preset)} style={attachDropdownItemStyle}>
+            {preset}
+          </button>
+        ))}
+      </StripMenu>
+      <StripMenu label="+ attach" open={attachOpen} onToggle={toggleAttach}>
+        <div style={attachDropdownTitleStyle}>detached sessions</div>
+        {attachLoading ? (
+          <div style={attachDropdownEmptyStyle}>loading…</div>
+        ) : standaloneSessions.length === 0 ? (
+          <div style={attachDropdownEmptyStyle}>no detached sessions</div>
+        ) : (
+          standaloneSessions.map((s) => (
+            <button key={s.id} onClick={() => void attachSession(s.id)} style={attachDropdownItemStyle} title={s.cwd ?? ''}>
+              <span style={{ color: 'var(--text)' }}>#{s.id}</span>
+              {s.cwd ? <span style={{ color: 'var(--text-soft)', marginLeft: 8, fontSize: 10 }}>{s.cwd}</span> : null}
+            </button>
+          ))
+        )}
+      </StripMenu>
     </>
   );
 
@@ -1367,10 +1401,9 @@ const workspaceNameInputStyle: React.CSSProperties = {
   minWidth: 160,
 };
 
+// top·right는 StripMenu가 앵커 rect로 채운다 — 스트립의 클리핑 밖에 사는 대가.
 const attachDropdownStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: 'calc(100% + 6px)',
-  right: 0,
+  position: 'fixed',
   minWidth: 240,
   maxHeight: 320,
   overflowY: 'auto',
