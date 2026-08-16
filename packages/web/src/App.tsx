@@ -955,6 +955,28 @@ function App() {
     return () => { cancelled = true; window.clearInterval(fallback); unsubscribe?.(); };
   }, [connected, workspaces.map((w) => w.id + ':' + layoutToSessionIds(w.layout).join('.')).join('|')]);
 
+  // ── 탭 넘침: 탭 구간만 가로 스크롤 (스크롤바 없음, 양끝 페이드가 힌트) ──
+  const tabScrollerRef = useRef<HTMLDivElement | null>(null);
+  const [tabFade, setTabFade] = useState({ left: false, right: false });
+  const updateTabFade = useCallback(() => {
+    const el = tabScrollerRef.current;
+    if (!el) return;
+    const left = el.scrollLeft > 2;
+    const right = el.scrollLeft < el.scrollWidth - el.clientWidth - 2;
+    setTabFade((prev) => (prev.left === left && prev.right === right ? prev : { left, right }));
+  }, []);
+  useEffect(() => {
+    updateTabFade();
+    window.addEventListener('resize', updateTabFade);
+    return () => window.removeEventListener('resize', updateTabFade);
+  }, [updateTabFade, workspaces.length]);
+  // 활성 탭은 어디서 열어도 시야에 들어온다.
+  useEffect(() => {
+    if (route.page !== 'workspace') return;
+    const el = tabScrollerRef.current?.querySelector(`[data-ws-tab="${route.id}"]`);
+    (el as HTMLElement | null)?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }, [route, workspaces.length]);
+
   // ── 탭 드래그 재배치 — 4px 문턱 전까지는 클릭/더블클릭 문법 그대로 ──
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const suppressTabClick = useRef(false);
@@ -1168,6 +1190,18 @@ function App() {
           style={{ ...tabStyle, ...(homeActive ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}
           title="home · ⌘1"
         >⌂</button>
+        <div style={{ position: 'relative', flex: 1, minWidth: 0, alignSelf: 'stretch', display: 'flex' }}>
+          <div
+            ref={tabScrollerRef}
+            className="tab-scroller"
+            onScroll={updateTabFade}
+            onWheel={(e) => {
+              // 세로 휠을 가로로 — 트랙패드 가로 제스처는 네이티브로 이미 온다.
+              const el = tabScrollerRef.current;
+              if (el && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY;
+            }}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: 1 }}
+          >
         {workspaces.map((ws, i) => {
           const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
           const running = ids.map((id) => agentStates[id]).find((a) => a?.active && a.kind);
@@ -1220,7 +1254,10 @@ function App() {
           );
         })}
         <button onClick={() => void createWorkspaceTab()} style={tabAddStyle} title="new workspace">+</button>
-        <span style={{ marginLeft: 'auto' }} />
+          </div>
+          {tabFade.left ? <div style={{ ...tabFadeStyle, left: 0, background: 'linear-gradient(to right, var(--bg0), transparent)' }} /> : null}
+          {tabFade.right ? <div style={{ ...tabFadeStyle, right: 0, background: 'linear-gradient(to left, var(--bg0), transparent)' }} /> : null}
+        </div>
         <span ref={setStripSlot} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} />
         <SettingsModal
           localEchoEnabled={localEchoEnabled}
@@ -1241,6 +1278,10 @@ function App() {
     </div>
   );
 }
+
+const tabFadeStyle: React.CSSProperties = {
+  position: 'absolute', top: 0, bottom: 0, width: 26, pointerEvents: 'none', zIndex: 1,
+};
 
 const tabStripStyle: React.CSSProperties = {
   display: 'flex',
