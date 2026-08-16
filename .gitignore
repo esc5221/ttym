@@ -21,3 +21,6 @@ packages/desktop/src-tauri/gen/
 # Working artifacts kept out of the tree (design HTML, roadmaps, council notes)
 docs/local/
 npm-staging/
+
+# Per-machine Claude Code notes (loads after CLAUDE.md, never shared)
+CLAUDE.local.md

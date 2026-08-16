@@ -9,7 +9,9 @@ packages/cli/      CLI (@ttym/cli → esbuild 번들 dist/ttym. bin/ttym은 얇�
 packages/server/   서버 (@ttym/server → dist/ttym-server.js)
 packages/web/      브라우저 앱 (@ttym/web — 구 demo)
 packages/desktop/  Tauri 앱 (@ttym/desktop — 구 native)
-packages/ui/       터미널 컴포넌트 + mux (@ttym/ui — 구 client)
+packages/ui/       React 터미널 컴포넌트 (@ttym/ui — 구 client). vt의 TerminalMux를 재export
+packages/vt/       DOM·React 없는 클라이언트 코어 (@ttym/vt) — TerminalMux(WS·attach·
+                   seq ACK·snapshot/delta replay·push 이벤트) · ansi · local-echo · panels
 packages/protocol/ wire 포맷 (@ttym/protocol) — 서버·클라 공용 단일 구현
 packages/api/      HTTP 클라이언트 (@ttym/api)
 packages/shared/   도메인 규칙 — layout 트리 연산 (@ttym/shared)
