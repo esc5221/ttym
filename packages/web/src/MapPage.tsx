@@ -77,17 +77,21 @@ const MAP_CSS = `
 .wmap header .refresh.busy svg { animation:wmap-spin 1s linear infinite !important; }
 @keyframes wmap-spin { to { transform:rotate(360deg); } }
 
-/* 폭이 주는 만큼 열이 접힌다: 3 → 2 → 1. 열 배정은 정렬 힌트로만 쓴다. */
+/* 폭이 주는 만큼 열이 접힌다: 4 → 3 → 2 → 1. 열 배정은 정렬 힌트로만 쓴다. */
 .wmap main { columns:3; column-gap:calc(var(--wu)*3.0); }
+@media (min-width:1800px) { .wmap main { columns:4; } }
 @media (max-width:1500px) { .wmap main { columns:2; } }
 @media (max-width:920px)  { .wmap main { columns:1; } }
-.wmap .stream { break-inside:avoid; margin-bottom:calc(var(--wu)*2.4); }
+/* 쪼갬 단위는 workspace다 — stream을 통짜로 지키면 긴 줄기 하나가 열 하나를
+   독차지하고 옆 열은 빈다(실측 117px 넘침의 진범). 헤더만 고아가 안 되게 지킨다. */
+.wmap .stream { margin-bottom:calc(var(--wu)*2.4); }
 .wmap .stream > h2 {
   font-size:calc(var(--wu)*0.95); font-weight:700; color:var(--wm-tx); margin:0;
   padding-bottom:calc(var(--wu)*0.5); margin-bottom:calc(var(--wu)*1.1);
   border-bottom:1px solid var(--wm-line);
+  break-inside:avoid; break-after:avoid;
 }
-.wmap .ws { margin-bottom:calc(var(--wu)*1.6); }
+.wmap .ws { margin-bottom:calc(var(--wu)*1.6); break-inside:avoid; }
 .wmap .ws:last-child { margin-bottom:0; }
 .wmap .wsh { color:var(--wm-soft); font-size:calc(var(--wu)*0.85); margin-bottom:calc(var(--wu)*0.2); }
 .wmap .wsh b { color:var(--wm-tx); font-weight:700; }
@@ -223,7 +227,7 @@ export function MapPage() {
   }, [data]);
 
   if (!data || !view) {
-    return <div className="wmap"><div className="empty-hint">loading…</div></div>;
+    return <div className="wmap thin-scroll"><div className="empty-hint">loading…</div></div>;
   }
 
   const renderSession = (sid: number, name: string | undefined, isLast: boolean, wsId?: string) => {
@@ -247,7 +251,7 @@ export function MapPage() {
   };
 
   return (
-    <div className="wmap">
+    <div className="wmap thin-scroll">
       <header>
         <span className="legend">
           <i style={{ color: 'var(--wm-claude)' }}>●</i> <span className="w">claude{'\u00A0'}</span>{view.counts.claude}&nbsp;&nbsp;
