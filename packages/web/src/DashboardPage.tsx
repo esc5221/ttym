@@ -178,7 +178,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
           className="reveal"
           onClick={(e) => { e.stopPropagation(); void terminateSession(sid, wsId); }}
           style={{ ...closeBtnStyle, marginLeft: 0, flexShrink: 0 }}
-          title="세션 종료"
+          title="terminate session"
         >×</button>
       </div>
     );
@@ -187,7 +187,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
   // workspace 분할 미니뷰 — 고정(ws)과 hover 양쪽에서 쓴다.
   const renderWsMini = (wsId: string) => {
     const target = workspaces.find((x) => x.id === wsId);
-    if (!target) return <div style={{ color: 'var(--text-dim)', padding: 20, fontSize: 12 }}>workspace가 사라졌다</div>;
+    if (!target) return <div style={{ color: 'var(--text-dim)', padding: 20, fontSize: 12 }}>workspace is gone</div>;
     const names = memberNameBySession(target.members);
     return (
       <div style={{ flex: 1, minHeight: 0 }}>
@@ -201,7 +201,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
             <div key={sid} style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0 }}>
               <div
                 onClick={() => setPanel({ kind: 'live', sid })}
-                title="클릭: live로 전환"
+                title="click: switch to live"
                 style={{ display: 'flex', alignItems: 'center', gap: 6, height: 22, padding: '0 8px', background: 'var(--bg2)', borderBottom: '1px solid var(--line)', fontSize: 10, cursor: 'pointer', flexShrink: 0 }}
               >
                 <span style={{ color: agentStates[sid]?.kind ? AGENT_COLORS[agentStates[sid]!.kind!] : 'var(--text-soft)', fontWeight: 700 }}>
@@ -268,7 +268,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
                 className="reveal-parent"
                 onClick={() => setPanel({ kind: 'ws', wsId: ws.id })}
                 onMouseEnter={(e) => { setHoveredWsId(ws.id); moveHl(e.currentTarget.parentElement as HTMLElement, 'ws'); }}
-                title="hover: 분할 미리보기 · 클릭: 고정 · 탭: 전체 열기"
+                title="hover: preview split · click: pin · tap: open"
                 style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', fontSize: 12, fontWeight: 700, color: 'var(--text-soft)', cursor: 'pointer' }}
               >
                 {workspaceDisplayLabel(ws)}
@@ -283,7 +283,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
                     className="reveal"
                     onClick={(e) => { e.stopPropagation(); void deleteWorkspaceCascade(ws); }}
                     style={closeBtnStyle}
-                    title="workspace 삭제 (세션 종료)"
+                    title="delete workspace · terminates its sessions"
                   >×</button>
                 </span>
               </div>
@@ -311,7 +311,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
               <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
                 <button onClick={() => navigate({ page: 'session', id: panel.sid })} style={miniLinkBtnStyle}>open</button>
                 <button onClick={() => void copySessionUrl(panel.sid)} style={miniLinkBtnStyle}>copy</button>
-                <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="미리보기로 (esc)">×</button>
+                <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="back to preview (esc)">×</button>
               </span>
             </>
           ) : panel.kind === 'ws' ? (
@@ -320,7 +320,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
               <span>{(() => { const w = workspaces.find((x) => x.id === panel.wsId); return w ? workspaceDisplayLabel(w) : panel.wsId; })()}</span>
               <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
                 <button onClick={() => navigate({ page: 'workspace', id: panel.wsId })} style={miniLinkBtnStyle}>open</button>
-                <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="미리보기로 (esc)">×</button>
+                <button onClick={() => setPanel({ kind: 'hover' })} style={miniLinkBtnStyle} title="back to preview (esc)">×</button>
               </span>
             </>
           ) : (

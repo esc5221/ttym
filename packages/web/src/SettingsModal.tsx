@@ -272,7 +272,7 @@ function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }
             value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !refreshing) void runRefresh(); }}
-            placeholder="one-off instruction, e.g. gemma 작업은 전부 한 줄기로 (optional)"
+            placeholder="one-off instruction, e.g. keep gemma work in one lane (optional)"
             style={{ ...inputStyle, flex: 1, width: 'auto' }}
             disabled={refreshing}
           />
