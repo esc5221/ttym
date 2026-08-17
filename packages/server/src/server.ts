@@ -89,12 +89,31 @@ function isSafeAssetPath(pathname: string): boolean {
   return !pathname.includes('..');
 }
 
+/**
+ * 캐시 정책은 파일 성격이 정한다.
+ *
+ * vite가 자산 이름에 내용 해시를 박으므로(index-ahgPC7aj.js) 그 파일들은 내용이
+ * 바뀌면 이름도 바뀐다 — 오래 캐시해도 낡은 것을 볼 일이 없다. 반면 index.html은
+ * 그 해시를 가리키는 지도라서 캐시하면 안 된다. 지도만 낡으면 브라우저가 이미
+ * 사라진 번들을 찾아가 빈 화면이 된다.
+ *
+ * 전에는 둘 다 max-age=300 이었다. 한 번 빌드할 때마다 5분짜리 시한폭탄이 깔린
+ * 셈이라, 실제로 폰과 데스크톱에서 세 번 빈 화면을 봤다.
+ */
+function cacheControlFor(filePath: string): string {
+  // /assets/ 아래는 해시가 붙은 빌드 산출물이다
+  if (filePath.includes('/assets/')) return 'public, max-age=31536000, immutable';
+  if (filePath.endsWith('.html')) return 'no-cache';
+  // 폰트처럼 이름이 고정된 것은 짧게 — 바꿀 때 URL 쿼리로 무효화한다
+  return 'public, max-age=300';
+}
+
 async function serveStaticFile(res: ServerResponse, filePath: string): Promise<boolean> {
   try {
     const body = await readFile(filePath);
     const contentType = MIME_TYPES[extname(filePath)] ?? 'application/octet-stream';
     res.writeHead(200, {
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': cacheControlFor(filePath),
       'Content-Type': contentType,
     });
     res.end(body);
