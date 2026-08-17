@@ -15,9 +15,10 @@ import {
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
-import { actionBtnStyle, tabStyle, AGENT_COLORS, API_BASE, IS_COARSE, useNarrow, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { actionBtnStyle, tabStyle, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
 import { KeyBar } from './KeyBar.js';
+import { PhoneWorkspace } from './PhoneWorkspace.js';
 import { MapPage } from './MapPage.js';
 import { SettingsModal } from './SettingsModal.js';
 
@@ -132,7 +133,8 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
   const [deadSessions, setDeadSessions] = useState<Set<number>>(new Set());
   const [focusedSid, setFocusedSid] = useState<number | null>(null);
   const [zoomedSid, setZoomedSid] = useState<number | null>(null);
-  const narrowLayout = useNarrow();
+  const surface = useSurface();
+  const touch = surface !== 'desktop';
   // 폰의 [맞춤] 토글: 이 pane의 PTY를 폰 크기로 빌려 쓴다 (떠나면 자동 반납)
   const [fitSids, setFitSids] = useState<Set<number>>(new Set);
   const [attachOpen, setAttachOpen] = useState(false);
@@ -564,11 +566,11 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             ) : null}
             {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'var(--mono)' }}>zoom</span> : null}
             {canRestore ? (
-              <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="이전 에이전트 세션 복원">restore</button>
+              <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="resume last agent session">restore</button>
             ) : null}
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('right', sid); }} style={miniLinkBtnStyle} title="split right">│</button>
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('down', sid); }} style={miniLinkBtnStyle} title="split down">─</button>
-            {IS_COARSE ? (
+            {touch ? (
               <button
                 className="reveal"
                 onClick={(e) => {
@@ -576,25 +578,25 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
                   setFitSids((prev) => { const next = new Set(prev); if (next.has(sid)) next.delete(sid); else next.add(sid); return next; });
                 }}
                 style={{ ...miniLinkBtnStyle, ...(fitSids.has(sid) ? { color: 'var(--accent)' } : null) }}
-                title="이 화면 크기로 빌려쓰기 (떠나면 원상복구)"
-              >{fitSids.has(sid) ? '원본' : '맞춤'}</button>
+                title="borrow this viewport size · restored on leave"
+              >{fitSids.has(sid) ? 'reset' : 'fit'}</button>
             ) : null}
-            <button className="reveal" onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={miniLinkBtnStyle} title="detach (세션 유지)">detach</button>
+            <button className="reveal" onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={miniLinkBtnStyle} title="detach · session keeps running">detach</button>
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void copySessionUrl(sid); }} style={miniLinkBtnStyle}>copy</button>
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
           </span>
         </div>
-        <div style={{ flex: 1, minHeight: 0, padding: U.termPad, ...(IS_COARSE ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}>
+        <div style={{ flex: 1, minHeight: 0, padding: U.termPad, ...(touch ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}>
           {!dead ? (
             <Terminal
               mux={mux}
               attachId={sid}
-              fontSize={IS_COARSE ? 14 : fontSize}
-              geometry={IS_COARSE ? (fitSids.has(sid) ? 'borrow' : 'follow') : 'fit'}
-              enableWebgl={!IS_COARSE}
+              fontSize={touch ? 14 : fontSize}
+              geometry={touch ? (fitSids.has(sid) ? 'borrow' : 'follow') : 'fit'}
+              enableWebgl={!touch}
               localEcho={localEchoEnabled}
               onExit={() => setDeadSessions((prev) => new Set(prev).add(sid))}
-              onBell={() => { if (IS_COARSE) navigator.vibrate?.(60); setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid))); }}
+              onBell={() => { if (touch) navigator.vibrate?.(60); setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid))); }}
             />
           ) : (
             <div style={emptyPaneStyle}>
@@ -615,7 +617,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
     <>
       <button onClick={() => void doSplit('right')} style={stripBtnStyle} title="split right of focused · ⌘\\">+ split</button>
       <StripMenu label="layout ▾" open={layoutMenuOpen} onToggle={() => setLayoutMenuOpen((v) => !v)}>
-        <div style={attachDropdownTitleStyle}>preset — 멤버는 그대로, 배치만 바뀐다</div>
+        <div style={attachDropdownTitleStyle}>preset · same members, new arrangement</div>
         {(['auto', 'even-h', 'even-v', 'main-v', 'tiled'] as const).map((preset) => (
           <button key={preset} onClick={() => void applyPreset(preset)} style={attachDropdownItemStyle}>
             {preset}
@@ -640,6 +642,44 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
     </>
   );
 
+  // 폰은 분할을 투영하는 대신 화면을 둘로 나눈다 (카드 목록 / 전체화면).
+  // 6인치에서 pane 두 개를 동시에 조작하는 건 물리적으로 안 되고, 동시에
+  // 감시하는 건 되니까. 스크롤할 물건도 모드마다 하나로 줄어든다.
+  if (surface === 'phone') {
+    // 스트립 액션은 폰에서 접는다. 393px 폭의 절반을 split·layout·attach가
+    // 먹는데, 터미널 추가는 카드 목록 아래에 있고 분할 프리셋은 폰에서 쓸 데가
+    // 없다. attach는 데스크톱에서 하면 된다.
+    return (
+      <>
+        {ws ? (
+          <PhoneWorkspace
+            mux={mux}
+            sessionIds={sessionIds}
+            memberNames={memberNames}
+            sessionCwds={sessionCwds}
+            agentStates={agentStates}
+            deadSessions={deadSessions}
+            bells={bells}
+            focusedSid={focusedSid}
+            onFocusSid={(sid) => {
+              setFocusedSid(sid);
+              setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; });
+            }}
+            localEchoEnabled={localEchoEnabled}
+            onSearch={(sid) => setSearch({ sid, query: '', index: -1, count: 0 })}
+            onExit={(sid) => setDeadSessions((prev) => new Set(prev).add(sid))}
+            onBell={(sid) => { navigator.vibrate?.(60); setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid))); }}
+            onSplit={() => void doSplit('right')}
+            onRestart={(sid) => void restartAt(sid)}
+            onDetach={(sid) => void detachMember(sid)}
+          />
+        ) : (
+          <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'var(--mono)' }}>loading…</div>
+        )}
+      </>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {actionsSlot ? createPortal(stripActions, actionsSlot) : null}
@@ -650,7 +690,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             renderPane={renderPane}
             onResize={commitResize}
             zoomedSessionId={zoomedSid}
-            stacked={narrowLayout}
+            stacked={false}
             splitterPx={U.splitterPx}
             splitterColor={U.splitterColor}
             splitterActiveColor="var(--accent)"
@@ -659,7 +699,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
           <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'var(--mono)' }}>loading…</div>
         )}
       </div>
-      {IS_COARSE && focusedSid !== null ? (
+      {touch && focusedSid !== null ? (
         <KeyBar
           sid={focusedSid}
           onSearch={() => setSearch({ sid: focusedSid, query: '', index: -1, count: 0 })}
@@ -867,6 +907,8 @@ function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
   const [stripSlot, setStripSlot] = useState<HTMLSpanElement | null>(null);
+  const appSurface = useSurface();
+  const visualH = useViewportHeight();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
 
@@ -894,7 +936,7 @@ function App() {
           if (!cancelled) setConnected(true);
           return;
         } catch {
-          setConnectNote(`서버 연결 재시도 중… (${Math.round(delayMs / 1000) || 1}s)`);
+          setConnectNote(`retrying in ${Math.round(delayMs / 1000) || 1}s…`);
           await new Promise((r) => setTimeout(r, delayMs));
           delayMs = Math.min(delayMs * 2, 5000);
         }
@@ -909,7 +951,7 @@ function App() {
     const unsubscribe = mux.onDisconnect(() => {
       if (cancelled) return;
       setConnected(false);
-      setConnectNote('연결이 끊겼다 — 재연결 중…');
+      setConnectNote('disconnected · reconnecting…');
       const retry = async () => {
         let delay = 500;
         while (!cancelled) {
@@ -1004,11 +1046,17 @@ function App() {
     window.addEventListener('resize', updateTabFade);
     return () => window.removeEventListener('resize', updateTabFade);
   }, [updateTabFade, workspaces.length]);
-  // 활성 탭은 어디서 열어도 시야에 들어온다.
+  // 활성 탭은 어디서 열어도 시야 한가운데로 온다.
+  //
+  // nearest는 최소한만 움직여 탭을 가장자리에 붙여놓는다 — 탭 15개짜리에서
+  // 12번째를 열면 오른쪽 끝에 정확히 걸쳐(실측 right 370 = 스크롤러 끝) 양끝의
+  // 페이드에 흐려지고, 잘린 것처럼 읽힌다. center면 좌우 이웃이 함께 보여
+  // 지금 어디쯤인지도 같이 드러난다. 양 끝 탭은 center가 불가능해 자연히
+  // 가장자리에 서는데, 그건 실제로 끝이라 오해가 없다.
   useEffect(() => {
     if (route.page !== 'workspace') return;
     const el = tabScrollerRef.current?.querySelector(`[data-ws-tab="${route.id}"]`);
-    (el as HTMLElement | null)?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+    (el as HTMLElement | null)?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   }, [route, workspaces.length]);
 
   // ── 탭 드래그 재배치 — 4px 문턱 전까지는 클릭/더블클릭 문법 그대로 ──
@@ -1214,7 +1262,20 @@ function App() {
   const homeActive = route.page === 'dashboard' || route.page === 'overview';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    // 키보드가 올라오면 100vh는 그대로인데 가시 영역만 줄어든다. 폰에서는
+    // 그 차이가 곧 잘려나가는 높이라, 루트를 visualViewport에 묶는다.
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      height: appSurface !== 'desktop' && visualH !== null ? visualH : '100vh',
+      // pan-y: 세로 스크롤(터미널 scrollback)은 살리고 브라우저의 핀치 줌만 끊는다.
+      // 안 막으면 터미널에서 핀치할 때 페이지가 통째로 확대되어 visualViewport가
+      // 755에서 151까지 무너지고(실측), 루트를 거기 묶어놨으니 터미널이 한 줄로
+      // 찌그러진다. viewport meta의 user-scalable=no 는 쓰지 않는다 — 페이지 전체
+      // 접근성을 죽이는 데다 최신 Chrome은 무시하기도 한다.
+      // overscroll-behavior: 아래로 당겼을 때 Chrome이 페이지를 새로고침해
+      // 목록으로 튕기던 것(pull-to-refresh)을 끊는다.
+      ...(appSurface !== 'desktop' ? { touchAction: 'pan-y', overscrollBehavior: 'none' as const } : null),
+    }}>
       <div
         {...(IS_NATIVE ? { 'data-tauri-drag-region': true } : {})}
         style={{ ...tabStripStyle, background: UI_STYLES[uiStyle].stripBg, borderBottom: UI_STYLES[uiStyle].stripLine, paddingLeft: IS_NATIVE ? 84 : 10 }}

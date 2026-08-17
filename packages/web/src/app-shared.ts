@@ -118,7 +118,7 @@ export function getTtymHost(): string {
  *  공간 성격(useNarrow)과 분리: 아이패드+키보드는 coarse지만 넓다. */
 export const IS_COARSE = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true;
 
-/** 공간 성격: 1열 스택의 기준. 리스너 구독이라 회전/리사이즈에 따라간다. */
+/** 공간 성격: 1열 스택의 잣대. 리스너 구독이라 회전/리사이즈에 따라간다. */
 export function useNarrow(maxPx = 720): boolean {
   const [narrow, setNarrow] = useState(() => window.matchMedia?.(`(max-width: ${maxPx}px)`).matches === true);
   useEffect(() => {
@@ -128,6 +128,71 @@ export function useNarrow(maxPx = 720): boolean {
     return () => mq.removeEventListener('change', onChange);
   }, [maxPx]);
   return narrow;
+}
+
+/**
+ * 입력 성격(coarse)과 공간 성격(narrow)을 한 판정으로 합친 것.
+ *
+ * 두 갈래를 따로 쓰던 시절엔 조합 절반이 미정의였다 — 아이패드는 KeyBar가 뜨고
+ * follow인데 레이아웃만 데스크톱이었고, 데스크톱 창을 좁히면 스택이 되는데
+ * 폰트는 데스크톱 크기 그대로였다. 화면 성격을 묻는 곳은 전부 이걸 쓴다.
+ *
+ *   phone    카드 목록 / 전체화면 두 모드. KeyBar. follow. 폰트 14
+ *   tablet   분할 유지. KeyBar. follow. 폰트는 설정값
+ *   desktop  기존 그대로
+ *
+ * 검증용 강제 지정: localStorage.setItem('ttym-surface', 'phone') 후 새로고침.
+ * 데스크톱 브라우저는 pointer:coarse가 아니라 창만 좁혀선 폰이 되지 못한다.
+ */
+export type Surface = 'phone' | 'tablet' | 'desktop';
+export const SURFACE_STORAGE_KEY = 'ttym-surface';
+
+function forcedSurface(): Surface | null {
+  try {
+    const v = localStorage.getItem(SURFACE_STORAGE_KEY);
+    return v === 'phone' || v === 'tablet' || v === 'desktop' ? v : null;
+  } catch { return null; }
+}
+
+export function useSurface(): Surface {
+  const narrow = useNarrow();
+  const forced = forcedSurface();
+  if (forced) return forced;
+  if (!IS_COARSE) return 'desktop';
+  return narrow ? 'phone' : 'tablet';
+}
+
+/** 터치가 주 입력인가 — KeyBar·webgl off처럼 포인터만 보는 곳이 쓴다. */
+export function useTouch(): boolean {
+  const surface = useSurface();
+  return surface !== 'desktop';
+}
+
+/**
+ * 소프트키보드를 뺀 실제 가시 높이.
+ *
+ * 100vh(=innerHeight)는 키보드가 올라와도 변하지 않는다. S24+ 실측으로
+ * innerHeight 755가 그대로인 동안 visualViewport는 413까지 줄었다(키보드 342px).
+ * 그 차이만큼 화면 아래가 키보드 뒤로 숨는다 — KeyBar만 visualViewport를 보고
+ * 레이아웃은 안 따라가던 것이 "터미널 아래가 잘린다"의 정체였다.
+ *
+ * 데스크톱은 100vh로 둔다. 거기선 이 값이 브라우저 UI 변화에 흔들리기만 한다.
+ */
+export function useViewportHeight(): number | null {
+  const [h, setH] = useState<number | null>(() => window.visualViewport?.height ?? null);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const sync = () => setH(vv.height);
+    sync();
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    return () => {
+      vv.removeEventListener('resize', sync);
+      vv.removeEventListener('scroll', sync);
+    };
+  }, []);
+  return h;
 }
 
 export const TTYM_HOST = getTtymHost();

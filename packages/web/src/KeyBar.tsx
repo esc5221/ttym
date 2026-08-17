@@ -42,11 +42,11 @@ export function KeyBar({ sid, onSearch }: { sid: number; onSearch: () => void })
       onPointerDown={(e) => { e.preventDefault(); run(); }}
       style={{
         // 10키가 좁은 폰에도 다 들어가게 균등 압축 — 잘리는 키는 없는 키다
-        flex: '1 1 0', minWidth: 0, height: 38, padding: 0,
+        flex: '1 1 0', minWidth: 0, height: 30, padding: 0,
         background: active ? 'var(--accent)' : 'var(--bg0)',
         color: active ? '#fff' : 'var(--text-soft)',
-        border: '1px solid var(--line)', borderRadius: 7,
-        fontFamily: 'var(--mono)', fontSize: 13,
+        border: 'none', borderRadius: 5,
+        fontFamily: 'var(--mono)', fontSize: 12,
         touchAction: 'manipulation',
       }}
     >{label}</button>
@@ -69,7 +69,7 @@ export function KeyBar({ sid, onSearch }: { sid: number; onSearch: () => void })
       ref={ref}
       style={{
         position: 'fixed', left: 0, right: 0, top: '100dvh', transform: 'translateY(-100%)',
-        zIndex: 40, display: 'flex', gap: 5, padding: '6px 8px calc(6px + env(safe-area-inset-bottom))',
+        zIndex: 40, display: 'flex', gap: 4, padding: '4px 6px calc(4px + env(safe-area-inset-bottom))',
         background: 'var(--bg1)', borderTop: '1px solid var(--line)',
       }}
     >
@@ -81,8 +81,8 @@ export function KeyBar({ sid, onSearch }: { sid: number; onSearch: () => void })
       {key('↑', () => host()?.sendKey('up'))}
       {key('→', () => host()?.sendKey('right'))}
       {key('⏎', () => host()?.sendKey('enter'))}
-      {key('⌘v', () => void paste())}
-      {key('🔍', onSearch)}
+      {key('paste', () => void paste())}
+      {key('find', onSearch)}
     </div>
   );
 }
