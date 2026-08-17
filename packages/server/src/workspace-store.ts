@@ -173,14 +173,37 @@ export class WorkspaceStore {
     }
   }
 
+  /** 예약됐지만 아직 끝나지 않은 저장. 종료 시 이것을 기다리면 유실이 없다. */
+  private inFlight: Promise<void> | null = null;
+
   private scheduleSave(): void {
     if (!this.dirty) {
       this.dirty = true;
       // Debounce: save on next tick to batch rapid changes
-      queueMicrotask(() => {
-        if (this.dirty) this.save().catch(() => {});
+      this.inFlight = new Promise<void>((resolve) => {
+        queueMicrotask(() => {
+          if (!this.dirty) { resolve(); return; }
+          this.save().catch(() => {}).finally(resolve);
+        });
       });
     }
+  }
+
+  /**
+   * 예약된 저장이 끝날 때까지 기다린다.
+   *
+   * 변경은 microtask 로 미뤄지므로, 부른 쪽이 곧바로 파일을 읽거나 디렉터리를
+   * 지우면 저장이 그 뒤에 도착한다. 테스트에서 afterEach 가 임시 디렉터리를
+   * 지운 뒤 rename 이 ENOENT 로 터지던 것이 이 경합이었다. 서버 종료 경로에서도
+   * 같은 이유로 마지막 변경이 유실될 수 있다.
+   */
+  async flush(): Promise<void> {
+    while (this.inFlight || this.savePromise) {
+      await this.inFlight?.catch(() => {});
+      await this.savePromise?.catch(() => {});
+      if (!this.dirty) break;
+    }
+    this.inFlight = null;
   }
 
   list(): WorkspaceInfo[] {

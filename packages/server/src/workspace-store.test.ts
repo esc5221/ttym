@@ -15,8 +15,17 @@ function layoutIds(node: any): number[] {
 
 describe('WorkspaceStore', () => {
   const dirs: string[] = [];
+  const stores: WorkspaceStore[] = [];
 
-  afterEach(() => {
+  /** 만든 스토어를 정리 대상으로 등록한다. 변경은 microtask 로 미뤄지므로
+   *  디렉터리를 지우기 전에 flush 해야 rename 이 ENOENT 로 터지지 않는다. */
+  function track<T extends WorkspaceStore>(store: T): T {
+    stores.push(store);
+    return store;
+  }
+
+  afterEach(async () => {
+    while (stores.length > 0) await stores.pop()!.flush();
     while (dirs.length > 0) {
       rmSync(dirs.pop()!, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
@@ -25,7 +34,7 @@ describe('WorkspaceStore', () => {
   it('reconciles members when layout changes and preserves existing names', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     const created = store.create('ws1', 'workspace 1', {
       type: 'split',
       axis: 'row',
@@ -62,7 +71,7 @@ describe('WorkspaceStore', () => {
   it('reorder rewrites tab order, rejects stale permutations, survives reload', async () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     const pane = { type: 'pane', sessionId: 0 } as const;
     for (const n of ['a', 'b', 'c']) store.create(n, n, pane, []);
     const events: unknown[] = [];
@@ -80,7 +89,7 @@ describe('WorkspaceStore', () => {
 
     // 디스크에 남는가: save 디바운스 대기 후 재로드
     await new Promise((r) => setTimeout(r, 50));
-    const reloaded = new WorkspaceStore(dir);
+    const reloaded = track(new WorkspaceStore(dir));
     await reloaded.load();
     expect(reloaded.list().map((w) => w.id)).toEqual(['c', 'a', 'b']);
   });
@@ -88,7 +97,7 @@ describe('WorkspaceStore', () => {
   it('supports atomic member add, rename, and remove without clobbering siblings', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     const created = store.create('ws1', 'workspace 1', { type: 'pane', sessionId: 0 }, []);
 
     const first = store.addMember(created.id, { sessionId: 31, name: 'lead', role: 'agent', tags: [] });
@@ -120,7 +129,7 @@ describe('WorkspaceStore', () => {
   it('inserts a new member immediately to the right of the target session', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     const created = store.create('ws1', 'workspace 1', {
       type: 'split',
       axis: 'row',
@@ -153,7 +162,7 @@ describe('WorkspaceStore', () => {
   it('splits downward into a column and upward before the target', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     const created = store.create('dir-ws', 'dir-ws', { type: 'pane', sessionId: 41 },
       [{ sessionId: 41, name: 'lead', createdAt: 1, updatedAt: 1 }]);
 
@@ -173,7 +182,7 @@ describe('WorkspaceStore', () => {
   it('preserves nesting and sizes when a member is added', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     // The RFD's reproduction: row [0.7, 0.3] with a nested col [0.5, 0.5].
     const created = store.create('ws1', 'nested', {
       type: 'split',
@@ -213,7 +222,7 @@ describe('WorkspaceStore', () => {
   it('preserves nesting and sizes when a member is removed', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     const created = store.create('ws1', 'nested', {
       type: 'split',
       axis: 'row',
@@ -247,7 +256,7 @@ describe('WorkspaceStore', () => {
   it('does not flatten across a long run of adds and removes', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     const created = store.create('ws1', 'nested', {
       type: 'split',
       axis: 'row',
@@ -281,7 +290,7 @@ describe('WorkspaceStore', () => {
   it('keeps a member the layout does not place, and reports it', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
 
     // layout mentions only 41; 42 is a member the layout does not show.
     const created = store.create('ws1', 'w', { type: 'pane', sessionId: 41 }, [
@@ -300,7 +309,7 @@ describe('WorkspaceStore', () => {
   it('renames a duplicate instead of dropping the member', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
 
     const created = store.create('ws1', 'w', {
       type: 'split', axis: 'row', sizes: [0.5, 0.5],
@@ -319,7 +328,7 @@ describe('WorkspaceStore', () => {
   it('reports nothing when the layout and members agree', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     const created = store.create('ws1', 'w', { type: 'pane', sessionId: 7 }, [
       { sessionId: 7, name: 'only', createdAt: 1, updatedAt: 1 },
     ]);
@@ -329,7 +338,7 @@ describe('WorkspaceStore', () => {
   it('stays consistent across the normal mutation paths', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     let ws = store.create('ws1', 'w', { type: 'pane', sessionId: 1 }, [
       { sessionId: 1, name: 'a', createdAt: 1, updatedAt: 1 },
     ]);
@@ -363,7 +372,7 @@ describe('WorkspaceStore', () => {
       ],
     }));
 
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     await store.load();
 
     const ws = store.get('ws1');
@@ -376,7 +385,7 @@ describe('WorkspaceStore', () => {
   it('handles missing file gracefully (empty store)', async () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     await store.load();
     expect(store.list()).toEqual([]);
   });
@@ -385,7 +394,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     writeFileSync(join(dir, 'workspaces.json'), '{invalid json!!!');
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     await store.load();
     expect(store.list()).toEqual([]);
   });
@@ -394,7 +403,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     writeFileSync(join(dir, 'workspaces.json'), JSON.stringify({ version: 99, workspaces: [] }));
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     await store.load();
     expect(store.list()).toEqual([]);
   });
@@ -403,7 +412,7 @@ describe('WorkspaceStore', () => {
     const dir = runtimeDir();
     dirs.push(dir);
     writeFileSync(join(dir, 'workspaces.json'), JSON.stringify({ version: 2 }));
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     await store.load();
     expect(store.list()).toEqual([]);
   });
@@ -413,7 +422,7 @@ describe('WorkspaceStore', () => {
   it('save() writes atomic file (tmp + rename)', async () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
     await store.save();
 
@@ -429,7 +438,7 @@ describe('WorkspaceStore', () => {
   it('serializes overlapping saves onto a single tmp file path', async () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'one', { type: 'pane', sessionId: 1 });
     store.create('ws2', 'two', { type: 'pane', sessionId: 2 });
 
@@ -444,7 +453,7 @@ describe('WorkspaceStore', () => {
   it('workspace names are addresses now: duplicates are refused', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'work', { type: 'pane', sessionId: 1 });
     expect(() => store.create('ws2', 'work', { type: 'pane', sessionId: 2 })).toThrow(/already exists/);
     store.create('ws2', 'other', { type: 'pane', sessionId: 2 });
@@ -458,21 +467,21 @@ describe('WorkspaceStore', () => {
   it('get returns undefined for non-existing workspace', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     expect(store.get('nope')).toBeUndefined();
   });
 
   it('delete returns false for non-existing workspace', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     expect(store.delete('nope')).toBe(false);
   });
 
   it('delete removes workspace and returns true', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
     expect(store.delete('ws1')).toBe(true);
     expect(store.get('ws1')).toBeUndefined();
@@ -482,7 +491,7 @@ describe('WorkspaceStore', () => {
   it('list returns empty array for fresh store', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     expect(store.list()).toEqual([]);
   });
 
@@ -494,7 +503,7 @@ describe('WorkspaceStore', () => {
   it('create normalizes workspace with missing members to empty array', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     const ws = store.create('ws1', 'test', { type: 'pane', sessionId: 5 });
     // reconcile should auto-generate member from layout
     expect(ws.members).toHaveLength(1);
@@ -507,7 +516,7 @@ describe('WorkspaceStore', () => {
   it('update returns null for non-existing workspace', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     expect(store.update('nope', { name: 'x' })).toBeNull();
   });
 
@@ -516,14 +525,14 @@ describe('WorkspaceStore', () => {
   it('addMember returns null for non-existing workspace', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     expect(store.addMember('nope', { sessionId: 1, name: 'x' })).toBeNull();
   });
 
   it('addMember updates existing member when sessionId matches', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, []);
     store.addMember('ws1', { sessionId: 50, name: 'first', role: 'agent', tags: ['a'] });
     const ws = store.addMember('ws1', { sessionId: 50, name: 'updated', role: 'executor' });
@@ -536,7 +545,7 @@ describe('WorkspaceStore', () => {
   it('addMember throws on duplicate member name', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, []);
     store.addMember('ws1', { sessionId: 50, name: 'lead' });
     expect(() => store.addMember('ws1', { sessionId: 51, name: 'lead' }))
@@ -546,7 +555,7 @@ describe('WorkspaceStore', () => {
   it('addMember is idempotent for same sessionId (no layout duplication)', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'test', { type: 'pane', sessionId: 0 }, []);
     store.addMember('ws1', { sessionId: 60, name: 'worker' });
     const ws = store.addMember('ws1', { sessionId: 60, name: 'worker-v2' });
@@ -560,14 +569,14 @@ describe('WorkspaceStore', () => {
   it('renameMember returns null for non-existing workspace', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     expect(store.renameMember('nope', 1, 'x')).toBeNull();
   });
 
   it('renameMember returns null for non-existing member', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
     expect(store.renameMember('ws1', 999, 'x')).toBeNull();
   });
@@ -575,7 +584,7 @@ describe('WorkspaceStore', () => {
   it('renameMember throws on duplicate name', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'test', {
       type: 'split', axis: 'row', sizes: [0.5, 0.5],
       children: [{ type: 'pane', sessionId: 1 }, { type: 'pane', sessionId: 2 }],
@@ -591,14 +600,14 @@ describe('WorkspaceStore', () => {
   it('removeMember returns null for non-existing workspace', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     expect(store.removeMember('nope', 1)).toBeNull();
   });
 
   it('removeMember produces empty pane when last member removed', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'test', { type: 'pane', sessionId: 1 });
     const ws = store.removeMember('ws1', 1);
     expect(ws!.members).toEqual([]);
@@ -610,7 +619,7 @@ describe('WorkspaceStore', () => {
   it('reconcile auto-renames members when names collide', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     // Two members with the same name — reconcile should de-dup
     const ws = store.create('ws1', 'test', {
       type: 'split', axis: 'row', sizes: [0.5, 0.5],
@@ -629,7 +638,7 @@ describe('WorkspaceStore', () => {
   it('layout with sessionId 0 is filtered (placeholder pane)', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     // sessionId: 0 is treated as placeholder — should produce no members
     const ws = store.create('ws1', 'test', { type: 'pane', sessionId: 0 });
     expect(ws.members).toEqual([]);
@@ -638,7 +647,7 @@ describe('WorkspaceStore', () => {
   it('removing all members from a split produces empty pane layout', () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     store.create('ws1', 'test', {
       type: 'split', axis: 'row', sizes: [0.5, 0.5],
       children: [{ type: 'pane', sessionId: 10 }, { type: 'pane', sessionId: 20 }],
@@ -663,7 +672,7 @@ describe('WorkspaceStore', () => {
         createdAt: 1, updatedAt: 2,
       }],
     }));
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     await store.load();
     const ws = store.get('ws1')!;
     // Should auto-generate member from layout
@@ -674,13 +683,13 @@ describe('WorkspaceStore', () => {
   it('keeps map annotations through update, save and reload', async () => {
     const dir = runtimeDir();
     dirs.push(dir);
-    const store = new WorkspaceStore(dir);
+    const store = track(new WorkspaceStore(dir));
     await store.load();
     store.create('ws-map', 'mapped', { type: 'pane', sessionId: 7 });
     store.update('ws-map', { map: { stream: '회사 본류', column: 2, order: 1 } });
     await store.save();
 
-    const reloaded = new WorkspaceStore(dir);
+    const reloaded = track(new WorkspaceStore(dir));
     await reloaded.load();
     const ws = reloaded.get('ws-map')!;
     expect(ws.map?.stream).toBe('회사 본류');
