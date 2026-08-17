@@ -139,11 +139,21 @@ const IS_MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform
 if (!IS_MAC && typeof document !== 'undefined' && 'fonts' in document) {
   document.fonts.add(new FontFace('D2Coding', "url(/fonts/D2Coding.woff2) format('woff2')", { weight: '400' }));
   document.fonts.add(new FontFace('D2Coding', "url(/fonts/D2Coding-Bold.woff2) format('woff2')", { weight: '700' }));
+  // ⏺(U+23FA)·⏵(U+23F5) 두 글자만 든 476바이트 폰트. Claude Code가 쓰는 기호인데
+  // 안드로이드에는 이 둘을 가진 고정폭 폰트가 없다 — U+23FA는 컬러 이모지로 폴백해
+  // 1.96셀 폭이 되어 다음 칸을 덮고, U+23F5는 글리프가 없어 빈칸이 된다(S24+ 실측).
+  // 유니코드상 둘 다 Neutral(1셀)이라 xterm 계산은 맞고 폰트만 없던 것이라,
+  // 0.5em advance로 직접 그려 스택 맨 앞에 세운다. scripts/build-glyph-font.mjs.
+  const glyphs = new FontFace('ttym glyphs', "url(/ttym-glyphs.woff2?v=1) format('woff2')", { unicodeRange: 'U+23FA, U+23F5' });
+  document.fonts.add(glyphs);
+  // unicode-range는 해당 글자가 화면에 뜰 때만 받아온다. xterm은 캔버스로 재는
+  // 경로가 있어 그 트리거를 놓치므로 직접 깨운다.
+  void glyphs.load().catch(() => {});
 }
 
 const TERMINAL_FONTS = IS_MAC
   ? 'Menlo, Monaco, "Courier New", monospace'
-  : 'D2Coding, "Cascadia Mono", Consolas, "Courier New", monospace';
+  : '"ttym glyphs", D2Coding, "Cascadia Mono", Consolas, "Courier New", monospace';
 
 export class TerminalHost {
   readonly wrapper: HTMLDivElement;
