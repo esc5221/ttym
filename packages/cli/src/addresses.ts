@@ -180,7 +180,7 @@ export function findMemberInWorkspace(workspace, token) {
 }
 
 export async function createWorkspaceMember(port, workspace, opts: Record<string, any> = {}) {
-  const { name, role = null, cmd = null, cwd = null } = opts;
+  const { name, role = null, cmd = null, cwd = null, cols = null, rows = null } = opts;
   const usedNames = new Set((workspace.members || []).map((m) => m.name));
   let memberName = name;
   if (!memberName) {
@@ -192,8 +192,10 @@ export async function createWorkspaceMember(port, workspace, opts: Record<string
   }
   const sessionBody: Record<string, unknown> = {
     cmd: cmd && cmd.length > 0 ? cmd : [process.env.SHELL || '/bin/bash'],
-    cols: 80,
-    rows: 24,
+    // 80x24 는 기본값일 뿐 상한이 아니다. TUI 에이전트는 좁으면 출력이 접혀
+    // 읽기 어려워지므로, 부르는 쪽이 정했으면 그것을 쓴다.
+    cols: cols ?? 80,
+    rows: rows ?? 24,
     verify: true,
   };
   if (cwd) sessionBody.cwd = cwd;
