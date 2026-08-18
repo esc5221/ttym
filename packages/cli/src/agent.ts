@@ -57,10 +57,15 @@ export const AGENTS = {
     metaKey: 'codexSessionId',
     lastMetaKey: 'codexLastSessionId',
     hooks: [
+      // 인라인 명령이 아니라 스크립트인 이유: Codex 는 SessionStart hook 의
+      // stdout 을 자기 JSON 으로 읽는다. 예전 명령이 부르던 `ttym meta` 는
+      // 세션 메타를 stdout 에 찍었고, 올바른 JSON이지만 스키마가 달라
+      // "invalid session start JSON output" 이 매번 났다. 스크립트는 아무것도
+      // 출력하지 않는다.
       {
         event: 'SessionStart',
         matcher: '',
-        command: '[ -z "$TTYM_SESSION_ID" ] && exit 0; jq -r .session_id | xargs -I{} ttym meta $TTYM_SESSION_ID --codex-session {}',
+        command: resolve(__dirname, '..', 'scripts', 'ttym-codex-hook.sh'),
       },
       {
         event: 'Stop',
