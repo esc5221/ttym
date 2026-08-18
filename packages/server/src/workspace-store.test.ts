@@ -701,4 +701,36 @@ describe('WorkspaceStore', () => {
     expect(reloaded.get('ws-map')!.map).toBeUndefined();
   });
 
+  it('flush 는 종료 직전에 들어온 변경까지 파일에 남긴다', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = track(new WorkspaceStore(dir));
+    await store.load();
+    store.create('a', 'A', { type: 'pane', sessionId: 1 });
+    await store.save();
+
+    // 종료 절차가 도는 도중에 마지막 변경 하나가 들어온다.
+    // save() 는 이 시점의 dirty 만 쓰고 돌아가므로 이것을 놓쳤다.
+    store.create('b', 'B', { type: 'pane', sessionId: 2 });
+    await store.flush();
+
+    const reloaded = track(new WorkspaceStore(dir));
+    await reloaded.load();
+    expect(reloaded.get('a')).toBeTruthy();
+    expect(reloaded.get('b')).toBeTruthy();
+  });
+
+  it('flush 는 예약이 걸리기 전 dirty 도 처리한다', async () => {
+    const dir = runtimeDir();
+    dirs.push(dir);
+    const store = track(new WorkspaceStore(dir));
+    await store.load();
+    store.create('only', 'Only', { type: 'pane', sessionId: 3 });
+    // 아무것도 await 하지 않고 곧바로 flush — inFlight 도 savePromise 도 아직 없다
+    await store.flush();
+
+    const reloaded = track(new WorkspaceStore(dir));
+    await reloaded.load();
+    expect(reloaded.get('only')?.name).toBe('Only');
+  });
 });

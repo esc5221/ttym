@@ -198,12 +198,18 @@ export class WorkspaceStore {
    * 같은 이유로 마지막 변경이 유실될 수 있다.
    */
   async flush(): Promise<void> {
+    // 예약된 것과 진행 중인 것을 먼저 비운다.
     while (this.inFlight || this.savePromise) {
-      await this.inFlight?.catch(() => {});
-      await this.savePromise?.catch(() => {});
-      if (!this.dirty) break;
+      const queued = this.inFlight;
+      const running = this.savePromise;
+      await queued?.catch(() => {});
+      await running?.catch(() => {});
+      if (this.inFlight === queued) this.inFlight = null;
+      if (!this.dirty && !this.inFlight && !this.savePromise) break;
     }
-    this.inFlight = null;
+    // 아직 안 쓴 변경이 남아 있으면 여기서 쓴다. 이 경로가 없으면 종료 직전에
+    // 들어온 변경이 예약조차 되기 전이라 통째로 사라진다.
+    if (this.dirty) await this.save().catch(() => {});
   }
 
   list(): WorkspaceInfo[] {

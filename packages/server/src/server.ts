@@ -1825,7 +1825,13 @@ export async function createServer(port: number): Promise<TtymServer> {
       // seconds. Running the heavy step first means a shutdown that hits the
       // deadline in index.ts loses the layouts — which is exactly how sessions
       // came back unreachable after a reboot before.
-      await workspaceStore.save();
+      //
+      // flush() rather than save(): mutations queue their write on a microtask,
+      // so a change that arrived while we were tearing down is scheduled but not
+      // yet running. save() only writes what is dirty at the moment it is called
+      // and returns before that queued write lands — the last edit before a
+      // restart was quietly dropped.
+      await workspaceStore.flush();
       await manager.shutdown(); // persist + don't kill holders
       await new Promise<void>((resolve, reject) => {
         wss.close((error) => {
