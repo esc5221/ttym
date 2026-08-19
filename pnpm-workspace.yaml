@@ -1,6 +1,20 @@
 packages:
   - packages/*
 
+# pnpm 11이 onlyBuiltDependencies를 allowBuilds로 갈았다. 둘 다 적어둔다 —
+# 모르는 키는 무시되므로 어느 버전에서 체크아웃해도 build.sh가 끝까지 간다.
+# 판단을 적지 않으면 pnpm 11이 ERR_PNPM_IGNORED_BUILDS로 exit 1을 내고,
+# vite 실행 전 의존성 검사가 그걸 실패로 읽어 빌드를 통째로 세운다.
+#
+# esbuild만 false다. postinstall이 bin/esbuild(JS 셤)를 네이티브 바이너리로
+# 바꿔치기하는 최적화를 하는데, pnpm이 만든 bin 래퍼는 그걸 node로 실행해서
+# 'SyntaxError: Invalid or unexpected token'으로 죽는다. 셤을 남겨두면 셤이
+# @esbuild/darwin-arm64를 런타임에 찾아가므로 기능 손실은 없다.
+allowBuilds:
+  node-pty: true
+  esbuild: false
+  better-sqlite3: true
+
 onlyBuiltDependencies:
   - node-pty
   - esbuild
