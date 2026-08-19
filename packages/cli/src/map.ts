@@ -29,11 +29,28 @@ interface MapSession {
   stale: boolean;
 }
 
+/** stream 없는 workspace가 모이는 자리. 웹의 UNSORTED_STREAM과 같은 문자열이어야 한다. */
+const UNSORTED = '미분류';
+
 interface MapWorkspace {
   id: string;
   name: string;
   members: Array<{ sessionId: number; name: string }>;
   map?: { stream?: string; column?: number; order?: number };
+}
+
+/** 이번 정리에서 이 workspace가 가질 stream.
+ *
+ *  stream은 사용자가 탭 줄에서 읽고 누르는 이름이다. 요약기가 10분마다 새로
+ *  지으면 묶음이 밤사이 통째로 바뀐다 — 실측으로 14개가 32ms 안에 다시 쓰인
+ *  적이 있다. 그래서 한 번 붙은 이름은 지키고, 요약기에게는 아직 이름이 없는
+ *  workspace를 이름 붙이는 일만 맡긴다. 다시 묶고 싶으면 --force.
+ */
+export function resolveStream(existing: string | undefined, proposed: unknown, force: boolean): string {
+  const kept = existing?.trim();
+  if (kept && !force) return kept;
+  const next = typeof proposed === 'string' ? proposed.trim().slice(0, 30) : '';
+  return next || kept || UNSORTED;
 }
 
 export async function cmdMap() {
@@ -132,23 +149,43 @@ export async function cmdMap() {
     });
   }
 
+  // stream은 사용자가 읽고 누르는 이름이다. 요약기가 10분마다 새로 지으면
+  // 탭 줄의 묶음이 밤사이 통째로 바뀐다 — 실측으로 14개가 32ms 안에 다시
+  // 쓰인 적이 있다. 그래서 한 번 붙은 stream은 유지하고, 요약기에게는
+  // 아직 이름이 없는 workspace를 이름 붙이는 일만 맡긴다.
+  // 다시 묶고 싶으면 --force. column/order는 배치일 뿐이라 매번 갱신해도 된다.
   let workspacesApplied = 0;
   const wsOut = (parsed as Record<string, unknown>).workspaces;
+  const placedNow = new Set<string>();
   if (wsOut && typeof wsOut === 'object') {
     for (const [wsId, value] of Object.entries(wsOut as Record<string, unknown>)) {
-      if (!map.workspaces.some((w) => w.id === wsId)) continue;
+      const row = map.workspaces.find((w) => w.id === wsId);
+      if (!row) continue;
       if (!value || typeof value !== 'object') continue;
       const v = value as Record<string, unknown>;
       const column = typeof v.column === 'number' && v.column >= 1 && v.column <= 3 ? Math.floor(v.column) : 1;
+      const stream = resolveStream(row.map?.stream, v.stream, force);
       await fetchPatch(port, `/api/workspaces/${wsId}`, {
         map: {
-          stream: typeof v.stream === 'string' ? v.stream.slice(0, 30) : '미분류',
+          stream,
           column,
           order: typeof v.order === 'number' ? Math.floor(v.order) : 0,
         },
       });
+      placedNow.add(wsId);
       workspacesApplied++;
     }
+  }
+
+  // 요약기가 통째로 빼먹은 미배치 workspace는 '미분류'로 못박는다. 안 그러면
+  // unplaced가 영영 비지 않아 위의 조기 종료가 안 걸리고, 10분마다 전체 요약이
+  // 다시 돈다 (이게 stream이 계속 바뀌던 실제 경로다).
+  for (const w of unplaced) {
+    if (placedNow.has(w.id)) continue;
+    await fetchPatch(port, `/api/workspaces/${w.id}`, {
+      map: { stream: UNSORTED, column: w.map?.column ?? 1, order: w.map?.order ?? 0 },
+    });
+    workspacesApplied++;
   }
 
   const backend = baseUrl ? `${model} @ ${new URL(baseUrl).host}` : `${model} @ claude`;

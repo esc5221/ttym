@@ -23,6 +23,8 @@ export const DEFAULT_MAP_PROMPT = `너는 터미널 멀티플렉서의 "작업 �
   "회사"/"개인"/"기타" 같은 추상 관리 분류는 금지. 같은 레포·제품을 다루는 workspace는 같은 stream.
   column은 배치 힌트: 활동이 활발한 줄기일수록 1(왼쪽), 휴면·상비 줄기는 3(오른쪽).
   기존 배치가 주어지면 특별한 이유 없이 바꾸지 마라.
+  이미 stream이 붙은 workspace의 stream은 어차피 적용되지 않는다(사용자가 읽는 이름이라 고정).
+  아직 stream이 없는 workspace에 이름을 붙이는 데 집중해라.
 
 출력 형식 (JSON만, 다른 텍스트 금지):
 {"sessions":{"<세션id>":{"title":"","note":"","status":null,"statusNote":""}},"workspaces":{"<wsId>":{"stream":"","column":1,"order":0}}}`;
