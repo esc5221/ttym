@@ -45,7 +45,12 @@ export interface Viewer {
 
 // ───── Holder protocol ─────
 
-const DEFAULT_RING_BYTES = 1024 * 1024;
+// 새로고침 뒤 얼마나 거슬러 올라갈 수 있는지를 정하는 값이다.
+// 에이전트 TUI는 같은 행을 반복해 다시 그리므로 raw 바이트가 크다 — 실측으로
+// Claude 응답이 행당 913바이트, Codex 1,111바이트, zsh은 79바이트다.
+// 1MB면 zsh은 1만 3천 줄이지만 Claude는 1,150줄밖에 안 된다. 4MB로 잡으면
+// Claude 기준 약 4,600줄이고, 세션 41개에서 164MB다.
+const DEFAULT_RING_BYTES = 4 * 1024 * 1024;
 
 function randomSeqBase(): number {
   return 1_000_000 + Math.floor(Math.random() * 99_000_000);

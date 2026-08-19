@@ -202,6 +202,11 @@ export class TerminalHost {
     this.term = new XTerm({
       // 검색 하이라이트(decorations)가 proposed API — headless 쪽은 이미 켜져 있다.
       allowProposedApi: true,
+      // 기본값 1000줄은 이 도구에 좁다. 3000줄을 출력하면 위 1950줄이 잘려나갔다(실측).
+      // 아래 두 층은 이미 넉넉한데(holder 1MB, 서버 ring) 클라이언트가 버리고 있었다.
+      // 줄당 비용은 cols에 비례하므로 pane이 넓을수록 크지만, 안 보는 세션의 host는
+      // MAX_IDLE_HOSTS로 회수되므로 상시 비용은 열려 있는 pane 몫이다.
+      scrollback: 10000,
       cursorBlink: opts.mode !== 'readonly',
       fontSize: opts.fontSize,
       fontFamily: TERMINAL_FONTS,
