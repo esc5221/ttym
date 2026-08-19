@@ -14,6 +14,8 @@ export interface TerminalProps {
   mode?: 'readwrite' | 'readonly';
   /** xterm 폰트 크기 (기본 14) */
   fontSize?: number;
+  /** CSS font-family 스택. 비우면 플랫폼 기본 (맥=Menlo, 그 외=Monoplex KR Nerd) */
+  fontFamily?: string;
   /**
    * GPU 렌더러 사용 여부. 프리뷰·그리드처럼 다수가 동시에 뜨는 자리는 false로 —
    * GPU 컨텍스트는 포커스된 큰 터미널 전용 자원이다.
@@ -35,7 +37,7 @@ export interface TerminalProps {
  * reparents the DOM out and drops the stream, nothing is disposed. Scrollback
  * and renderer state are wherever the session is next displayed.
  */
-export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, enableWebgl = true, localEcho = false, geometry = 'fit', className, style, onCreated, onExit, onBell }: TerminalProps) {
+export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, fontFamily, enableWebgl = true, localEcho = false, geometry = 'fit', className, style, onCreated, onExit, onBell }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<TerminalHost | null>(null);
   const onExitRef = useRef(onExit);
@@ -44,8 +46,8 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
   onExitRef.current = onExit;
   onBellRef.current = onBell;
   onCreatedRef.current = onCreated;
-  const optsRef = useRef<HostOptions>({ mode, fontSize, enableWebgl, localEcho, geometry });
-  optsRef.current = { mode, fontSize, enableWebgl, localEcho, geometry };
+  const optsRef = useRef<HostOptions>({ mode, fontSize, fontFamily, enableWebgl, localEcho, geometry });
+  optsRef.current = { mode, fontSize, fontFamily, enableWebgl, localEcho, geometry };
 
   useEffect(() => {
     const el = containerRef.current;
@@ -115,8 +117,8 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
   }, [mux, attachId, cmd, cwd]);
 
   useEffect(() => {
-    hostRef.current?.applyOptions({ mode, fontSize, enableWebgl, localEcho, geometry });
-  }, [mode, fontSize, enableWebgl, localEcho, geometry]);
+    hostRef.current?.applyOptions({ mode, fontSize, fontFamily, enableWebgl, localEcho, geometry });
+  }, [mode, fontSize, fontFamily, enableWebgl, localEcho, geometry]);
 
   return (
     <div

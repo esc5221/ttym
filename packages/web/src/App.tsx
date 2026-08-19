@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes, getHost } from '@ttym/ui';
+import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes, getHost, ensureFontsRegistered } from '@ttym/ui';
 import * as api from '@ttym/api';
 import type { SessionInfo } from '@ttym/ui';
 import '@xterm/xterm/css/xterm.css';
@@ -308,7 +308,7 @@ const streamLabelStyle: React.CSSProperties = {
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number }) {
+function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
   const U = UI_STYLES[uiStyle];
   const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
@@ -775,6 +775,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
               mux={mux}
               attachId={sid}
               fontSize={touch ? 14 : fontSize}
+              fontFamily={fontFamily || undefined}
               geometry={touch ? (fitSids.has(sid) ? 'borrow' : 'follow') : 'fit'}
               enableWebgl={!touch}
               localEcho={localEchoEnabled}
@@ -793,7 +794,7 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
@@ -1087,6 +1088,8 @@ function App() {
   const [localEchoEnabled, setLocalEchoEnabled] = useState(readLocalEchoEnabled);
   const [uiStyle, setUiStyle] = useState<UiStyle>(readUiStyle);
   const [fontSize, setFontSize] = useState(14);
+  // 빈 문자열 = 플랫폼 기본에 맡긴다 (맥=Menlo, 그 외=Monoplex KR Nerd).
+  const [fontFamily, setFontFamily] = useState('');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
   const [stripSlot, setStripSlot] = useState<HTMLSpanElement | null>(null);
@@ -1412,6 +1415,20 @@ function App() {
       const size = Number(values['font-size']);
       if (Number.isFinite(size) && size >= 8 && size <= 32) setFontSize(size);
     }
+    // 터미널과 UI 크롬이 같은 스택을 쓴다 — 둘이 갈리면 탭 라벨과 pane 안의
+    // 글자가 다른 폰트로 보인다. --mono는 index.html이 심어둔 기본을 덮어쓴다.
+    if (values['font-family'] !== undefined) {
+      const stack = values['font-family'].trim();
+      setFontFamily(stack);
+      if (stack) {
+        // 크롬은 터미널보다 먼저 그려진다 — 등록을 TerminalHost에 맡기면
+        // 첫 pane이 뜨기 전까지 탭 라벨만 폴백 폰트로 보인다.
+        ensureFontsRegistered(stack);
+        document.documentElement.style.setProperty('--mono', stack);
+      } else {
+        document.documentElement.style.removeProperty('--mono');
+      }
+    }
     // desktop 창의 zoom 복원 — 최초 config 수신 때 한 번만. 이후의 push에
     // 반응하면 다른 창에서 zoom을 바꿀 때마다 이 창까지 끌려간다.
     if (IS_NATIVE && !zoomInitDone.current && values.zoom !== undefined) {
@@ -1462,7 +1479,7 @@ function App() {
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} fontFamily={fontFamily} />;
       break;
     default:
       page = mainView === 'map'

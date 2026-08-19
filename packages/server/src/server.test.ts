@@ -416,6 +416,36 @@ describe('createServer', () => {
     expect(runtime.terminal.integrity).toBe('healthy');
   });
 
+  it('serves custom.css as an empty sheet until the user writes one', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const base = `http://127.0.0.1:${port}`;
+
+    // 파일이 없는 상태가 기본이다 — 404는 콘솔에 에러를 남기므로 빈 시트를 준다.
+    const before = await fetch(`${base}/custom.css`);
+    expect(before.status).toBe(200);
+    expect(before.headers.get('content-type')).toContain('text/css');
+    expect(await before.text()).toBe('');
+
+    const save = await fetch(`${base}/api/custom-css`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ css: ':root { --accent: #d79921; }' }),
+    });
+    expect(save.status).toBe(200);
+
+    const after = await fetch(`${base}/custom.css`);
+    expect(await after.text()).toContain('--accent: #d79921');
+    // 편집기가 다시 열 때 같은 내용을 봐야 한다 — 파일이 진실이다.
+    const read = await fetch(`${base}/api/custom-css`).then((r) => r.json()) as { css: string };
+    expect(read.css).toContain('--accent: #d79921');
+
+    // 비우면 파일을 지운다: 빈 파일이 남아 "설정이 있는데 비었다"로 보이면 안 된다.
+    await fetch(`${base}/api/custom-css`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ css: '   ' }),
+    });
+    expect(await (await fetch(`${base}/custom.css`)).text()).toBe('');
+  });
+
   it('accepts a dropped file upload and dedupes names Finder-style', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const put = (name: string, body: string) =>

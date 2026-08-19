@@ -888,6 +888,52 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     }
   }
 
+  // GET|POST /api/custom-css — 사용자 스타일시트(~/.ttym/custom.css)의 편집 창구.
+  // 파일이 진실이고 설정 UI는 편집기일 뿐이다: 에디터로 직접 고쳐도 똑같이 산다.
+  // config에 담지 않는 이유는 포맷이다 — config는 한 줄 `key = value`라 여러 줄
+  // CSS가 들어갈 자리가 없다.
+  if (path === '/api/custom-css') {
+    const cssPath = resolve(getHomeDir(), 'custom.css');
+    if (req.method === 'GET') {
+      let css = '';
+      try { css = readFileSyncFs(cssPath, 'utf8'); } catch {}
+      json(200, { css });
+      return true;
+    }
+    if (req.method === 'POST') {
+      readBody().then((body) => {
+        try {
+          const { css } = JSON.parse(body);
+          if (typeof css !== 'string') { json(400, { error: 'css must be string' }); return; }
+          if (!css.trim()) {
+            try { unlinkSync(cssPath); } catch {}
+            json(200, { css: '' });
+            return;
+          }
+          writeFileSyncFs(cssPath, css.endsWith('\n') ? css : css + '\n');
+          json(200, { css });
+        } catch {
+          json(400, { error: 'invalid body' });
+        }
+      });
+      return true;
+    }
+  }
+
+  // GET /custom.css — <link>가 무는 자리. 없으면 빈 시트를 준다: 404를 주면
+  // 콘솔에 매번 에러가 찍히는데, "커스텀 CSS 없음"은 오류가 아니라 기본 상태다.
+  if (path === '/custom.css' && req.method === 'GET') {
+    let css = '';
+    try { css = readFileSyncFs(resolve(getHomeDir(), 'custom.css'), 'utf8'); } catch {}
+    res.writeHead(200, {
+      'Content-Type': 'text/css; charset=utf-8',
+      // 저장 직후 새로고침이 옛 시트를 보면 "안 먹는다"로 읽힌다.
+      'Cache-Control': 'no-cache',
+    });
+    res.end(css);
+    return true;
+  }
+
   // ───── Workspace API ─────
 
   // GET /api/workspaces

@@ -22,7 +22,11 @@
       font-display: block;
     }
     /* D2Coding은 맥 외 플랫폼에서만 JS가 FontFace로 등록 — 맥에선 스택에서 건너뛰어진다. */
-    :root { --mono: "ttym glyphs", Menlo, Monaco, D2Coding, "Cascadia Mono", Consolas, monospace; }
+    /* webfont는 JS가 FontFace로 등록할 때만 받아온다(terminal-host.ts). 맥은
+       Menlo(시스템)에서 멈추므로 뒤의 webfont 이름들엔 닿지 않고, 그 외 플랫폼은
+       Monoplex KR Nerd로 떨어진다. config의 font-family가 오면 App이 덮어쓴다.
+       "ttym glyphs"는 두 글자짜리라 항상 맨 앞 — 나머지를 가리지 않는다. */
+    :root { --mono: "ttym glyphs", Menlo, Monaco, "Monoplex KR Nerd", D2Coding, "Cascadia Mono", Consolas, monospace; }
     * { margin: 0; padding: 0; box-sizing: border-box; transition: none !important; animation: none !important; }
       .agent-dot-run { animation: agent-pulse 1.4s ease-in-out infinite !important; }
       /* 행동 버튼은 hover에서만 — 상태 표시(점·bell)는 항상 보인다. */
@@ -60,6 +64,10 @@
     /* 줄기가 바뀌는 자리에만 가는 선 — 지도 뷰의 제목 밑줄이 여기선 행 구분선이 된다. */
     .stream-rule { grid-column: 1 / -1; height: 1px; background: var(--line, #2d2d2d); margin: 4px 0; opacity: .6; }
   </style>
+  <!-- 사용자 스타일시트(~/.ttym/custom.css). 마지막에 오므로 앱 토큰을 덮어쓸 수
+       있다 — 커스터마이즈의 공식 표면은 theme.css의 --토큰들이다. 파일이 없으면
+       서버가 빈 시트를 준다. -->
+  <link rel="stylesheet" href="/custom.css" />
 </head>
 <body>
   <div id="root"></div>

@@ -106,7 +106,7 @@ function GeneralSection({ mainView, onMainViewChange, localEchoEnabled, onLocalE
   );
 }
 
-function AppearanceSection({ uiStyle, onUiStyleChange, fontSize, onFontSizeChange, onThemeChange }: Props) {
+function AppearanceSection({ uiStyle, onUiStyleChange, fontSize, onFontSizeChange, onThemeChange, onPatchConfig }: Props) {
   const [theme, setTheme] = useState<'dark' | 'light'>(
     () => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'),
   );
@@ -135,7 +135,93 @@ function AppearanceSection({ uiStyle, onUiStyleChange, fontSize, onFontSizeChang
           <button onClick={() => onFontSizeChange(Math.min(32, fontSize + 1))} style={{ ...actionBtnStyle, padding: '2px 8px', fontSize: 11 }}>+</button>
         </span>
       </Field>
+      <FontFamilyField onPatchConfig={onPatchConfig} />
+      <CustomCssField />
     </>
+  );
+}
+
+/**
+ * 폰트는 CSS font-family 스택을 그대로 받는다 — 프리셋 드롭다운을 두면 목록에
+ * 없는 시스템 폰트를 쓸 길이 막힌다. 번들된 이름(Monoplex KR Nerd·D2Coding)은
+ * 자동으로 등록되고, 나머지는 사용자 기기에 설치된 폰트를 그대로 부른다.
+ */
+function FontFamilyField({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }) {
+  const [draft, setDraft] = useState('');
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    void fetch(`${API_BASE}/api/config`).then((r) => r.json()).then(({ values }) => {
+      setDraft(values['font-family'] ?? '');
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []);
+
+  const commit = () => onPatchConfig({ 'font-family': draft.trim() || null });
+
+  return (
+    <Field label="font family" hint='CSS 스택 그대로. 비우면 기본값 — 맥은 Menlo, 그 외는 Monoplex KR Nerd'>
+      <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+        <input
+          value={loaded ? draft : ''}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+          placeholder='"Monoplex KR Nerd", Menlo, monospace'
+          style={{ ...inputStyle, width: 280 }}
+        />
+        <button onClick={() => { setDraft(''); onPatchConfig({ 'font-family': null }); }} style={actionBtnStyle}>reset</button>
+      </span>
+    </Field>
+  );
+}
+
+/**
+ * 사용자 스타일시트. 파일(~/.ttym/custom.css)이 진실이고 이 상자는 편집기다 —
+ * 에디터로 직접 고쳐도 같은 결과다. 저장하면 <link>를 다시 물려 즉시 반영한다.
+ */
+function CustomCssField() {
+  const [draft, setDraft] = useState('');
+  const [flash, setFlash] = useState('');
+
+  useEffect(() => {
+    void fetch(`${API_BASE}/api/custom-css`).then((r) => r.json()).then(({ css }) => setDraft(css ?? '')).catch(() => {});
+  }, []);
+
+  const save = async () => {
+    try {
+      await fetch(`${API_BASE}/api/custom-css`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ css: draft }),
+      });
+      // 새로고침 없이 반영: 링크의 href에 캐시 버스터를 달아 다시 읽힌다.
+      const link = document.querySelector<HTMLLinkElement>('link[href^="/custom.css"]');
+      if (link) link.href = `/custom.css?v=${Date.now()}`;
+      setFlash('saved');
+      setTimeout(() => setFlash(''), 1500);
+    } catch {
+      setFlash('failed');
+      setTimeout(() => setFlash(''), 1500);
+    }
+  };
+
+  return (
+    <Field
+      label={`custom css ${flash ? '· ' + flash : ''}`}
+      hint="~/.ttym/custom.css — theme.css의 --토큰을 덮어쓰는 게 안전한 방법이다 (--mono, --bg0, --accent, --term-fg …)"
+    >
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          spellCheck={false}
+          placeholder={':root {\n  --accent: #d79921;\n}'}
+          style={{ ...inputStyle, width: 280, height: 120, fontFamily: 'var(--mono)', resize: 'vertical' }}
+        />
+        <button onClick={() => void save()} style={actionBtnStyle}>save</button>
+      </span>
+    </Field>
   );
 }
 

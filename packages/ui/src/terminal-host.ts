@@ -38,6 +38,8 @@ const MAX_IDLE_HOSTS = 16;
 export interface HostOptions {
   mode: 'readwrite' | 'readonly';
   fontSize: number;
+  /** CSS font-family 스택. 비우면 플랫폼 기본(DEFAULT_TERMINAL_FONTS). */
+  fontFamily?: string;
   enableWebgl: boolean;
   localEcho: boolean;
   /**
@@ -133,33 +135,99 @@ function evictIdleHosts() {
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
 
-// 맥 외 플랫폼에만 D2Coding webfont를 등록한다 — 맥은 Menlo가 현행 경험 그대로이고,
-// FontFace를 등록하지 않으면 스택의 D2Coding이 건너뛰어져 다운로드조차 없다.
-// 파일은 서버가 same-origin으로 서빙(packages/web/public/fonts, OFL).
-if (!IS_MAC && typeof document !== 'undefined' && 'fonts' in document) {
-  document.fonts.add(new FontFace('D2Coding', "url(/fonts/D2Coding.woff2) format('woff2')", { weight: '400' }));
-  document.fonts.add(new FontFace('D2Coding', "url(/fonts/D2Coding-Bold.woff2) format('woff2')", { weight: '700' }));
+/**
+ * 우리가 same-origin으로 서빙하는 webfont들 (packages/web/public/fonts, 모두 OFL).
+ *
+ * 등록은 게으르다: FontFace를 document.fonts에 넣는 순간이 아니라 실제로 쓰일 때
+ * 브라우저가 받아온다 — 그래서 스택에 없는 폰트는 바이트 하나 들지 않는다. 반대로
+ * 등록하지 *않으면* 스택에 이름이 있어도 그냥 건너뛰어지므로, 쓰기 전에 반드시
+ * 등록해야 한다.
+ */
+interface BundledFace {
+  weight?: string;
+  url: string;
+  /** 이 범위의 글자를 만날 때만 받아온다 — 두 글자짜리 보충 폰트가 이걸 쓴다. */
+  unicodeRange?: string;
+}
+
+const BUNDLED_FONTS: Record<string, { faces: BundledFace[]; eager?: boolean }> = {
   // ⏺(U+23FA)·⏵(U+23F5) 두 글자만 든 476바이트 폰트. Claude Code가 쓰는 기호인데
   // 안드로이드에는 이 둘을 가진 고정폭 폰트가 없다 — U+23FA는 컬러 이모지로 폴백해
   // 1.96셀 폭이 되어 다음 칸을 덮고, U+23F5는 글리프가 없어 빈칸이 된다(S24+ 실측).
   // 유니코드상 둘 다 Neutral(1셀)이라 xterm 계산은 맞고 폰트만 없던 것이라,
   // 0.5em advance로 직접 그려 스택 맨 앞에 세운다. scripts/build-glyph-font.mjs.
-  const glyphs = new FontFace('ttym glyphs', "url(/ttym-glyphs.woff2?v=1) format('woff2')", { unicodeRange: 'U+23FA, U+23F5' });
-  document.fonts.add(glyphs);
-  // unicode-range는 해당 글자가 화면에 뜰 때만 받아온다. xterm은 캔버스로 재는
-  // 경로가 있어 그 트리거를 놓치므로 직접 깨운다.
-  void glyphs.load().catch(() => {});
+  'ttym glyphs': {
+    faces: [{ url: '/ttym-glyphs.woff2?v=1', unicodeRange: 'U+23FA, U+23F5' }],
+    // unicode-range는 해당 글자가 화면에 뜰 때만 받아온다. xterm은 캔버스로 재는
+    // 경로가 있어 그 트리거를 놓치므로 직접 깨운다.
+    eager: true,
+  },
+  'Monoplex KR Nerd': {
+    faces: [
+      { weight: '400', url: '/fonts/MonoplexKRNerd-Regular.woff2' },
+      { weight: '700', url: '/fonts/MonoplexKRNerd-Bold.woff2' },
+    ],
+  },
+  'D2Coding': {
+    faces: [
+      { weight: '400', url: '/fonts/D2Coding.woff2' },
+      { weight: '700', url: '/fonts/D2Coding-Bold.woff2' },
+    ],
+  },
+};
+
+const registeredFonts = new Set<string>();
+
+/**
+ * 폰트 스택에 등장하는 번들 폰트를 document.fonts에 등록한다. 이름을 스택에서
+ * 찾아 등록하므로, 사용자가 config로 지정한 폰트도 (그것이 번들 폰트라면)
+ * 플랫폼과 무관하게 살아난다 — 맥에서 Monoplex를 고르는 경우가 이 경로다.
+ */
+export function ensureFontsRegistered(stack: string): void {
+  if (typeof document === 'undefined' || !('fonts' in document)) return;
+  for (const [family, spec] of Object.entries(BUNDLED_FONTS)) {
+    if (registeredFonts.has(family) || !stack.includes(family)) continue;
+    registeredFonts.add(family);
+    for (const face of spec.faces) {
+      try {
+        const descriptors: FontFaceDescriptors = {};
+        if (face.weight) descriptors.weight = face.weight;
+        if (face.unicodeRange) descriptors.unicodeRange = face.unicodeRange;
+        const registered = new FontFace(family, `url(${face.url}) format('woff2')`, descriptors);
+        document.fonts.add(registered);
+        if (spec.eager) void registered.load().catch(() => {});
+      } catch { /* 등록 실패는 폴백으로 흡수된다 — 폰트 때문에 터미널이 죽지는 않는다 */ }
+    }
+  }
 }
 
-const TERMINAL_FONTS = IS_MAC
+/**
+ * 맥은 Menlo 그대로 — 시스템 폰트라 다운로드가 없고, 현행 사용자 경험이 그것이다.
+ * 그 외 플랫폼은 Monoplex KR Nerd를 셀프호스팅해 쓴다: 한글:영문이 정확히 2:1이라
+ * 한글 섞인 줄이 어긋나지 않고, Nerd 심볼이 들어 있어 powerline 프롬프트가 깨지지
+ * 않는다. D2Coding은 폴백으로 남는다.
+ */
+export const DEFAULT_TERMINAL_FONTS = IS_MAC
   ? 'Menlo, Monaco, "Courier New", monospace'
-  : '"ttym glyphs", D2Coding, "Cascadia Mono", Consolas, "Courier New", monospace';
+  : '"ttym glyphs", "Monoplex KR Nerd", D2Coding, "Cascadia Mono", Consolas, "Courier New", monospace';
+
+/** 설정값이 비어 있으면 플랫폼 기본으로 — 설정 파일이 없어도 동작해야 한다. */
+export function resolveFontStack(configured?: string): string {
+  const trimmed = configured?.trim();
+  return trimmed ? trimmed : DEFAULT_TERMINAL_FONTS;
+}
+
+// 기본 스택은 모듈 로드 때 등록한다. 터미널이 하나도 없는 화면(대시보드·설정)도
+// UI 크롬을 var(--mono)로 그리는데, 등록을 첫 TerminalHost 생성까지 미루면 그
+// 전까지 크롬만 다른 폰트로 보였다가 바뀐다.
+ensureFontsRegistered(DEFAULT_TERMINAL_FONTS);
 
 export class TerminalHost {
   readonly wrapper: HTMLDivElement;
   readonly term: XTerm;
   private readonly fit: FitAddon;
   private webgl: WebglAddon | undefined;
+  private webFonts: WebFontsAddon | undefined;
   private searchAddon: SearchAddon | undefined;
   /** 쉘 통합(OSC 133;A)이 심는 프롬프트 경계 marker — ⌘↑/⌘↓ 점프의 좌표계. */
   private commandMarkers: import('@xterm/xterm').IMarker[] = [];
@@ -199,6 +267,9 @@ export class TerminalHost {
     this.wrapper.style.width = '100%';
     this.wrapper.style.height = '100%';
 
+    const fontStack = resolveFontStack(opts.fontFamily);
+    ensureFontsRegistered(fontStack);
+
     this.term = new XTerm({
       // 검색 하이라이트(decorations)가 proposed API — headless 쪽은 이미 켜져 있다.
       allowProposedApi: true,
@@ -209,7 +280,7 @@ export class TerminalHost {
       scrollback: 10000,
       cursorBlink: opts.mode !== 'readonly',
       fontSize: opts.fontSize,
-      fontFamily: TERMINAL_FONTS,
+      fontFamily: fontStack,
       theme: terminalTheme(),
       disableStdin: opts.mode === 'readonly',
     });
@@ -284,7 +355,11 @@ export class TerminalHost {
       // 링크는 에이전트가 뱉는 PR·배포 URL을 바로 여는 용도, OSC 52는 세션
       // 안의 vim·tmux·원격 ssh가 시스템 클립보드로 복사하게 해준다.
       // 로드 전엔 webfont를 스택에서 잠시 빼고 폴백으로 계측, 로드 완료 시 재계측.
-    try { this.term.loadAddon(new WebFontsAddon()); } catch {}
+    try {
+        // 참조를 남긴다: 설정으로 폰트가 바뀌면 relayout()으로 재계측해야 한다.
+        this.webFonts = new WebFontsAddon();
+        this.term.loadAddon(this.webFonts);
+      } catch {}
     try { this.term.loadAddon(new WebLinksAddon()); } catch {}
       try { this.term.loadAddon(new ClipboardAddon()); } catch {}
       this.syncWrapperSizing();
@@ -384,6 +459,9 @@ export class TerminalHost {
     if (prev.fontSize !== opts.fontSize) {
       this.term.options.fontSize = opts.fontSize;
       this.scheduleFit();
+    }
+    if (resolveFontStack(prev.fontFamily) !== resolveFontStack(opts.fontFamily)) {
+      this.applyFontFamily(resolveFontStack(opts.fontFamily));
     }
     if (prev.mode !== opts.mode) {
       this.term.options.disableStdin = opts.mode === 'readonly';
@@ -610,6 +688,34 @@ export class TerminalHost {
     this.fit.dispose();
     this.term.dispose();
     this.localEcho.setEnabled(false);
+  }
+
+  // ── fonts ──
+
+  /**
+   * 폰트를 런타임에 갈아끼운다. 순서가 전부다:
+   *
+   *   1. 등록  — 스택에 이름만 있고 FontFace가 없으면 브라우저가 건너뛴다.
+   *   2. 적용  — options.fontFamily.
+   *   3. 재계측 — xterm은 셀 크기를 *측정*해서 격자를 잡는다. 폰트가 도착하기 전에
+   *              잰 값은 폴백 폰트의 것이고, 그대로 두면 한글 섞인 줄이 어긋난다.
+   *              WebFontsAddon.relayout()이 로드를 기다렸다가 다시 잰다.
+   *   4. 아틀라스 폐기 — WebGL 렌더러는 글리프를 텍스처에 캐시한다. 비우지 않으면
+   *              새 폰트를 지정해도 옛 글리프가 계속 그려진다.
+   */
+  private applyFontFamily(stack: string) {
+    ensureFontsRegistered(stack);
+    this.term.options.fontFamily = stack;
+    const settle = () => {
+      if (this.disposed) return;
+      try { this.webgl?.clearTextureAtlas(); } catch {}
+      this.scheduleFit();
+    };
+    if (this.webFonts) {
+      this.webFonts.relayout().then(settle).catch(settle);
+    } else {
+      settle();
+    }
   }
 
   // ── renderer ──
