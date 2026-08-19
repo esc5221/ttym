@@ -52,6 +52,13 @@
     .thin-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-dim, #6e6e6e); }
     .preview-scroll::-webkit-scrollbar { display: none; }
     .preview-scroll { scrollbar-width: none; -ms-overflow-style: none; }
+    /* stream 메뉴: 왼쪽에 줄기 이름이 세로로 내려가고, 그 오른쪽에 그 줄기의
+       workspace가 탭 줄과 같은 알약으로 퍼진다. 한 줄에 안 들어가면 아래로 흘린다.
+       세로 목록이 아니라 알약인 이유는 탭 줄에서 고른 뒤 보게 될 모양과 같기 때문. */
+    .stream-grid { display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 3px; align-items: start; }
+    .stream-pills { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px; }
+    /* 줄기가 바뀌는 자리에만 가는 선 — 지도 뷰의 제목 밑줄이 여기선 행 구분선이 된다. */
+    .stream-rule { grid-column: 1 / -1; height: 1px; background: var(--line, #2d2d2d); margin: 4px 0; opacity: .6; }
   </style>
 </head>
 <body>

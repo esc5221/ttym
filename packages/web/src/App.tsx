@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes, getHost } from '@ttym/ui';
 import * as api from '@ttym/api';
@@ -15,7 +15,7 @@ import {
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
-import { actionBtnStyle, tabStyle, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { actionBtnStyle, groupByStream, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
 import { KeyBar } from './KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
@@ -84,11 +84,15 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
  *  승격되므로, 안쪽에 absolute로 띄운 패널은 스트립 높이(42px) 밖에서 잘려
  *  보이지 않는다. z-index로는 뚫리지 않는다. 그래서 패널은 body 포털 + fixed로
  *  클리핑 박스 밖에 살고(SettingsModal과 같은 문법), 위치는 버튼 rect가 정한다. */
-function StripMenu({ label, open, onToggle, children }: {
-  label: string;
+function StripMenu({ label, open, onToggle, children, align = 'right', anchorStyle, panelStyle }: {
+  label: React.ReactNode;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
+  /** 패널이 버튼의 어느 모서리에 맞춰 서는가. 스트립 왼쪽 끝의 메뉴는 'left'. */
+  align?: 'left' | 'right';
+  anchorStyle?: React.CSSProperties;
+  panelStyle?: React.CSSProperties;
 }) {
   const anchorRef = useRef<HTMLButtonElement | null>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
@@ -108,12 +112,21 @@ function StripMenu({ label, open, onToggle, children }: {
 
   return (
     <>
-      <button ref={anchorRef} onClick={onToggle} style={stripBtnStyle}>{label}</button>
+      <button ref={anchorRef} onClick={onToggle} style={anchorStyle ?? stripBtnStyle}>{label}</button>
       {open && rect ? createPortal(
         <div style={{
           ...attachDropdownStyle,
           top: rect.bottom + 6,
-          right: Math.max(6, window.innerWidth - rect.right),
+          // 왼쪽 정렬은 버튼이 화면 왼쪽에 있을 때 쓴다. 폭까지 같이 묶지 않으면
+          // 좁은 화면에서 패널이 오른쪽으로 삐져나간다(폰 실측 440 > 411) —
+          // 넘치는 대신 남은 자리에 맞춰 줄어들게 한다.
+          ...(align === 'left'
+            ? {
+                left: Math.max(6, rect.left),
+                maxWidth: window.innerWidth - Math.max(6, rect.left) - 6,
+              }
+            : { right: Math.max(6, window.innerWidth - rect.right) }),
+          ...panelStyle,
         }}>
           {children}
         </div>,
@@ -122,6 +135,176 @@ function StripMenu({ label, open, onToggle, children }: {
     </>
   );
 }
+
+/** 에이전트 점 — 탭·stream 메뉴가 같은 것을 보게 하려고 한 곳에 둔다.
+ *  도는 중이면 뛰고, 붙어만 있으면 흐리게. 없으면 아무것도 안 그린다. */
+function AgentDot({ kind, running }: { kind: AgentState['kind'] | null | undefined; running: boolean }) {
+  if (!kind) return null;
+  return (
+    <span
+      className={running ? 'agent-dot-run' : undefined}
+      style={{ width: 5, height: 5, borderRadius: '50%', background: AGENT_COLORS[kind], opacity: running ? 1 : 0.4, flexShrink: 0 }}
+    />
+  );
+}
+
+/** workspace 안의 에이전트 상태를 한 점으로 접는다 — 도는 게 있으면 그게 이긴다. */
+function workspaceAgent(ws: Workspace, agentStates: Record<number, AgentState>): { kind: AgentState['kind'] | null; running: boolean } {
+  const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+  const states = ids.map((id) => agentStates[id]);
+  const running = states.find((a) => a?.active && a.kind);
+  if (running) return { kind: running.kind, running: true };
+  const idle = states.find((a) => a?.kind);
+  return { kind: idle?.kind ?? null, running: false };
+}
+
+function streamAgent(items: Workspace[], agentStates: Record<number, AgentState>): { kind: AgentState['kind'] | null; running: boolean } {
+  let idle: AgentState['kind'] | null = null;
+  for (const ws of items) {
+    const a = workspaceAgent(ws, agentStates);
+    if (a.running) return a;
+    if (a.kind && !idle) idle = a.kind;
+  }
+  return { kind: idle, running: false };
+}
+
+/** 탭 줄 맨 앞의 stream 메뉴.
+ *
+ *  탭 줄은 workspace 18개에 2161px가 필요한데 1512 화면의 실제 폭은 1422다(실측).
+ *  그래서 줄에는 현재 stream의 workspace만 남기고 나머지는 이 메뉴 안으로 넣는다.
+ *  대신 메뉴는 열자마자 전부 보여준다 — 접힌 쪽에서 도는 것이 실측 5개 중 3개라,
+ *  호버로 한 줄기씩 갈아 끼우면 그 셋을 찾느라 마우스를 열 번 옮겨야 한다.
+ *  트리거의 점이 모든 stream을 통틀어 가장 급한 것을 띄우는 이유도 같다 —
+ *  접는 대가를 갚는 유일한 자리다. */
+function StreamMenu({ groups, current, agentStates, activeId, uiStyle, onPick }: {
+  groups: Array<{ stream: string; items: Workspace[] }>;
+  current: string;
+  agentStates: Record<number, AgentState>;
+  activeId: string | null;
+  uiStyle: UiStyle;
+  onPick: (ws: Workspace) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const all = groups.flatMap((g) => g.items);
+  const overall = streamAgent(all, agentStates);
+  const count = groups.find((g) => g.stream === current)?.items.length ?? 0;
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    // 한 프레임 미뤄서 단다. React는 click 같은 discrete 이벤트에서 effect를
+    // 동기로 비우므로, 즉시 달면 '메뉴를 여는 그 클릭'이 계속 버블해 방금 단
+    // 이 리스너에 잡힌다 — 열리자마자 닫혀 아예 안 눌리는 것처럼 보인다.
+    // (합성 click으로는 재현되지 않아 진짜 마우스로 눌러야 드러난다)
+    const raf = requestAnimationFrame(() => window.addEventListener('click', close));
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('click', close);
+    };
+  }, [open]);
+
+  const pill = (ws: Workspace, label: string) => {
+    const agent = workspaceAgent(ws, agentStates);
+    const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+    return (
+      <button
+        key={ws.id}
+        onClick={() => { setOpen(false); onPick(ws); }}
+        style={{
+          ...tabStyle,
+          cursor: 'pointer',
+          ...(ws.id === activeId ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null),
+        }}
+        title={workspaceDisplayLabel(ws)}
+      >
+        <AgentDot kind={agent.kind} running={agent.running} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{label}</span>
+        <span style={{ color: 'var(--text-dim)' }}>{ids.length}</span>
+      </button>
+    );
+  };
+
+  return (
+    <StripMenu
+      align="left"
+      open={open}
+      onToggle={() => setOpen((v) => !v)}
+      anchorStyle={streamTriggerStyle}
+      panelStyle={streamPanelStyle}
+      label={
+        <>
+          <AgentDot kind={overall.kind} running={overall.running} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{current}</span>
+          <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>{count}</span>
+          <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 9 }}>▾</span>
+        </>
+      }
+    >
+      <div className="stream-grid">
+        {groups.map(({ stream, items }, i) => {
+          // stream과 workspace의 이름이 같으면 두 번 쓰지 않는다 — 알약 하나가 둘 다다.
+          const merged = items.length === 1 && items[0].name === stream;
+          const agent = streamAgent(items, agentStates);
+          return (
+            <Fragment key={stream}>
+              {i ? <div className="stream-rule" /> : null}
+              {merged ? (
+                <>
+                  <div className="stream-pills" style={{ paddingLeft: 5 }}>{pill(items[0], stream)}</div>
+                  <div />
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => { setOpen(false); onPick(items[0]); }}
+                    style={{ ...streamLabelStyle, color: stream === current ? 'var(--text)' : 'var(--text-soft)' }}
+                    title={stream}
+                  >
+                    <AgentDot kind={agent.kind} running={agent.running} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{stream}</span>
+                  </button>
+                  <div className="stream-pills">{items.map((ws) => pill(ws, ws.name))}</div>
+                </>
+              )}
+            </Fragment>
+          );
+        })}
+      </div>
+    </StripMenu>
+  );
+}
+
+const streamTriggerStyle: React.CSSProperties = {
+  ...tabStyle,
+  fontWeight: 700,
+  color: 'var(--text)',
+  background: 'var(--bg1)',
+  border: '1px solid var(--line)',
+  cursor: 'pointer',
+};
+
+const streamPanelStyle: React.CSSProperties = {
+  // 실측 684×505에 18개가 스크롤 없이 들어간다. 폰에서는 화면이 정하게 둔다.
+  width: 'min(684px, calc(100vw - 20px))',
+  minWidth: 0,
+  maxHeight: 'min(560px, calc(100vh - 90px))',
+};
+
+const streamLabelStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 7,
+  height: 29,
+  padding: '0 4px 0 7px',
+  fontSize: 12,
+  fontWeight: 700,
+  fontFamily: 'var(--mono)',
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+  textAlign: 'left',
+};
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
@@ -1062,6 +1245,23 @@ function App() {
   // ── 탭 드래그 재배치 — 4px 문턱 전까지는 클릭/더블클릭 문법 그대로 ──
   const [dragTabId, setDragTabId] = useState<string | null>(null);
   const suppressTabClick = useRef(false);
+  // 탭 줄에 남길 것: 현재 stream의 workspace만. 현재 stream은 열려 있는 탭이
+  // 정한다 — 따로 저장하지 않는다. 홈·지도처럼 workspace가 없는 화면에서는
+  // 마지막으로 있던 줄기를 기억한다 (없으면 첫 줄기).
+  const streamGroups = useMemo(() => groupByStream(workspaces), [workspaces]);
+  const activeWs = route.page === 'workspace' ? workspaces.find((w) => w.id === route.id) ?? null : null;
+  const [lastStream, setLastStream] = useState<string | null>(null);
+  useEffect(() => {
+    if (activeWs) setLastStream(streamOf(activeWs));
+  }, [activeWs?.id, activeWs ? streamOf(activeWs) : null]);
+  const currentStream = activeWs
+    ? streamOf(activeWs)
+    : (lastStream && streamGroups.some((g) => g.stream === lastStream) ? lastStream : streamGroups[0]?.stream ?? UNSORTED_STREAM);
+  const visibleWorkspaces = useMemo(
+    () => streamGroups.find((g) => g.stream === currentStream)?.items ?? [],
+    [streamGroups, currentStream],
+  );
+
   const beginTabDrag = useCallback((id: string, e: React.MouseEvent) => {
     if (e.button !== 0) return;
     const startX = e.clientX;
@@ -1083,12 +1283,17 @@ function App() {
         else if (i > from && ev.clientX > mid) to = Math.max(to, i);
       });
       if (to !== from) {
+        // DOM에 보이는 것은 현재 stream의 탭뿐이라 to는 '보이는 순서'의 자리다.
+        // 전역 배열에 그대로 쓰면 다른 stream 사이로 끼어든다 — 목표 자리에 있던
+        // 탭의 전역 인덱스로 옮겨 심는다.
+        const targetId = ids[to];
         setWorkspaces((prev) => {
           const arr = prev.slice();
           const at = arr.findIndex((w) => w.id === id);
-          if (at === -1) return prev;
+          const dest = arr.findIndex((w) => w.id === targetId);
+          if (at === -1 || dest === -1) return prev;
           const [item] = arr.splice(at, 1);
-          arr.splice(to, 0, item);
+          arr.splice(arr.findIndex((w) => w.id === targetId) + (dest > at ? 1 : 0), 0, item);
           return arr;
         });
       }
@@ -1111,8 +1316,14 @@ function App() {
   const createWorkspaceTab = useCallback(async () => {
     const id = uuid().slice(0, 8);
     const ws = await apiCreateWorkspace({ id, name: `workspace ${workspaces.length + 1}`, layout: { type: 'pane', sessionId: 0 } });
-    if (ws) navigate({ page: 'workspace', id: ws.id });
-  }, [workspaces.length]);
+    if (!ws) return;
+    // 지금 보고 있는 줄기에서 만든 것이니 그 줄기에 둔다. 안 그러면 미분류로
+    // 떨어져 방금 만든 탭이 눈앞에서 사라진다.
+    if (currentStream !== UNSORTED_STREAM) {
+      await apiUpdateWorkspace(ws.id, { map: { stream: currentStream } });
+    }
+    navigate({ page: 'workspace', id: ws.id });
+  }, [workspaces.length, currentStream]);
 
   // 창별 세밀 줌 (데스크톱 셸에서만): ⌘+/− 5% 스텝, ⌘0 리셋. 50~200% 클램프.
   // 브라우저 줌은 오리진 단위로 전 창이 동기화되지만 webview 줌은 창의 것이다.
@@ -1155,12 +1366,13 @@ function App() {
       const at = Number(e.key) - 1;
       e.preventDefault();
       if (at === 0) { navigate({ page: 'dashboard' }); return; }
-      const ws = workspaces[at - 1];
+      // 줄에 보이는 것과 번호가 어긋나면 안 된다 — 필터된 목록을 센다.
+      const ws = visibleWorkspaces[at - 1];
       if (ws) navigate({ page: 'workspace', id: ws.id });
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [workspaces]);
+  }, [visibleWorkspaces]);
 
   const handleLocalEchoChange = useCallback((value: boolean) => {
     writeLocalEchoEnabled(value);
@@ -1285,6 +1497,19 @@ function App() {
           style={{ ...tabStyle, ...(homeActive ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}
           title="home · ⌘1"
         >⌂</button>
+        {streamGroups.length > 1 ? (
+          <>
+            <StreamMenu
+              groups={streamGroups}
+              current={currentStream}
+              agentStates={agentStates}
+              activeId={route.page === 'workspace' ? route.id : null}
+              uiStyle={uiStyle}
+              onPick={(ws) => navigate({ page: 'workspace', id: ws.id })}
+            />
+            <span style={{ width: 1, height: 16, background: 'var(--line)', flexShrink: 0, margin: '0 5px' }} />
+          </>
+        ) : null}
         <div style={{ position: 'relative', flex: 1, minWidth: 0, alignSelf: 'stretch', display: 'flex' }}>
           <div
             ref={tabScrollerRef}
@@ -1297,12 +1522,10 @@ function App() {
             }}
             style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, flex: 1 }}
           >
-        {workspaces.map((ws, i) => {
+        {visibleWorkspaces.map((ws, i) => {
           const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
-          const running = ids.map((id) => agentStates[id]).find((a) => a?.active && a.kind);
-          const anyAgent = ids.map((id) => agentStates[id]).find((a) => a?.kind);
+          const agent = workspaceAgent(ws, agentStates);
           const active = route.page === 'workspace' && route.id === ws.id;
-          const dotColor = (running ?? anyAgent)?.kind ? AGENT_COLORS[(running ?? anyAgent)!.kind!] : undefined;
           return (
             <button
               key={ws.id}
@@ -1320,12 +1543,7 @@ function App() {
               title={`${workspaceDisplayLabel(ws)}${IS_NATIVE ? ` · ⌘${i + 2}` : ''} · 더블클릭: 이름 변경 · 드래그: 재배치`}
               onDoubleClick={() => { setRenamingId(ws.id); setRenameDraft(ws.name); }}
             >
-              {dotColor ? (
-                <span
-                  className={running ? 'agent-dot-run' : undefined}
-                  style={{ width: 5, height: 5, borderRadius: '50%', background: dotColor, opacity: running ? 1 : 0.4, flexShrink: 0 }}
-                />
-              ) : null}
+              <AgentDot kind={agent.kind} running={agent.running} />
               {renamingId === ws.id ? (
                 <input
                   autoFocus

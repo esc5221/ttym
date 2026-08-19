@@ -22,11 +22,21 @@ export interface WorkspaceMemberInfo {
   updatedAt?: number;
 }
 
+/** Placement on the work map — written by the summarizer, read by the map view
+ *  and by the tab strip's stream menu. Absent means unsorted. */
+export interface WorkspaceMapAnnotation {
+  stream?: string;
+  column?: number;
+  order?: number;
+  updatedAt?: number;
+}
+
 export interface WorkspaceInfo {
   id: string;
   name: string;
   layout: LayoutNode;
   members: WorkspaceMemberInfo[];
+  map?: WorkspaceMapAnnotation;
   createdAt: number;
   updatedAt: number;
 }

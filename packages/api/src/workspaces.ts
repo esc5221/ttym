@@ -1,6 +1,6 @@
 import { request, type BaseUrl } from './transport.js';
 import { layoutFromSessionIds, type LayoutNode } from '@ttym/shared';
-import type { SessionInfo, WorkspaceInfo, WorkspaceMemberInfo } from './types.js';
+import type { SessionInfo, WorkspaceInfo, WorkspaceMapAnnotation, WorkspaceMemberInfo } from './types.js';
 
 export function listWorkspaces(base: BaseUrl): Promise<WorkspaceInfo[]> {
   return request(base, '/api/workspaces');
@@ -29,7 +29,7 @@ export function createWorkspace(
 export function updateWorkspace(
   base: BaseUrl,
   id: string,
-  patch: { name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: 'even-h' | 'even-v' | 'main-v' | 'tiled' | 'auto' },
+  patch: { name?: string; layout?: LayoutNode; members?: WorkspaceMemberInfo[]; preset?: 'even-h' | 'even-v' | 'main-v' | 'tiled' | 'auto'; map?: WorkspaceMapAnnotation | null },
 ): Promise<WorkspaceInfo> {
   return request(base, `/api/workspaces/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch });
 }

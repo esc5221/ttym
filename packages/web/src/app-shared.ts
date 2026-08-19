@@ -35,8 +35,34 @@ export interface Workspace {
   name: string;
   layout: LayoutNode;
   members: WorkspaceMember[];
+  /** 작업 지도의 배치. stream이 탭 줄의 묶음 이름이기도 하다 — 지도 뷰와 같은 값을 읽는다. */
+  map?: { stream?: string; column?: number; order?: number; updatedAt?: number };
   createdAt: number;
   updatedAt: number;
+}
+
+/** stream 없는 workspace가 모이는 자리. 지도 뷰의 'unsorted'와 같은 뜻이다. */
+export const UNSORTED_STREAM = '미분류';
+
+export function streamOf(workspace: Workspace): string {
+  const name = workspace.map?.stream?.trim();
+  return name || UNSORTED_STREAM;
+}
+
+/** workspace를 stream 단위로 묶는다. 순서는 배열 등장 순 — 탭 순서가 곧 줄기 순서다.
+ *  미분류만 맨 뒤로 민다 (이름이 아니라 '아직 이름이 없다'는 뜻이라). */
+export function groupByStream(workspaces: Workspace[]): Array<{ stream: string; items: Workspace[] }> {
+  const groups = new Map<string, Workspace[]>();
+  for (const workspace of workspaces) {
+    const key = streamOf(workspace);
+    const bucket = groups.get(key);
+    if (bucket) bucket.push(workspace);
+    else groups.set(key, [workspace]);
+  }
+  const entries = [...groups].map(([stream, items]) => ({ stream, items }));
+  return entries
+    .filter((entry) => entry.stream !== UNSORTED_STREAM)
+    .concat(entries.filter((entry) => entry.stream === UNSORTED_STREAM));
 }
 
 export const LOCAL_ECHO_STORAGE_KEY = 'ttym-demo-local-echo';
@@ -295,7 +321,7 @@ export function sessionWorkspaceMembership(workspaces: Workspace[]): Map<number,
   return membership;
 }
 
-export async function apiUpdateWorkspace(id: string, patch: { name?: string; layout?: LayoutNode }): Promise<void> {
+export async function apiUpdateWorkspace(id: string, patch: { name?: string; layout?: LayoutNode; map?: { stream?: string; column?: number; order?: number } }): Promise<void> {
   try {
     await api.updateWorkspace(API_BASE, id, patch);
   } catch {}
