@@ -191,6 +191,48 @@ suite('CLI 계약', () => {
     }
   });
 
+  it('§6 await --json은 reason이 done|timeout|failed|unknown 중 하나다', () => {
+    const r = run(['await', 'suite:echoer', '--json', '--timeout', '1500', '--', 'noop']);
+    expect(r.stdout, `stdout이 비었다 — 전체 출력: ${r.out}`).not.toBe('');
+    const j = JSON.parse(r.stdout);
+    expect(j, 'reason이 없다').toHaveProperty('reason');
+    expect(['done', 'timeout', 'failed', 'unknown'], 'reason이 허용 집합 밖이다').toContain(j.reason);
+  });
+
+  it('§6 await --json output은 ESC 코드포인트를 포함하지 않는다', () => {
+    const ansiCommand = '"\\033[31mwhat is --raw\\033[0m"';
+    const r = run(['await', 'suite:echoer', '--json', '--timeout', '2000', '--', 'printf', ansiCommand]);
+    expect(r.stdout, `stdout이 비었다 — 전체 출력: ${r.out}`).not.toBe('');
+    const j = JSON.parse(r.stdout);
+    expect(j, 'output이 없다').toHaveProperty('output');
+    expect(j.output, 'output에 ESC 바이트(0x1b)가 들어있다').not.toMatch(/\x1b/);
+  });
+
+  it('§6 await 프롬프트 본문에 --raw가 있어도 strip 동작은 유지되고, 플래그 --raw는 인자로 인식된다', () => {
+    const ansiCommand = '"\\033[31mwhat is --raw\\033[0m"';
+    const rawFromPrompt = run(['await', 'suite:echoer', '--json', '--timeout', '2000', '--', 'printf', ansiCommand]);
+    expect(rawFromPrompt.stdout, `stdout이 비었다 — 전체 출력: ${rawFromPrompt.out}`).not.toBe('');
+    const promptJson = JSON.parse(rawFromPrompt.stdout);
+    expect(promptJson.output, '프롬프트의 --raw 토큰이 strip을 비활성화했다').not.toMatch(/\x1b/);
+
+    const rawFromFlag = run(['await', 'suite:echoer', '--raw', '--json', '--timeout', '2000', '--', 'printf', ansiCommand]);
+    expect(rawFromFlag.stdout, `stdout이 비었다 — 전체 출력: ${rawFromFlag.out}`).not.toBe('');
+    const flagJson = JSON.parse(rawFromFlag.stdout);
+    expect(flagJson.output, '실제 --raw 플래그가 raw 출력을 만들지 못했다').toMatch(/\x1b/);
+  });
+
+  it('§6 await --match --json은 각 항목이 target·interaction·completed·reason·output을 가진다', () => {
+    const r = run(['await', '--match', 'name:echoer', '--json', '--timeout', '2000', '--', 'noop']);
+    expect(r.stdout, `stdout이 비었다 — 전체 출력: ${r.out}`).not.toBe('');
+    const arr = JSON.parse(r.stdout);
+    expect(Array.isArray(arr), '응답이 배열이 아니다').toBe(true);
+    for (const item of arr) {
+      for (const key of ['target', 'interaction', 'completed', 'reason', 'output']) {
+        expect(item, `missing ${key}`).toHaveProperty(key);
+      }
+    }
+  });
+
   it('§6 전역 --json은 위치를 가리지 않는다', () => {
     const a = run(['--json', 'workspace', 'info', wsId]);
     const b = run(['workspace', 'info', wsId, '--json']);

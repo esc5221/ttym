@@ -18,15 +18,16 @@ import { ensureServerRunning } from './lifecycle.js';
  * 크기도 마찬가지다 — 기본 80x24 는 TUI 에이전트에 좁아서 띄운 뒤 resize 를
  * 다시 부르는 왕복이 생겼다.
  */
-function geometryOptions(): Record<string, unknown> {
-  const args = process.argv.slice(3);
+export function geometryOptions(args: string[]): Record<string, unknown> {
+  const sep = args.indexOf('--');
+  const ownArgs = sep === -1 ? args : args.slice(0, sep);
   const out: Record<string, unknown> = {};
-  const cwd = readOption(args, '--cwd');
+  const cwd = readOption(ownArgs, '--cwd');
   if (cwd) out.cwd = resolve(cwd.replace(/^~(?=\/|$)/, HOME_DIR));
-  const size = readOption(args, '--size');
+  const size = readOption(ownArgs, '--size');
   if (size) {
     const m = /^(\d+)x(\d+)$/.exec(size.trim());
-    if (!m) {
+    if (!m || Number(m[1]) <= 0 || Number(m[2]) <= 0) {
       console.error(`--size must look like <cols>x<rows>, got: ${size}`);
       process.exit(EXIT.USAGE);
     }
@@ -53,7 +54,7 @@ export async function cmdNew() {
   // Membership is a CLI convenience here, not a storage invariant: the session
   // gets a name by being filed in the default workspace (ADR-0001 Q1).
   const workspace = await ensureDefaultWorkspace(port);
-  const { workspace: updated, member, session } = await createWorkspaceMember(port, workspace, { name, cmd, ...geometryOptions() });
+  const { workspace: updated, member, session } = await createWorkspaceMember(port, workspace, { name, cmd, ...geometryOptions(args) });
   const result = {
     address: `${updated.name}:${member.name}`,
     sessionId: session.id,
@@ -83,7 +84,7 @@ export async function cmdSplit() {
     console.error('split needs a workspace member as its target, not a bare session id');
     process.exit(EXIT.USAGE);
   }
-  const body: Record<string, unknown> = { targetSessionId: target.sessionId, name, ...geometryOptions() };
+  const body: Record<string, unknown> = { targetSessionId: target.sessionId, name, ...geometryOptions(args) };
   if (cmd) body.cmd = cmd;
   const data = await fetchPost(port, `/api/workspaces/${encodeURIComponent(target.workspace.id)}/split`, body);
   if (!data || data.error || !data.session) {
@@ -266,35 +267,67 @@ function awaitReason(status: string | null): 'done' | 'timeout' | 'failed' | 'un
   return 'unknown';
 }
 
+/**
+ * 단일 대상과 --match 가 같은 모양을 내놓게 하는 한 군데.
+ *
+ * output 은 경로와 무관하게 벗긴 평문이다 — transcript 는 서버가 이미
+ * 평문으로 주지만 그게 null 이면 폴백하는 화면은 ANSI 원본이라,
+ * 부르는 쪽은 같은 필드에서 둘 중 무엇을 받았는지 구분할 수 없었다.
+ */
+async function awaitInteraction(port: number, sessionId: number, prompt: string, timeoutMs: number, raw: boolean) {
+  const response = await fetchRequest(port, 'POST', `/api/sessions/${sessionId}/interactions`, {
+    prompt: prompt.replace(/[\r\n]+$/, ''),
+    timeoutMs,
+    submit: 'cr',
+  }, timeoutMs + 15_000);
+  const interaction = response?.interaction ?? null;
+  let output = interaction?.transcript ?? null;
+  if (output === null) {
+    const screen = await fetchJson(port, `/api/sessions/${sessionId}/screen`).catch(() => null);
+    output = screen?.screen ?? '';
+  }
+  return {
+    interaction: interaction ? {
+      id: interaction.id,
+      status: interaction.status,
+      // 추출 품질은 숨기지 않는다 — 어디서 온 답인지, 화면이 온전했는지.
+      transcriptSource: interaction.transcriptSource ?? null,
+      integrity: interaction.integrity ?? null,
+    } : null,
+    completed: interaction?.status === 'completed',
+    reason: awaitReason(interaction?.status ?? null),
+    output: raw ? output : stripAnsi(output),
+  };
+}
+
 export async function cmdAwaitAddr() {
   const args = process.argv.slice(3);
   const sep = args.indexOf('--');
   const prompt = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
+  const ownArgs = sep === -1 ? args : args.slice(0, sep);
   const token = args[0];
   if (!token || !prompt) {
-    console.error('usage: ttym await <ws:name|:name|#id | --match \"expr\"> [--timeout ms] -- "prompt"');
+    console.error('usage: ttym await <ws:name|:name|#id | --match \"expr\"> [--timeout ms] [--raw] -- "prompt"');
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
   await ensureCompatibleServer(port);
-  const timeoutMs = parseInt(readOption(args, '--timeout') || '120000', 10);
+  // 프롬프트는 -- 뒤에 온다. 플래그를 argv 전체에서 찾으면 프롬프트 본문의
+  // '--raw' 나 '--timeout' 이 CLI 의 플래그로 읽힌다.
+  const raw = ownArgs.includes('--raw');
+  const timeoutMs = parseInt(readOption(ownArgs, '--timeout') || '120000', 10);
   if (token === '--match') {
     // 매칭된 멤버 각각에 순차 await — Stop hook 완료 감지가 멤버별 독립이라
     // 병렬도 되지만, 출력이 섞이지 않게 순서대로 묻는다.
     const targets = await resolveMatches(port, args[1] ?? '');
     const results = [];
     for (const t of targets) {
-      const response = await fetchRequest(port, 'POST', `/api/sessions/${t.sessionId}/interactions`, {
-        prompt: prompt.replace(/[\r\n]+$/, ''),
-        timeoutMs,
-        submit: 'cr',
-      }, timeoutMs + 15_000);
-      results.push({ target: t.label, interaction: response?.interaction ?? null });
+      results.push({ target: t.label, ...await awaitInteraction(port, t.sessionId, prompt, timeoutMs, raw) });
     }
     if (hasFlag('--json')) return printOutput(results, true);
     for (const entry of results) {
       console.log(`── ${entry.target} ──`);
-      console.log(entry.interaction?.transcript ?? `(${entry.interaction?.status ?? 'no response'})`);
+      console.log(entry.output || `(${entry.reason})`);
     }
     return;
   }
@@ -304,7 +337,7 @@ export async function cmdAwaitAddr() {
   // 133;D가 완료 신호이고, 답은 그 명령의 출력 구간이다.
   const shell = await shellAwait(port, target.sessionId, prompt.replace(/[\r\n]+$/, ''), timeoutMs);
   if (shell) {
-    const output = shell.output === null ? null : (hasFlag('--raw') ? shell.output : cleanShellOutput(shell.output));
+    const output = shell.output === null ? null : (raw ? shell.output : cleanShellOutput(shell.output));
     if (hasFlag('--json')) {
       return printOutput({
         target: target.label,
@@ -330,38 +363,13 @@ export async function cmdAwaitAddr() {
     return;
   }
 
-  const response = await fetchRequest(port, 'POST', `/api/sessions/${target.sessionId}/interactions`, {
-    prompt: prompt.replace(/[\r\n]+$/, ''),
-    timeoutMs,
-    submit: 'cr',
-  }, timeoutMs + 15_000);
-  const interaction = response?.interaction ?? null;
-
-  let output = interaction?.transcript ?? null;
-  if (output === null) {
-    const screen = await fetchJson(port, `/api/sessions/${target.sessionId}/screen`).catch(() => null);
-    output = screen?.screen ?? '';
-  }
-  if (hasFlag('--json')) {
-    return printOutput({
-      target: target.label,
-      interaction: interaction ? {
-        id: interaction.id,
-        status: interaction.status,
-        // 추출 품질은 숨기지 않는다 — 어디서 온 답인지, 화면이 온전했는지.
-        transcriptSource: interaction.transcriptSource ?? null,
-        integrity: interaction.integrity ?? null,
-      } : null,
-      completed: interaction?.status === 'completed',
-      reason: awaitReason(interaction?.status ?? null),
-      output,
-    }, true);
-  }
-  if (interaction?.status === 'pending') {
-    console.error(`timeout: still running after ${timeoutMs}ms — resume with id ${interaction.id}`);
-  } else if (interaction?.status === 'failed') {
+  const result = await awaitInteraction(port, target.sessionId, prompt, timeoutMs, raw);
+  if (hasFlag('--json')) return printOutput({ target: target.label, ...result }, true);
+  if (result.interaction?.status === 'pending') {
+    console.error(`timeout: still running after ${timeoutMs}ms — resume with id ${result.interaction.id}`);
+  } else if (result.interaction?.status === 'failed') {
     console.error('agent ended the turn without answering');
   }
-  process.stdout.write(output);
-  if (output && !output.endsWith('\n')) process.stdout.write('\n');
+  process.stdout.write(result.output);
+  if (result.output && !result.output.endsWith('\n')) process.stdout.write('\n');
 }

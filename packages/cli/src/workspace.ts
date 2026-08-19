@@ -8,6 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, shellAwait, stripAnsi, cleanShellOutput, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 import { isRuntimeMetaKey } from '@ttym/protocol';
 import { listWorkspaces, resolveCurrentWorkspace, resolveWorkspace, findMemberInWorkspace, createWorkspaceMember, requireMember, patchSessionMeta, memberAddress, normalizeAddressToken, getWorkspaceById, findWorkspaceBySessionId, getSessionIdsFromLayout } from './addresses.js';
+import { geometryOptions } from './sessions.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 export async function cmdMeta() {
   const sessionId = process.argv[3];
@@ -257,13 +258,14 @@ export async function cmdWorkspace() {
 
   if (action === 'add') {
     const workspace = await resolveWorkspace(port, args[0]);
-    const name = readOption(args, '--name');
-    const role = readOption(args, '--role');
     const cmdIndex = args.indexOf('--cmd');
+    const ownArgs = cmdIndex === -1 ? args : args.slice(0, cmdIndex);
+    const name = readOption(ownArgs, '--name');
+    const role = readOption(ownArgs, '--role');
     const cmd = cmdIndex !== -1 ? args.slice(cmdIndex + 1).filter((value) => value !== '--json') : null;
     try {
       const { workspace: updated, member, session } = await createWorkspaceMember(port, workspace, {
-        name, role, cmd,
+        name, role, cmd, ...geometryOptions(ownArgs),
       });
       const result = {
         workspace: `${updated.name}`,
@@ -328,7 +330,7 @@ export async function cmdWorkspace() {
   console.log('  create <name> [--json]');
   console.log('  rename <workspace|--current> --name <name>');
   console.log('  delete <workspace|--current> [--json]');
-  console.log('  add <workspace|--current> [--name <name>] [--role <role>] [--cmd ...] [--json]');
+  console.log('  add <workspace|--current> [--name <name>] [--role <role>] [--cwd <dir>] [--size <cols>x<rows>] [--cmd ...] [--json]');
   console.log('  remove <workspace|--current> <member> [--json]');
   console.log('  detach <workspace|--current> <member> [--json]');
   console.log('  send <workspace|--current> <member> -- \"command\\\\n\"');

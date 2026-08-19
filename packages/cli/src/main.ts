@@ -20,8 +20,8 @@ function printHelp() {
   console.log('');
   console.log('commands:');
   console.log('  attach <ws[/member]>         Attach (prefix: C-b, C-b ? for keys). Creation asks; --new skips the ask');
-  console.log('  new <name> [-- cmd]          Create a session in the default workspace');
-  console.log('  split <addr> <name> [-- cmd] Split beside a member (addr: ws:name | :name)');
+  console.log('  new <name> [--cwd <dir>] [--size <cols>x<rows>] [-- cmd]  Create a session in the default workspace');
+  console.log('  split <addr> <name> [--cwd <dir>] [--size <cols>x<rows>] [-- cmd]  Split beside a member (addr: ws:name | :name)');
   console.log('  send <addr> -- "data"        Send bytes (addr: ws:name | :name | #id)');
   console.log('  screen <addr>                Read the screen');
   console.log('  resize <addr> <cols> <rows>  Resize a session');
