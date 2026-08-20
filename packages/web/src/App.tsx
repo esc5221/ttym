@@ -316,7 +316,11 @@ const streamLabelStyle: React.CSSProperties = {
  *
  *  세션이 살아 있으면 한 번 더 누르게 한다. 삭제는 터미널까지 죽이는데,
  *  그 6개를 실수로 날리면 복구가 없다. 모달을 새로 만들지 않고 같은 항목이
- *  두 번째 얼굴로 바뀐다 — 새 개념 없이 확인만 얻는 가장 싼 방법. */
+ *  두 번째 얼굴로 바뀐다 — 새 개념 없이 확인만 얻는 가장 싼 방법.
+ *
+ *  첫 얼굴이 값을 말하고(delete · 2 sessions) 두 번째가 행동을 말한다
+ *  (confirm delete). 확인은 사용자를 떠보는 게 아니라 잃을 것을 보여주고
+ *  다시 묻는 일이다. 잃을 게 없으면(세션 0) 묻지 않고 바로 지운다. */
 function TabContextMenu({ target, onClose, onRename, onDelete }: {
   target: { ws: Workspace; x: number; y: number } | null;
   onClose: () => void;
@@ -356,7 +360,10 @@ function TabContextMenu({ target, onClose, onRename, onDelete }: {
       top: Math.min(target.y, window.innerHeight - 90),
       }}
     >
-      <div style={attachDropdownTitleStyle}>{workspaceDisplayLabel(target.ws)}</div>
+      {/* 구획 이름이 아니라 사람이 지은 이름이라 대문자로 소리치지 않는다 */}
+      <div style={{ ...attachDropdownTitleStyle, textTransform: 'none', fontSize: 11 }}>
+        {workspaceDisplayLabel(target.ws)}
+      </div>
       <button
         style={attachDropdownItemStyle}
         onClick={() => { onClose(); onRename(target.ws); }}
@@ -368,7 +375,14 @@ function TabContextMenu({ target, onClose, onRename, onDelete }: {
           onClose();
           onDelete(target.ws);
         }}
-      >{armed ? `really? ${live} session${live === 1 ? '' : 's'} die` : 'delete'}</button>
+      >
+        {armed ? 'confirm delete' : 'delete'}
+        {!armed && live > 0 ? (
+          <span style={{ color: 'var(--text-dim)', marginLeft: 6, fontSize: 11 }}>
+            · {live} session{live === 1 ? '' : 's'}
+          </span>
+        ) : null}
+      </button>
     </div>,
     document.body,
   );
