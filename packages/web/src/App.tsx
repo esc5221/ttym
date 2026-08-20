@@ -15,7 +15,7 @@ import {
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
-import { actionBtnStyle, groupByStream, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { actionBtnStyle, apiDeleteWorkspace, groupByStream, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
 import { KeyBar } from './KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
@@ -305,6 +305,74 @@ const streamLabelStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
   textAlign: 'left',
 };
+
+/** 탭 우클릭 메뉴 — 이름 바꾸기와 삭제.
+ *
+ *  hover ×가 아니라 우클릭인 이유: 탭은 이미 클릭(이동)·더블클릭(rename)·
+ *  드래그(재배치) 세 제스처를 쓴다. 하루에 수십 번 누르는 자리에 되돌릴 수 없는
+ *  버튼을 네 번째로 앉히면 언젠가 잘못 눌린다. 폭도 늘어난다 — gpai 8개가 이미
+ *  1109px로 스트립 1081을 넘고 있다. 삭제는 드물고 못 되돌리니 일부러 가는
+ *  자리에 둔다.
+ *
+ *  세션이 살아 있으면 한 번 더 누르게 한다. 삭제는 터미널까지 죽이는데,
+ *  그 6개를 실수로 날리면 복구가 없다. 모달을 새로 만들지 않고 같은 항목이
+ *  두 번째 얼굴로 바뀐다 — 새 개념 없이 확인만 얻는 가장 싼 방법. */
+function TabContextMenu({ target, onClose, onRename, onDelete }: {
+  target: { ws: Workspace; x: number; y: number } | null;
+  onClose: () => void;
+  onRename: (ws: Workspace) => void;
+  onDelete: (ws: Workspace) => void;
+}) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => { setArmed(false); }, [target?.ws.id]);
+  useEffect(() => {
+    if (!target) return;
+    const close = () => onClose();
+    // StreamMenu와 같은 이유로 한 프레임 미룬다 — 여는 이벤트가 그대로
+    // 버블해 방금 단 리스너에 잡히면 열리자마자 닫힌다.
+    const raf = requestAnimationFrame(() => {
+      window.addEventListener('click', close);
+      window.addEventListener('contextmenu', close);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('click', close);
+      window.removeEventListener('contextmenu', close);
+    };
+  }, [target, onClose]);
+
+  if (!target) return null;
+  const live = layoutToSessionIds(target.ws.layout).filter((id) => id > 0).length;
+  return createPortal(
+    <div
+      // 패널 안의 클릭은 '바깥 클릭'이 아니다. 안 끊으면 delete 첫 클릭이
+      // 확인 단계로 가는 대신 메뉴를 닫아버려, 확인이 영영 안 뜬다.
+      onClick={(e) => e.stopPropagation()}
+      style={{
+      ...attachDropdownStyle,
+      minWidth: 180,
+      // 오른쪽 끝에서 열면 화면 밖으로 나간다 — 커서 자리를 쓰되 안으로 물린다.
+      left: Math.min(target.x, window.innerWidth - 190),
+      top: Math.min(target.y, window.innerHeight - 90),
+      }}
+    >
+      <div style={attachDropdownTitleStyle}>{workspaceDisplayLabel(target.ws)}</div>
+      <button
+        style={attachDropdownItemStyle}
+        onClick={() => { onClose(); onRename(target.ws); }}
+      >rename</button>
+      <button
+        style={{ ...attachDropdownItemStyle, color: armed ? 'var(--err)' : 'var(--text-soft)' }}
+        onClick={() => {
+          if (live > 0 && !armed) { setArmed(true); return; }
+          onClose();
+          onDelete(target.ws);
+        }}
+      >{armed ? `really? ${live} session${live === 1 ? '' : 's'} die` : 'delete'}</button>
+    </div>,
+    document.body,
+  );
+}
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
@@ -1097,6 +1165,22 @@ function App() {
   const visualH = useViewportHeight();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const [tabMenu, setTabMenu] = useState<{ ws: Workspace; x: number; y: number } | null>(null);
+
+  const deleteWorkspace = useCallback(async (ws: Workspace) => {
+    const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
+    // 세션을 먼저 죽인다. workspace만 지우면 PTY는 holder에 살아남아
+    // 어디에도 안 붙은 유령이 된다 (CLI의 delete와 같은 순서).
+    for (const sid of ids) muxRef.current?.destroySession(sid);
+    await apiDeleteWorkspace(ws.id);
+    const next = await fetchWorkspaces();
+    setWorkspaces(next);
+    // 보고 있던 탭을 지웠으면 갈 곳을 정해준다 — 같은 stream의 이웃, 없으면 홈.
+    if (route.page === 'workspace' && route.id === ws.id) {
+      const sibling = next.find((w) => w.id !== ws.id && streamOf(w) === streamOf(ws));
+      navigate(sibling ? { page: 'workspace', id: sibling.id } : { page: 'dashboard' });
+    }
+  }, [route]);
 
   const commitRename = useCallback(async () => {
     const id = renamingId;
@@ -1548,6 +1632,7 @@ function App() {
               key={ws.id}
               data-ws-tab={ws.id}
               onMouseDown={(e) => beginTabDrag(ws.id, e)}
+              onContextMenu={(e) => { e.preventDefault(); setTabMenu({ ws, x: e.clientX, y: e.clientY }); }}
               onClick={() => {
                 if (suppressTabClick.current) { suppressTabClick.current = false; return; }
                 navigate({ page: 'workspace', id: ws.id });
@@ -1589,6 +1674,12 @@ function App() {
           {tabFade.right ? <div style={{ ...tabFadeStyle, right: 0, background: 'linear-gradient(to left, var(--bg0), transparent)' }} /> : null}
         </div>
         <span ref={setStripSlot} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} />
+        <TabContextMenu
+          target={tabMenu}
+          onClose={() => setTabMenu(null)}
+          onRename={(ws) => { setRenamingId(ws.id); setRenameDraft(ws.name); }}
+          onDelete={(ws) => { void deleteWorkspace(ws); }}
+        />
         <SettingsModal
           localEchoEnabled={localEchoEnabled}
           onLocalEchoChange={(value) => { handleLocalEchoChange(value); patchConfig({ 'local-echo': String(value) }); }}
