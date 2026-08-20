@@ -321,11 +321,13 @@ const streamLabelStyle: React.CSSProperties = {
  *  첫 얼굴이 값을 말하고(delete · 2 sessions) 두 번째가 행동을 말한다
  *  (confirm delete). 확인은 사용자를 떠보는 게 아니라 잃을 것을 보여주고
  *  다시 묻는 일이다. 잃을 게 없으면(세션 0) 묻지 않고 바로 지운다. */
-function TabContextMenu({ target, onClose, onRename, onDelete }: {
+function TabContextMenu({ target, streams, onClose, onRename, onDelete, onMove }: {
   target: { ws: Workspace; x: number; y: number } | null;
+  streams: string[];
   onClose: () => void;
   onRename: (ws: Workspace) => void;
   onDelete: (ws: Workspace) => void;
+  onMove: (ws: Workspace, stream: string) => void;
 }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => { setArmed(false); }, [target?.ws.id]);
@@ -356,8 +358,9 @@ function TabContextMenu({ target, onClose, onRename, onDelete }: {
       ...attachDropdownStyle,
       minWidth: 180,
       // 오른쪽 끝에서 열면 화면 밖으로 나간다 — 커서 자리를 쓰되 안으로 물린다.
+      maxHeight: 'min(420px, calc(100vh - 80px))',
       left: Math.min(target.x, window.innerWidth - 190),
-      top: Math.min(target.y, window.innerHeight - 90),
+      top: Math.min(target.y, window.innerHeight - 120),
       }}
     >
       {/* 구획 이름이 아니라 사람이 지은 이름이라 대문자로 소리치지 않는다 */}
@@ -383,6 +386,30 @@ function TabContextMenu({ target, onClose, onRename, onDelete }: {
           </span>
         ) : null}
       </button>
+      {/* 요약기가 정한 묶음을 사람이 되돌릴 자리. 이게 없으면 잘못 묶인 것을
+          고칠 방법이 아예 없어서, 새 workspace를 어디에 두든 절반은 틀린 채로
+          남는다. 고르면 그 이름은 고정된다 — 요약기는 이름 없는 것만 건드린다. */}
+      {/* 위는 이 workspace에 하는 일, 아래는 갈 곳. 두 구획이라 선으로 가른다 */}
+      <div style={{ height: 1, background: 'var(--line)', margin: '5px 6px 1px' }} />
+      <div style={attachDropdownTitleStyle}>move to stream</div>
+      {streams.map((name) => {
+        const here = name === streamOf(target.ws);
+        return (
+          <button
+            key={name}
+            disabled={here}
+            style={{
+              ...attachDropdownItemStyle,
+              color: here ? 'var(--text-dim)' : 'var(--text-soft)',
+              cursor: here ? 'default' : 'pointer',
+            }}
+            onClick={() => { if (here) return; onClose(); onMove(target.ws, name); }}
+          >
+            {name}
+            {here ? <span style={{ color: 'var(--text-dim)', marginLeft: 6, fontSize: 11 }}>· here</span> : null}
+          </button>
+        );
+      })}
     </div>,
     document.body,
   );
@@ -1181,6 +1208,20 @@ function App() {
   const [renameDraft, setRenameDraft] = useState('');
   const [tabMenu, setTabMenu] = useState<{ ws: Workspace; x: number; y: number } | null>(null);
 
+  // 목적지 목록. 지금 비어 있어도 미분류는 항상 갈 수 있어야 한다 — 여기서
+  // 빼내는 게 이 메뉴의 주된 쓸모다.
+  const streamTargets = useMemo(() => {
+    const names = groupByStream(workspaces).map((g) => g.stream);
+    return names.includes(UNSORTED_STREAM) ? names : [...names, UNSORTED_STREAM];
+  }, [workspaces]);
+
+  const moveWorkspaceToStream = useCallback(async (ws: Workspace, stream: string) => {
+    // column/order는 지도의 배치라 여기서 건드릴 게 아니다. 서버의 update가
+    // map을 통째로 갈아끼우므로 남은 필드를 직접 실어 보낸다.
+    await apiUpdateWorkspace(ws.id, { map: { stream, column: ws.map?.column, order: ws.map?.order } });
+    setWorkspaces(await fetchWorkspaces());
+  }, []);
+
   const deleteWorkspace = useCallback(async (ws: Workspace) => {
     const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
     // 세션을 먼저 죽인다. workspace만 지우면 PTY는 holder에 살아남아
@@ -1418,13 +1459,15 @@ function App() {
     const id = uuid().slice(0, 8);
     const ws = await apiCreateWorkspace({ id, name: `workspace ${workspaces.length + 1}`, layout: { type: 'pane', sessionId: 0 } });
     if (!ws) return;
-    // 지금 보고 있는 줄기에서 만든 것이니 그 줄기에 둔다. 안 그러면 미분류로
-    // 떨어져 방금 만든 탭이 눈앞에서 사라진다.
-    if (currentStream !== UNSORTED_STREAM) {
-      await apiUpdateWorkspace(ws.id, { map: { stream: currentStream } });
-    }
+    // stream은 붙이지 않는다. 방금 만든 것은 이름도 없다(`workspace 18`) — 이름이
+    // 없는데 소속만 있는 건 앞뒤가 안 맞고, 요약기가 이름을 붙이는 것도 stream이
+    // 비어 있을 때만 일어난다. 물려받게 하면 요약기가 손을 못 댄다.
+    //
+    // 보고 있던 줄기에서 만들었더라도 탭이 사라지지는 않는다 — 현재 줄기는 열려
+    // 있는 탭이 정하므로, 새 탭으로 옮겨가면 줄이 미분류로 따라온다. 그게 원하던
+    // 게 아니면 우클릭 한 번으로 옮긴다. 조용히 틀리는 것보다 낫다.
     navigate({ page: 'workspace', id: ws.id });
-  }, [workspaces.length, currentStream]);
+  }, [workspaces.length]);
 
   // 창별 세밀 줌 (데스크톱 셸에서만): ⌘+/− 5% 스텝, ⌘0 리셋. 50~200% 클램프.
   // 브라우저 줌은 오리진 단위로 전 창이 동기화되지만 webview 줌은 창의 것이다.
@@ -1690,6 +1733,8 @@ function App() {
         <span ref={setStripSlot} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }} />
         <TabContextMenu
           target={tabMenu}
+          streams={streamTargets}
+          onMove={(ws, stream) => { void moveWorkspaceToStream(ws, stream); }}
           onClose={() => setTabMenu(null)}
           onRename={(ws) => { setRenamingId(ws.id); setRenameDraft(ws.name); }}
           onDelete={(ws) => { void deleteWorkspace(ws); }}
