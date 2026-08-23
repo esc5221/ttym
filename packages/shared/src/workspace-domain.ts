@@ -24,6 +24,26 @@ export interface WorkspaceLike<TMember extends WorkspaceMemberLike = WorkspaceMe
   members: TMember[];
 }
 
+/** 새 workspace에 붙일 이름 — 아직 안 쓰인 첫 번호.
+ *
+ *  개수로 짓던 시절(`workspace ${count + 1}`)에는 만들고 지우기를 반복한 뒤
+ *  살아남은 큰 번호와 정면으로 부딪쳤다: 19개가 있는데 "workspace 20"이 그중
+ *  하나여서, + 버튼이 매번 409를 받고 아무 일도 안 일어났다. 개수는 이름의
+ *  최대값과 아무 관계가 없다 — 쓰인 번호를 직접 봐야 한다.
+ *
+ *  유일성의 최종 판정은 여전히 서버다. 이건 첫 시도를 맞히기 위한 것이고,
+ *  다른 창이 같은 번호를 동시에 집으면 호출부가 다음 번호로 재시도한다. */
+export function nextWorkspaceName(taken: Iterable<string>): string {
+  const used = new Set<number>();
+  for (const name of taken) {
+    const match = /^workspace (\d+)$/.exec(name.trim());
+    if (match) used.add(Number(match[1]));
+  }
+  let n = 1;
+  while (used.has(n)) n += 1;
+  return `workspace ${n}`;
+}
+
 export interface BasePanelState {
   key: string;
   sessionId?: number;

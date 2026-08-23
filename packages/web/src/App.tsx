@@ -9,13 +9,14 @@ import {
   formatCwd,
   layoutToSessionIds,
   memberNameBySession,
+  nextWorkspaceName,
   removePane,
   resizeSplit,
   swapPanes,
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
-import { actionBtnStyle, apiDeleteWorkspace, groupByStream, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { actionBtnStyle, apiDeleteWorkspace, groupByStream, isNameConflict, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
 import { KeyBar } from './KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
@@ -1456,8 +1457,25 @@ function App() {
   }, []);
 
   const createWorkspaceTab = useCallback(async () => {
-    const id = uuid().slice(0, 8);
-    const ws = await apiCreateWorkspace({ id, name: `workspace ${workspaces.length + 1}`, layout: { type: 'pane', sessionId: 0 } });
+    // 이름의 유일성은 서버가 판정한다. 다른 창이 같은 번호를 동시에 집을 수
+    // 있으니, 충돌한 이름은 빼고 다음 번호로 몇 번 더 시도한다. 충돌이 아닌
+    // 실패(터널 끊김 등)는 재시도해봐야 같은 결과라 바로 그만둔다.
+    const taken = new Set(workspaces.map((w) => w.name));
+    let ws: Workspace | null = null;
+    for (let attempt = 0; attempt < 5 && !ws; attempt++) {
+      const name = nextWorkspaceName(taken);
+      try {
+        ws = await apiCreateWorkspace({ id: uuid().slice(0, 8), name, layout: { type: 'pane', sessionId: 0 } });
+      } catch (error) {
+        if (!isNameConflict(error)) {
+          // 화면에 띄울 자리가 아직 없다. 적어도 콘솔에는 남긴다 —
+          // 아무 데도 안 남으면 다음에도 "버튼이 안 눌린다"로만 보인다.
+          console.error('workspace 만들기 실패', error);
+          return;
+        }
+        taken.add(name);
+      }
+    }
     if (!ws) return;
     // stream은 붙이지 않는다. 방금 만든 것은 이름도 없다(`workspace 18`) — 이름이
     // 없는데 소속만 있는 건 앞뒤가 안 맞고, 요약기가 이름을 붙이는 것도 stream이

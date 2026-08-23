@@ -273,10 +273,17 @@ export async function apiReorderWorkspaces(ids: string[]): Promise<void> {
   } catch { /* 실패 시 다음 push가 서버 순서로 되돌린다 — 낙관적 UI의 안전망 */ }
 }
 
-export async function apiCreateWorkspace(ws: { id: string; name: string; layout: LayoutNode }): Promise<Workspace | null> {
-  try {
-    return await api.createWorkspace(API_BASE, { id: ws.id, name: ws.name, layout: ws.layout }) as Workspace;
-  } catch { return null; }
+/** 여기서는 실패를 삼키지 않는다. 삼키던 시절에는 이름 충돌(409)과 터널
+ *  끊김이 똑같이 null로 돌아왔고, 호출부가 조용히 돌아서서 + 버튼이 아무
+ *  반응도 없는 것처럼 보였다. 무엇이 실패했는지는 호출부가 알아야 한다. */
+export async function apiCreateWorkspace(ws: { id: string; name: string; layout: LayoutNode }): Promise<Workspace> {
+  return await api.createWorkspace(API_BASE, { id: ws.id, name: ws.name, layout: ws.layout }) as Workspace;
+}
+
+/** 이름이 이미 있다는 서버의 거절인가. instanceof를 쓰지 않는 것은 번들이
+ *  @ttym/api를 두 벌 물면 그 검사가 조용히 거짓이 되기 때문이다. */
+export function isNameConflict(error: unknown): boolean {
+  return (error as { status?: number } | null)?.status === 409;
 }
 
 /** 셸에 안전하게 꽂을 경로: 평범한 문자만이 아니면 따옴표로 감싼다.
