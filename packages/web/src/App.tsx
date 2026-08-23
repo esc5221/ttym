@@ -418,13 +418,20 @@ function TabContextMenu({ target, streams, onClose, onRename, onDelete, onMove }
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
+function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; pane: number | null; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
   const U = UI_STYLES[uiStyle];
   const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});
   const [deadSessions, setDeadSessions] = useState<Set<number>>(new Set());
   const [focusedSid, setFocusedSid] = useState<number | null>(null);
+
+  // 폰에서 만든 주소(#w/<id>/p/<sid>)를 데스크톱에서 열면 그 pane에 포커스가
+  // 간다. 폰 쪽은 카드에서 열 때 이미 onFocusSid를 부르므로 여기선 링크로
+  // 들어온 경우를 받는 셈이다.
+  useEffect(() => {
+    if (pane !== null) setFocusedSid(pane);
+  }, [pane]);
   const [zoomedSid, setZoomedSid] = useState<number | null>(null);
   const surface = useSurface();
   const touch = surface !== 'desktop';
@@ -955,6 +962,15 @@ function WorkspacePage({ mux, workspaceId, localEchoEnabled, agentStates, action
             deadSessions={deadSessions}
             bells={bells}
             focusedSid={focusedSid}
+            pane={pane}
+            fontSize={fontSize}
+            // 위치는 URL이 갖는다. 목록에서 열 때만 히스토리에 쌓고, pane 사이를
+            // 넘길 때와 목록으로 나올 때는 갈아끼운다 — 안 그러면 여섯 번 넘긴 뒤
+            // 뒤로가기를 여섯 번 눌러야 목록에 닿는다.
+            onOpenPane={(sid, options) => navigate(
+              sid === null ? { page: 'workspace', id: workspaceId } : { page: 'workspace', id: workspaceId, pane: sid },
+              options,
+            )}
             onFocusSid={(sid) => {
               setFocusedSid(sid);
               setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; });
@@ -1638,7 +1654,7 @@ function App() {
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} fontFamily={fontFamily} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} pane={route.pane ?? null} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} fontFamily={fontFamily} />;
       break;
     default:
       page = mainView === 'map'

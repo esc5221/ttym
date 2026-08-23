@@ -171,6 +171,24 @@ export function useNarrow(maxPx = 720): boolean {
  * 데스크톱 브라우저는 pointer:coarse가 아니라 창만 좁혀선 폰이 되지 못한다.
  */
 export type Surface = 'phone' | 'tablet' | 'desktop';
+/** 폰에서 핀치로 맞춘 글자 크기. 기기의 취향이지 workspace의 성질이 아니라
+ *  URL이 아니라 여기에 둔다. 서버 config의 font-size에 쓰면 폰에서 한 번
+ *  오므리는 것으로 데스크톱 글자까지 바뀐다. */
+export const PHONE_FONT_SIZE_STORAGE_KEY = 'ttym-phone-font-size';
+
+export function readPhoneFontSize(fallback: number): number {
+  try {
+    const raw = localStorage.getItem(PHONE_FONT_SIZE_STORAGE_KEY);
+    if (raw === null) return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 8 && value <= 28 ? value : fallback;
+  } catch { return fallback; }
+}
+
+export function writePhoneFontSize(value: number): void {
+  try { localStorage.setItem(PHONE_FONT_SIZE_STORAGE_KEY, String(value)); } catch {}
+}
+
 export const SURFACE_STORAGE_KEY = 'ttym-surface';
 
 function forcedSurface(): Surface | null {
@@ -367,35 +385,9 @@ export async function apiSplitWorkspace(
 }
 
 // ───── 해시 라우팅 ─────
-
-export type Route =
-  | { page: 'dashboard' }
-  | { page: 'overview' }
-  | { page: 'session'; id: number }
-  | { page: 'viewer'; id: number }
-  | { page: 'workspace'; id: string };
-
-export function parseHash(): Route {
-  const hash = window.location.hash;
-  if (hash === '#overview') return { page: 'overview' };
-  const sessionMatch = hash.match(/^#s\/(\d+)$/);
-  if (sessionMatch) return { page: 'session', id: parseInt(sessionMatch[1], 10) };
-  const viewerMatch = hash.match(/^#v\/(\d+)$/);
-  if (viewerMatch) return { page: 'viewer', id: parseInt(viewerMatch[1], 10) };
-  const wsMatch = hash.match(/^#w\/(.+)$/);
-  if (wsMatch) return { page: 'workspace', id: wsMatch[1] };
-  return { page: 'dashboard' };
-}
-
-export function navigate(route: Route) {
-  switch (route.page) {
-    case 'dashboard': window.location.hash = ''; break;
-    case 'overview': window.location.hash = 'overview'; break;
-    case 'session': window.location.hash = `s/${route.id}`; break;
-    case 'viewer': window.location.hash = `v/${route.id}`; break;
-    case 'workspace': window.location.hash = `w/${route.id}`; break;
-  }
-}
+// 구현은 route.ts에 산다 — 이 파일은 import 시점에 window.location을 읽어서
+// node에서 못 불러오는데, 파싱은 테스트로 못 박고 싶은 순수 함수다.
+export { parseHash, navigate, parseRouteHash, routeToHash, type Route } from './route.js';
 
 
 export const emptyPaneStyle: React.CSSProperties = {

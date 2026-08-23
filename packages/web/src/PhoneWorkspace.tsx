@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TerminalMux, Terminal, getHost } from '@ttym/ui';
 import { formatCwd } from '@ttym/shared';
-import { AGENT_COLORS, AgentState, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, stripBtnStyle } from './app-shared.js';
+import { AGENT_COLORS, AgentState, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, readPhoneFontSize, stripBtnStyle, writePhoneFontSize } from './app-shared.js';
 import { KeyBar } from './KeyBar.js';
 import { useSwipe } from './useSwipe.js';
 import { usePinchZoom } from './usePinchZoom.js';
@@ -29,6 +29,11 @@ export interface PhoneWorkspaceProps {
   bells: Set<number>;
   focusedSid: number | null;
   onFocusSid: (sid: number) => void;
+  /** 지금 전체화면인 세션. URL(#w/<id>/p/<sid>)이 원천이다. */
+  pane: number | null;
+  onOpenPane: (sid: number | null, options?: { replace?: boolean }) => void;
+  /** 앱 설정의 글자 크기 — 폰이 아직 핀치로 자기 값을 안 정했을 때의 출발점. */
+  fontSize: number;
   localEchoEnabled: boolean;
   onSearch: (sid: number) => void;
   onExit: (sid: number) => void;
@@ -38,46 +43,43 @@ export interface PhoneWorkspaceProps {
   onDetach: (sid: number) => void;
 }
 
-type PhoneView = { mode: 'list' } | { mode: 'focus'; sid: number };
-
 /** 핀치로 폰트를 키울 때 이 행수 밑으로는 못 내려간다. */
 const MIN_ROWS = 8;
 
 export function PhoneWorkspace(props: PhoneWorkspaceProps) {
-  const { sessionIds, focusedSid } = props;
-  const [view, setView] = useState<PhoneView>({ mode: 'list' });
+  const { sessionIds, focusedSid, pane, onOpenPane } = props;
+  const showing = pane !== null && sessionIds.includes(pane) ? pane : null;
 
-  // 사라진 pane을 보고 있었다면 목록으로 돌아온다
+  // 보고 있던 pane이 사라졌으면 URL도 목록으로 되돌린다. 안 그러면 주소에는
+  // 죽은 세션이 남아 새로고침 때마다 한 번씩 목록으로 튕긴다.
   useEffect(() => {
-    if (view.mode === 'focus' && !sessionIds.includes(view.sid)) setView({ mode: 'list' });
-  }, [sessionIds.join(','), view]);
+    if (pane !== null && !sessionIds.includes(pane)) onOpenPane(null, { replace: true });
+  }, [sessionIds.join(','), pane, onOpenPane]);
 
-  // 안드로이드 뒤로가기와 브라우저 back이 목록으로 나가는 데 쓰이게 한다
+  // 핀치로 맞춘 글자 크기는 이 층에 둔다. FocusView 안에 있던 시절에는 목록으로
+  // 한 번 나갔다 오면 컴포넌트가 죽어 매번 14로 돌아갔다. 저장은 localStorage —
+  // 새로고침도 넘긴다.
+  const [fontSize, setFontSize] = useState(() => readPhoneFontSize(props.fontSize));
   useEffect(() => {
-    if (view.mode !== 'focus') return;
-    history.pushState({ ttymFocus: true }, '');
-    const onPop = () => setView({ mode: 'list' });
-    window.addEventListener('popstate', onPop);
-    return () => window.removeEventListener('popstate', onPop);
-  }, [view.mode === 'focus' ? view.sid : null]);
+    // 핀치는 프레임마다 부른다. 손을 뗀 뒤 한 번만 쓴다.
+    const timer = setTimeout(() => writePhoneFontSize(fontSize), 300);
+    return () => clearTimeout(timer);
+  }, [fontSize]);
 
-  const openFocus = useCallback((sid: number) => {
-    props.onFocusSid(sid);
-    setView({ mode: 'focus', sid });
-  }, [props.onFocusSid]);
-
-  if (view.mode === 'focus' && sessionIds.includes(view.sid)) {
+  if (showing !== null) {
     return (
       <FocusView
         {...props}
-        sid={view.sid}
-        onBack={() => { if (history.state?.ttymFocus) history.back(); else setView({ mode: 'list' }); }}
-        onMove={(sid) => { props.onFocusSid(sid); setView({ mode: 'focus', sid }); }}
+        sid={showing}
+        fontSize={fontSize}
+        onFontSize={setFontSize}
+        onBack={() => onOpenPane(null, { replace: true })}
+        onMove={(sid) => { props.onFocusSid(sid); onOpenPane(sid, { replace: true }); }}
       />
     );
   }
 
-  return <ListView {...props} onOpen={openFocus} focusedSid={focusedSid} />;
+  return <ListView {...props} onOpen={(sid) => { props.onFocusSid(sid); onOpenPane(sid); }} focusedSid={focusedSid} />;
 }
 
 // ───── 카드 목록 ─────
@@ -187,13 +189,12 @@ function ListView({
 
 function FocusView({
   mux, sid, sessionIds, memberNames, sessionCwds, agentStates, deadSessions,
-  localEchoEnabled, onSearch, onExit, onBell, onBack, onMove, onRestart, onDetach,
-}: PhoneWorkspaceProps & { sid: number; onBack: () => void; onMove: (sid: number) => void }) {
+  localEchoEnabled, onSearch, onExit, onBell, onBack, onMove, onRestart, onDetach, fontSize, onFontSize,
+}: PhoneWorkspaceProps & { sid: number; onBack: () => void; onMove: (sid: number) => void; onFontSize: (next: number) => void }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const at = sessionIds.indexOf(sid);
   const prev = at > 0 ? sessionIds[at - 1] : undefined;
   const next = at < sessionIds.length - 1 ? sessionIds[at + 1] : undefined;
-  const [fontSize, setFontSize] = useState(14);
 
   // 가로만 우리가 잡는다. 세로 scrollback은 xterm이 이미 한다 —
   // touch-action:none 으로 브라우저를 물린 뒤에야 살아났다(pan-y일 때는 브라우저가
@@ -221,14 +222,12 @@ function FocusView({
   // 커진 만큼 행을 줄이므로 그냥 두면 터미널이 두세 줄만 남는다. 행높이는 폰트의
   // 1.08배로 잡았다(폰트 14에서 15.1px 실측).
   usePinchZoom(bodyRef, (delta) => {
-    setFontSize((v) => {
-      const next = Math.min(28, Math.max(8, v + delta));
-      if (delta > 0) {
-        const h = bodyRef.current?.clientHeight ?? 0;
-        if (h > 0 && h / (next * 1.08) < MIN_ROWS) return v;
-      }
-      return next;
-    });
+    const stepped = Math.min(28, Math.max(8, fontSize + delta));
+    if (delta > 0) {
+      const h = bodyRef.current?.clientHeight ?? 0;
+      if (h > 0 && h / (stepped * 1.08) < MIN_ROWS) return;
+    }
+    onFontSize(stepped);
   });
 
   const dead = deadSessions.has(sid);
