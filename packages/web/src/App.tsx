@@ -1493,15 +1493,26 @@ function App() {
       }
     }
     if (!ws) return;
-    // stream은 붙이지 않는다. 방금 만든 것은 이름도 없다(`workspace 18`) — 이름이
-    // 없는데 소속만 있는 건 앞뒤가 안 맞고, 요약기가 이름을 붙이는 것도 stream이
-    // 비어 있을 때만 일어난다. 물려받게 하면 요약기가 손을 못 댄다.
+    // 보고 있던 줄기에 넣는다. gpai를 열어놓고 +를 누르는 건 gpai에서 일을
+    // 하나 더 벌인다는 뜻이지, 분류를 미루겠다는 뜻이 아니다. 안 붙이면 탭 줄이
+    // 미분류로 통째로 갈아엎이면서 보던 형제 탭들이 사라진다.
     //
-    // 보고 있던 줄기에서 만들었더라도 탭이 사라지지는 않는다 — 현재 줄기는 열려
-    // 있는 탭이 정하므로, 새 탭으로 옮겨가면 줄이 미분류로 따라온다. 그게 원하던
-    // 게 아니면 우클릭 한 번으로 옮긴다. 조용히 틀리는 것보다 낫다.
+    // 미분류에서 만든 것에는 아무것도 안 붙인다. stream이 비어 있어야 요약기가
+    // 이름을 지어주므로, 그 자리는 "아직 분류 안 함"의 뜻을 유지한다.
+    //
+    // 이동 뒤에 붙이면 탭 줄이 미분류로 한 번 튀었다가 돌아온다. 붙이고, 목록을
+    // 다시 읽고, 그 다음에 옮긴다.
+    if (currentStream !== UNSORTED_STREAM) {
+      try {
+        await apiUpdateWorkspace(ws.id, { map: { stream: currentStream } });
+        setWorkspaces(await fetchWorkspaces());
+      } catch (error) {
+        // 줄기에 못 넣었을 뿐 workspace는 생겼다. 미분류에 있을 뿐이니 계속 간다.
+        console.error('새 workspace를 stream에 못 넣었다', error);
+      }
+    }
     navigate({ page: 'workspace', id: ws.id });
-  }, [workspaces.length]);
+  }, [workspaces.length, currentStream]);
 
   // 창별 세밀 줌 (데스크톱 셸에서만): ⌘+/− 5% 스텝, ⌘0 리셋. 50~200% 클램프.
   // 브라우저 줌은 오리진 단위로 전 창이 동기화되지만 webview 줌은 창의 것이다.
