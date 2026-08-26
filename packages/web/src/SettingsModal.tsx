@@ -11,8 +11,8 @@ import { API_BASE, actionBtnStyle, type UiStyle } from './app-shared.js';
  * 요약 지시문은 서버의 map-prompt(GET/PUT — 비우면 기본값 복귀).
  */
 
-type Section = 'general' | 'appearance' | 'map';
-const SECTIONS: Section[] = ['general', 'appearance', 'map'];
+type Section = 'general' | 'appearance' | 'agents' | 'map';
+const SECTIONS: Section[] = ['general', 'appearance', 'agents', 'map'];
 
 interface Props {
   localEchoEnabled: boolean;
@@ -76,6 +76,7 @@ export function SettingsModal(props: Props) {
               <div style={panelStyle}>
                 {section === 'general' ? <GeneralSection {...props} /> : null}
                 {section === 'appearance' ? <AppearanceSection {...props} /> : null}
+                {section === 'agents' ? <AgentsSection onPatchConfig={props.onPatchConfig} /> : null}
                 {section === 'map' ? <MapSection onPatchConfig={props.onPatchConfig} /> : null}
               </div>
             </div>
@@ -223,6 +224,61 @@ function CustomCssField() {
       </span>
     </Field>
   );
+}
+
+/** resume 할 때 에이전트에 붙일 기본 플래그.
+ *
+ *  env(TTYM_*_RESUME_FLAGS)로도 되지만 그건 그 셸에서 export 한 것에만 붙는다.
+ *  pane의 env는 세션을 만든 순간 화석이 되므로, 나중에 export 해봐야 이미 떠
+ *  있는 pane에는 안 먹는다. 여기 적은 값은 서버가 들고 있어 그 문제가 없다. */
+function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }) {
+  return (
+    <>
+      <ResumeFlagsField
+        agent="claude"
+        configKey="agent-claude-resume-flags"
+        placeholder="--dangerously-skip-permissions"
+      />
+      <ResumeFlagsField
+        agent="codex"
+        configKey="agent-codex-resume-flags"
+        placeholder="--full-auto"
+      />
+    </>
+  );
+
+  function ResumeFlagsField({ agent, configKey, placeholder }: { agent: string; configKey: string; placeholder: string }) {
+    const [draft, setDraft] = useState('');
+    const [loaded, setLoaded] = useState(false);
+
+    useEffect(() => {
+      void fetch(`${API_BASE}/api/config`).then((r) => r.json()).then(({ values }) => {
+        setDraft(values[configKey] ?? '');
+        setLoaded(true);
+      }).catch(() => setLoaded(true));
+    }, []);
+
+    const commit = () => onPatchConfig({ [configKey]: draft.trim() || null });
+
+    return (
+      <Field
+        label={`${agent} resume flags`}
+        hint={`appended by ttym agent resume and the pane's restore button · TTYM_${agent.toUpperCase()}_RESUME_FLAGS overrides this for one shell`}
+      >
+        <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          <input
+            value={loaded ? draft : ''}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+            placeholder={placeholder}
+            style={{ ...inputStyle, width: 280 }}
+          />
+          <button onClick={() => { setDraft(''); onPatchConfig({ [configKey]: null }); }} style={actionBtnStyle}>reset</button>
+        </span>
+      </Field>
+    );
+  }
 }
 
 function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }) {

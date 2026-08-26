@@ -533,11 +533,15 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
   const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
 
   const restoreAgent = useCallback((sid: number) => {
-    const last = lastAgentIds[sid];
-    if (!last) return;
-    const cmd = last.claude ? `claude --resume ${last.claude}` : last.codex ? `codex resume ${last.codex}` : null;
-    if (!cmd) return;
-    void api.sendToSession(API_BASE, sid, cmd + '\r');
+    if (!lastAgentIds[sid]) return;
+    // 명령을 여기서 조립하지 않는다. `ttym agent resume`이 어느 에이전트인지
+    // 찾고 설정·env·플래그를 붙이는 일을 이미 한다 — 베껴 두면 이렇게 어긋난다:
+    // 이 줄이 `claude --resume <id>`를 직접 만들던 동안 설정한 기본 플래그가
+    // 웹에서만 빠져 있었다.
+    //
+    // pane의 셸 PATH에 ttym이 있어야 한다. 없으면 command not found가 터미널에
+    // 그대로 찍힌다 — 조용히 아무 일도 안 일어나는 것보다 낫다.
+    void api.sendToSession(API_BASE, sid, 'ttym agent resume\r');
   }, [lastAgentIds]);
 
   useEffect(() => {

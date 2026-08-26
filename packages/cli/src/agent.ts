@@ -50,6 +50,7 @@ export const AGENTS = {
     ],
     resumeArgs: (sid) => ['claude', '--resume', sid],
     resumeFlagsEnv: 'TTYM_CLAUDE_RESUME_FLAGS',
+    resumeFlagsConfig: 'agent-claude-resume-flags',
   },
   codex: {
     name: 'Codex CLI (experimental)',
@@ -75,8 +76,27 @@ export const AGENTS = {
     ],
     resumeArgs: (sid) => ['codex', 'resume', sid],
     resumeFlagsEnv: 'TTYM_CODEX_RESUME_FLAGS',
+    resumeFlagsConfig: 'agent-codex-resume-flags',
   },
 };
+
+/** resume 명령을 만든다.
+ *
+ *  세 군데서 플래그가 들어온다. 뒤로 갈수록 세다:
+ *    config   ~/.ttym/config 의 agent-*-resume-flags — 설정 창에서 고치는 그 값.
+ *             env 와 달리 셸에 안 매달려서, 이미 떠 있는 pane 에서도 먹는다
+ *             (pane 의 env 는 세션 만들 때 화석화된다).
+ *    env      TTYM_*_RESUME_FLAGS — 이 셸에서만 다르게 하고 싶을 때
+ *    extra    명령줄에 직접 적은 것
+ *
+ *  같은 플래그가 겹치면 뒤엣것이 이기는 건 에이전트 CLI 의 몫이다. 우리는
+ *  순서만 보장한다.
+ */
+export function buildResumeArgs(options) {
+  const { baseArgs, config = '', env = '', extra = [] } = options;
+  const split = (text) => String(text || '').split(/\s+/).filter(Boolean);
+  return [...baseArgs, ...split(config), ...split(env), ...extra];
+}
 
 function isttymHook(command, cfg) {
   return cfg.hooks.some((hook) => command === hook.command)
@@ -289,12 +309,21 @@ export async function cmdAgent() {
       }
     }
 
-    const baseArgs = targetCfg.resumeArgs(targetSessionId);
-    // Default flags from env (e.g. TTYM_CLAUDE_RESUME_FLAGS="--dangerously-skip-permissions")
-    const envFlags = targetCfg.resumeFlagsEnv
-      ? (process.env[targetCfg.resumeFlagsEnv] || '').split(/\s+/).filter(Boolean)
-      : [];
-    const args = [...baseArgs, ...envFlags, ...extraArgs];
+    // 설정 창에서 정한 기본 플래그. 서버가 없으면 그냥 없는 셈 치고 간다 —
+    // resume 자체는 위에서 meta 를 받아온 뒤라 여기까지 왔으면 대개 살아 있다.
+    let configFlags = '';
+    if (targetCfg.resumeFlagsConfig) {
+      try {
+        const config = await fetchJson(port, '/api/config');
+        configFlags = config?.values?.[targetCfg.resumeFlagsConfig] || '';
+      } catch {}
+    }
+    const args = buildResumeArgs({
+      baseArgs: targetCfg.resumeArgs(targetSessionId),
+      config: configFlags,
+      env: targetCfg.resumeFlagsEnv ? process.env[targetCfg.resumeFlagsEnv] : '',
+      extra: extraArgs,
+    });
     console.log(`resuming ${targetCfg.name}: ${args.join(' ')}`);
     const child = spawn(args[0], args.slice(1), { stdio: 'inherit' });
     child.on('exit', (code) => process.exit(code ?? 0));
@@ -311,8 +340,10 @@ export async function cmdAgent() {
   console.log('  resume [agent] [...extra-args]');
   console.log('                        Resume agent session (auto-detect or specify);');
   console.log('                        extra args are passed to the agent verbatim.');
-  console.log('                        Defaults can be set via TTYM_CLAUDE_RESUME_FLAGS /');
-  console.log('                        TTYM_CODEX_RESUME_FLAGS env vars.');
+  console.log('                        Default flags: settings > agents, or the');
+  console.log('                        agent-claude-resume-flags / agent-codex-resume-flags');
+  console.log('                        config keys. TTYM_CLAUDE_RESUME_FLAGS /');
+  console.log('                        TTYM_CODEX_RESUME_FLAGS override them for one shell.');
   console.log('  info [session-id]     Show linked agent sessions');
   console.log('');
   console.log('agents:');
