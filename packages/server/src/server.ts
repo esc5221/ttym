@@ -1673,7 +1673,7 @@ export async function createServer(port: number): Promise<TtymServer> {
         }
 
         case CMD.ATTACH: {
-          const meta = parseJson<{ fromSeq?: number; cols?: number; rows?: number; mode?: string }>(payload);
+          const meta = parseJson<{ fromSeq?: number; cols?: number; rows?: number; mode?: string; borrow?: boolean }>(payload);
           const session = manager.get(sessionId);
           if (!session || session.isDead) {
             safeSend(ws, encode(sessionId, CMD.ATTACH, jsonPayload({ ok: false, error: 'session not found' })));
@@ -1682,9 +1682,12 @@ export async function createServer(port: number): Promise<TtymServer> {
 
           const mode = meta?.mode === 'readonly' ? 'readonly' as const : 'readwrite' as const;
 
-          // readwrite viewer만 resize 가능
+          // readwrite viewer만 resize 가능. borrow를 실어 왔으면 장부에 적는다 —
+          // 그래야 그 뷰어가 떠날 때 이전 기하로 돌아간다. zen이 재부착으로
+          // 들어오면서 첫 기하를 여기 싣기 때문에 이 갈래가 필요하다.
           if (mode === 'readwrite' && meta?.cols && meta?.rows) {
-            session.resize(meta.cols, meta.rows);
+            if (meta.borrow) session.borrowResize(viewerId, meta.cols, meta.rows);
+            else session.resize(meta.cols, meta.rows);
           }
 
           const fromSeq = meta?.fromSeq ?? 0;

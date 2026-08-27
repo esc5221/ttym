@@ -16,7 +16,7 @@ import {
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
-import { actionBtnStyle, apiDeleteWorkspace, groupByStream, isNameConflict, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { actionBtnStyle, apiDeleteWorkspace, groupByStream, isNameConflict, readZenFontSize, writeZenFontSize, ZEN_DEFAULT_COLS, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
 import { KeyBar } from './KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
@@ -416,6 +416,126 @@ function TabContextMenu({ target, streams, onClose, onRename, onDelete, onMove }
   );
 }
 
+/** zen 읽기 모드 — 크롬을 전부 걷고 한 pane만 고정 폭으로 크게 읽는다.
+ *
+ *  들판 위에 글자만 남는다. 터미널 배경(--term-bg)과 앱 배경(--bg0)이 같은 값이라
+ *  테두리를 안 그리면 경계가 아예 없다.
+ *
+ *  cols를 못박는 이유: 지금 살아있는 세션이 86~314 cols로 흩어져 있다. 폭을
+ *  안 정하면 314짜리는 키울수록 못 읽는다. borrow로 빌리므로 나갈 때, 탭을 닫을
+ *  때, 창이 죽을 때 서버가 이전 기하로 되돌린다(session.ts releaseBorrow).
+ *
+ *  바가 absolute인 것이 핵심이다. 흐름에 두면 마우스를 위로 올릴 때마다 컨테이너
+ *  높이가 줄고 → rows가 바뀌고 → PTY가 리플로우된다. 읽는 중에 화면이 다시
+ *  그려지는 최악의 경우다. */
+function ZenView({ mux, sid, name, cwd, cols, localEchoEnabled, fontFamily, onExit, onBell, onSessionExit }: {
+  mux: TerminalMux;
+  sid: number;
+  name?: string;
+  cwd?: string;
+  cols: number;
+  localEchoEnabled: boolean;
+  fontFamily: string;
+  onExit: () => void;
+  onBell: () => void;
+  onSessionExit: () => void;
+}) {
+  const [fontSize, setFontSize] = useState(() => readZenFontSize());
+  // 들어올 때 한 번은 보여준다 — 안 보여주면 나가는 법을 알 도리가 없다.
+  const [hintOpen, setHintOpen] = useState(true);
+  useEffect(() => {
+    const timer = setTimeout(() => setHintOpen(false), 2200);
+    return () => clearTimeout(timer);
+  }, []);
+  useEffect(() => {
+    const timer = setTimeout(() => writeZenFontSize(fontSize), 300);
+    return () => clearTimeout(timer);
+  }, [fontSize]);
+
+  const bump = (delta: number) => setFontSize((v) => Math.min(32, Math.max(9, v + delta)));
+
+  return createPortal(
+    <div style={zenOverlayStyle}>
+      {/* 상단 44px만 바를 깨운다. 본문 위에서 마우스를 움직여도 안 뜬다 —
+          읽는 중에 크롬이 번쩍이지 않게. */}
+      <div className="zen-top" style={zenTopZoneStyle}>
+        <div className={`zen-bar${hintOpen ? ' zen-bar-show' : ''}`} style={zenBarStyle}>
+          <span style={{ color: 'var(--text)', fontWeight: 700 }}>{name || `#${sid}`}</span>
+          {cwd ? <span style={{ color: 'var(--cwd)', fontSize: 11 }}>{formatCwd(cwd)}</span> : null}
+          <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{cols} cols</span>
+          <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <button onClick={() => bump(-1)} style={miniLinkBtnStyle} title="smaller">A−</button>
+            <span style={{ color: 'var(--text-dim)', fontSize: 11, minWidth: 18, textAlign: 'center' }}>{fontSize}</span>
+            <button onClick={() => bump(1)} style={miniLinkBtnStyle} title="larger">A+</button>
+            <button onClick={onExit} style={{ ...miniLinkBtnStyle, marginLeft: 8 }} title="exit zen · ⌘.">⌘. exit</button>
+          </span>
+        </div>
+      </div>
+      <div style={zenStageStyle}>
+        <Terminal
+          mux={mux}
+          attachId={sid}
+          fontSize={fontSize}
+          fontFamily={fontFamily}
+          localEcho={localEchoEnabled}
+          geometry="borrow"
+          fixedCols={cols}
+          // 100% 폭이면 wrapper(max-content)가 그 안 왼쪽에 붙어 가운데 정렬이 안 먹는다.
+          style={{ width: 'max-content', height: '100%' }}
+          onExit={onSessionExit}
+          onBell={onBell}
+        />
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+const zenOverlayStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 60,
+  background: 'var(--bg0)',
+  display: 'flex',
+  flexDirection: 'column',
+};
+
+const zenTopZoneStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: 0, left: 0, right: 0,
+  height: 34,
+  zIndex: 1,
+};
+
+const zenBarStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  height: 34,
+  padding: '0 14px',
+  margin: '5px 6px 0',
+  borderRadius: 7,
+  background: 'var(--bg1)',
+  border: '1px solid var(--line)',
+  fontFamily: 'var(--mono)',
+  fontSize: 12,
+};
+
+/** 스크롤은 xterm 자기 것 하나뿐이다 — 바깥 스크롤러를 두면 한 번의 휠에 두 번 움직인다.
+ *
+ *  여백은 글자가 화면 끝에 붙지 않을 만큼만. 이 높이가 그대로 rows라, 여백 1px이
+ *  읽을 줄 수에서 빠져나간다. 바를 피하려고 위를 44px 비워뒀더니 900px 화면에서
+ *  3줄을 그냥 버리고 있었다 — 바는 absolute라 자리를 안 차지하므로, 뜰 때 첫 줄을
+ *  잠깐 덮는 편이 늘 비워두는 것보다 낫다. */
+const zenStageStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  display: 'flex',
+  justifyContent: 'center',
+  padding: '6px 0',
+  overflow: 'hidden',
+};
+
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
 function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; pane: number | null; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
@@ -433,6 +553,9 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
     if (pane !== null) setFocusedSid(pane);
   }, [pane]);
   const [zoomedSid, setZoomedSid] = useState<number | null>(null);
+  /** zen 읽기 모드로 보고 있는 pane. zoom과 다른 물건이다 — zoom은 레이아웃 투영이고,
+   *  zen은 크롬을 전부 걷어내고 고정 폭으로 읽는 화면이다. */
+  const [zenSid, setZenSid] = useState<number | null>(null);
   const surface = useSurface();
   const touch = surface !== 'desktop';
   // 폰의 [맞춤] 토글: 이 pane의 PTY를 폰 크기로 빌려 쓴다 (떠나면 자동 반납)
@@ -531,6 +654,24 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
   }, [insertPathsIntoPane]);
 
   const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
+
+  // pane이 사라졌는데 zen에 남아 있으면 빈 화면에 갇힌다.
+  useEffect(() => {
+    if (zenSid !== null && !sessionIds.includes(zenSid)) setZenSid(null);
+  }, [sessionIds.join(','), zenSid]);
+
+  // ⌘. 토글. Esc는 못 쓴다 — 터미널이 Esc의 주인이라 가로채면 vim·claude에서
+  // Esc가 죽는다. 기존 단축키가 전부 ⌘ 기반이고 ⌘.이 비어 있다.
+  useEffect(() => {
+    if (touch) return;
+    const handler = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key !== '.') return;
+      event.preventDefault();
+      setZenSid((cur) => (cur !== null ? null : focusedSid ?? sessionIds[0] ?? null));
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [touch, focusedSid, sessionIds.join(',')]);
 
   const restoreAgent = useCallback((sid: number) => {
     if (!lastAgentIds[sid]) return;
@@ -742,6 +883,12 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
         </div>
       );
     }
+    // zen이 이 pane을 데려갔다. 여기서 Terminal을 또 그리면 같은 세션에 호스트를
+    // 두 번 붙이는 셈이라, 자리만 비워둔다. 호스트는 하나뿐이고 zen 컨테이너로
+    // 옮겨 담겼을 뿐이다(terminal-host의 mount는 재생성이 아니라 재배치다).
+    if (sid === zenSid) {
+      return <div key={`zen-${sid}`} style={{ ...emptyPaneStyle, color: 'var(--text-dim)', fontSize: 11 }}>zen</div>;
+    }
     const dead = deadSessions.has(sid);
     const isFocused = focusedSid === sid;
     const name = memberNames[sid];
@@ -872,6 +1019,9 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
             {canRestore ? (
               <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="resume last agent session">restore</button>
             ) : null}
+            {touch ? null : (
+              <button className="reveal" onClick={(e) => { e.stopPropagation(); setZenSid(sid); }} style={miniLinkBtnStyle} title="zen · ⌘.">zen</button>
+            )}
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('right', sid); }} style={miniLinkBtnStyle} title="split right">│</button>
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('down', sid); }} style={miniLinkBtnStyle} title="split down">─</button>
             {touch ? (
@@ -915,7 +1065,7 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
@@ -997,6 +1147,20 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {actionsSlot ? createPortal(stripActions, actionsSlot) : null}
+      {zenSid !== null && sessionIds.includes(zenSid) ? (
+        <ZenView
+          mux={mux}
+          sid={zenSid}
+          name={memberNames[zenSid]}
+          cwd={sessionCwds[zenSid]}
+          cols={ZEN_DEFAULT_COLS}
+          localEchoEnabled={localEchoEnabled}
+          fontFamily={fontFamily}
+          onExit={() => setZenSid(null)}
+          onBell={() => setBells((prev) => new Set(prev).add(zenSid))}
+          onSessionExit={() => { setDeadSessions((prev) => new Set(prev).add(zenSid)); setZenSid(null); }}
+        />
+      ) : null}
       <div style={{ flex: 1, minHeight: 0, background: 'var(--bg0)', padding: U.wrapPad }}>
         {ws ? (
           <LayoutView

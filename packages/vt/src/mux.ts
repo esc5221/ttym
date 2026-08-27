@@ -372,7 +372,7 @@ export class TerminalMux {
   async attachSession(
     sessionId: number,
     callbacks: SessionCallbacks,
-    opts?: { fromSeq?: number; cols?: number; rows?: number; mode?: 'readwrite' | 'readonly' },
+    opts?: { fromSeq?: number; cols?: number; rows?: number; mode?: 'readwrite' | 'readonly'; borrow?: boolean },
   ): Promise<SessionInfo> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('Not connected');
@@ -392,6 +392,10 @@ export class TerminalMux {
         cols: opts?.cols,
         rows: opts?.rows,
         mode: opts?.mode,
+        // attach가 실어 보낸 cols도 PTY를 즉시 리사이즈한다. 빌리는 중이라면
+        // 그것도 빌림이어야 한다 — 아니면 장부가 안 생겨서 떠날 때 되돌릴 게
+        // 없다. zen(borrow)이 재부착으로 들어올 때 정확히 그랬다.
+        borrow: opts?.borrow || undefined,
       }))));
     });
 

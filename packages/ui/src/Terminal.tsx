@@ -24,6 +24,8 @@ export interface TerminalProps {
   localEcho?: boolean;
   /** fit(기본) | follow(서버 기하 추종) | borrow(빌려쓰기 — 반납 시 자동 복원). */
   geometry?: 'fit' | 'follow' | 'borrow';
+  /** cols를 못박는다 (rows는 컨테이너가 정한다). zen 읽기 모드용. */
+  fixedCols?: number;
   className?: string;
   style?: React.CSSProperties;
   onCreated?: (sessionId: number) => void;
@@ -37,7 +39,7 @@ export interface TerminalProps {
  * reparents the DOM out and drops the stream, nothing is disposed. Scrollback
  * and renderer state are wherever the session is next displayed.
  */
-export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, fontFamily, enableWebgl = true, localEcho = false, geometry = 'fit', className, style, onCreated, onExit, onBell }: TerminalProps) {
+export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize = 14, fontFamily, enableWebgl = true, localEcho = false, geometry = 'fit', fixedCols, className, style, onCreated, onExit, onBell }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<TerminalHost | null>(null);
   const onExitRef = useRef(onExit);
@@ -46,8 +48,8 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
   onExitRef.current = onExit;
   onBellRef.current = onBell;
   onCreatedRef.current = onCreated;
-  const optsRef = useRef<HostOptions>({ mode, fontSize, fontFamily, enableWebgl, localEcho, geometry });
-  optsRef.current = { mode, fontSize, fontFamily, enableWebgl, localEcho, geometry };
+  const optsRef = useRef<HostOptions>({ mode, fontSize, fontFamily, enableWebgl, localEcho, geometry, fixedCols });
+  optsRef.current = { mode, fontSize, fontFamily, enableWebgl, localEcho, geometry, fixedCols };
 
   useEffect(() => {
     const el = containerRef.current;
@@ -117,8 +119,8 @@ export function Terminal({ mux, cmd, cwd, attachId, mode = 'readwrite', fontSize
   }, [mux, attachId, cmd, cwd]);
 
   useEffect(() => {
-    hostRef.current?.applyOptions({ mode, fontSize, fontFamily, enableWebgl, localEcho, geometry });
-  }, [mode, fontSize, fontFamily, enableWebgl, localEcho, geometry]);
+    hostRef.current?.applyOptions({ mode, fontSize, fontFamily, enableWebgl, localEcho, geometry, fixedCols });
+  }, [mode, fontSize, fontFamily, enableWebgl, localEcho, geometry, fixedCols]);
 
   return (
     <div

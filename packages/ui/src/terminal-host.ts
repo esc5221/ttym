@@ -50,6 +50,12 @@ export interface HostOptions {
    * 기억한다 — follow로 돌아가거나 떠나면 자동 복원 (폰의 [맞춤] 토글).
    */
   geometry?: 'fit' | 'follow' | 'borrow';
+  /**
+   * cols를 이 값에 못박는다 (rows는 컨테이너 높이가 정한다). zen 읽기 모드용.
+   * 살아있는 세션들이 86~314 cols로 흩어져 있어서, 폭을 안 고정하면 확대할수록
+   * 못 읽는다. geometry가 borrow면 서버가 이전 기하를 기억했다가 되돌린다.
+   */
+  fixedCols?: number;
 }
 
 const registry = new Map<number, TerminalHost>();
@@ -391,6 +397,10 @@ export class TerminalHost {
       cols: follow ? undefined : this.term.cols,
       rows: follow ? undefined : this.term.rows,
       mode: this.opts.mode,
+      // zen처럼 재부착으로 들어오는 빌림은 첫 기하가 attach에 실린다. 표시를
+      // 안 하면 서버가 평범한 resize로 처리해 장부를 안 만들고, 그러면 탭을
+      // 그냥 닫았을 때 되돌아갈 기하가 없다.
+      borrow: this.opts.geometry === 'borrow',
     }).then((info) => {
       if (this.disposed || this.stream !== 'attaching') { this.mux.detachSession(this.sessionId); return; }
       this.stream = 'attached';
@@ -467,10 +477,17 @@ export class TerminalHost {
       this.term.options.disableStdin = opts.mode === 'readonly';
       this.term.options.cursorBlink = opts.mode !== 'readonly';
     }
+    if (prev.fixedCols !== opts.fixedCols) {
+      this.syncWrapperSizing();
+      this.scheduleFit();
+    }
     if (prev.geometry !== opts.geometry) {
       this.syncWrapperSizing();
-      if (prev.geometry === 'borrow' && opts.geometry === 'follow') {
-        // 반납 — 서버가 이전 기하 복원 + 브로드캐스트, follow가 그걸 받아 입는다
+      if (prev.geometry === 'borrow' && opts.geometry !== 'borrow') {
+        // 반납 — 서버가 이전 기하 복원 + 브로드캐스트.
+        // follow만 보던 조건이었는데, zen(borrow)에서 pane(fit)으로 돌아올 때도
+        // 여기를 지난다. 안 풀어주면 장부가 남아 이 뷰어가 떠날 때까지 서버가
+        // 옛 기하를 쥐고 있게 된다.
         this.mux.releaseGeometry(this.sessionId);
       }
       if (opts.geometry !== 'follow') this.scheduleFit();
@@ -746,9 +763,23 @@ export class TerminalHost {
     this.scheduleFit();
   }
 
+  /** cols는 못박고 rows만 컨테이너에서 뽑는다. fit 애드온의 치수 계산을 그대로
+   *  쓰되 cols만 버린다 — 셀 크기를 직접 재면 렌더러마다 어긋난다. */
+  private resizeToFixedCols(cols: number): boolean {
+    const proposed = this.fit.proposeDimensions();
+    const rows = proposed?.rows;
+    if (!rows || rows <= 0) return false;
+    if (this.term.cols !== cols || this.term.rows !== rows) this.term.resize(cols, rows);
+    return true;
+  }
+
   private fitNow() {
     if (this.opts.geometry === 'follow') return;
-    try { this.fit.fit(); } catch {}
+    try {
+      const fixed = this.opts.fixedCols;
+      if (fixed && fixed > 0) { this.resizeToFixedCols(fixed); return; }
+      this.fit.fit();
+    } catch {}
   }
 
   private scheduleFit() {
@@ -756,7 +787,9 @@ export class TerminalHost {
     requestAnimationFrame(() => {
       if (this.disposed) return;
       try {
-        this.fit.fit();
+        const fixed = this.opts.fixedCols;
+        if (fixed && fixed > 0) this.resizeToFixedCols(fixed);
+        else this.fit.fit();
         this.term.refresh(0, Math.max(0, this.term.rows - 1));
       } catch {}
     });
@@ -773,7 +806,11 @@ export class TerminalHost {
   /** follow는 natural size — pane 컨테이너가 스크롤로 열람한다. */
   private syncWrapperSizing() {
     const natural = this.opts.geometry === 'follow';
-    this.wrapper.style.width = natural ? 'max-content' : '100%';
+    // cols를 못박으면 가로는 내용이 정한다 — 컨테이너가 그걸 가운데 놓는다.
+    // 세로는 100%로 둬야 proposeDimensions가 진짜 높이에서 rows를 뽑는다
+    // (양쪽 다 max-content면 자기 높이를 자기가 정하는 순환이 된다).
+    const fixedWidth = !!this.opts.fixedCols;
+    this.wrapper.style.width = natural || fixedWidth ? 'max-content' : '100%';
     this.wrapper.style.height = natural ? 'max-content' : '100%';
   }
 

@@ -174,6 +174,24 @@ export type Surface = 'phone' | 'tablet' | 'desktop';
 /** 폰에서 핀치로 맞춘 글자 크기. 기기의 취향이지 workspace의 성질이 아니라
  *  URL이 아니라 여기에 둔다. 서버 config의 font-size에 쓰면 폰에서 한 번
  *  오므리는 것으로 데스크톱 글자까지 바뀐다. */
+/** zen 읽기 모드의 글자 크기. 이 기기에서 읽기 편한 크기라 서버가 아니라 여기 둔다.
+ *  120 cols × 17px 모노 ≈ 1200px — 문서 폭이 저절로 나온다. */
+export const ZEN_FONT_SIZE_STORAGE_KEY = 'ttym-zen-font-size';
+export const ZEN_DEFAULT_COLS = 120;
+
+export function readZenFontSize(fallback = 17): number {
+  try {
+    const raw = localStorage.getItem(ZEN_FONT_SIZE_STORAGE_KEY);
+    if (raw === null) return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 9 && value <= 32 ? value : fallback;
+  } catch { return fallback; }
+}
+
+export function writeZenFontSize(value: number): void {
+  try { localStorage.setItem(ZEN_FONT_SIZE_STORAGE_KEY, String(value)); } catch {}
+}
+
 export const PHONE_FONT_SIZE_STORAGE_KEY = 'ttym-phone-font-size';
 
 export function readPhoneFontSize(fallback: number): number {

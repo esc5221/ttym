@@ -63,6 +63,12 @@
     .stream-pills { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px; }
     /* 줄기가 바뀌는 자리에만 가는 선 — 지도 뷰의 제목 밑줄이 여기선 행 구분선이 된다. */
     .stream-rule { grid-column: 1 / -1; height: 1px; background: var(--line, #2d2d2d); margin: 4px 0; opacity: .6; }
+    /* zen 바: 평소엔 없다. 상단 44px에 마우스가 들어올 때만 뜬다 — 본문 위에서
+       움직여도 안 뜨게 존을 좁게 잡았다. 들어온 직후 한 번은 스스로 보인다
+       (.zen-bar-show). 전역 * { transition: none !important } 를 뚫으려면
+       .reveal 처럼 !important 로 선언해야 한다. */
+    .zen-bar { opacity: 0; pointer-events: none; transition: opacity .16s ease !important; }
+    .zen-top:hover .zen-bar, .zen-bar.zen-bar-show { opacity: 1; pointer-events: auto; }
   </style>
   <!-- 사용자 스타일시트(~/.ttym/custom.css). 마지막에 오므로 앱 토큰을 덮어쓸 수
        있다 — 커스터마이즈의 공식 표면은 theme.css의 --토큰들이다. 파일이 없으면
