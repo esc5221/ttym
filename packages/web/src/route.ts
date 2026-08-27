@@ -13,8 +13,12 @@ export type Route =
   | { page: 'viewer'; id: number }
   /** pane은 폰에서 "지금 전체화면으로 보고 있는 세션"이다. 없으면 카드 목록.
    *  컴포넌트 상태로 두던 시절에는 새로고침 한 번에 목록으로 튕겼고, 보고 있는
-   *  화면을 링크로 보낼 수도 없었다. 위치는 URL이 말해야 한다. */
-  | { page: 'workspace'; id: string; pane?: number };
+   *  화면을 링크로 보낼 수도 없었다. 위치는 URL이 말해야 한다.
+   *
+   *  zen은 데스크톱의 읽기 모드다. pane과 칸을 나눠 쓰지 않는 이유: 데스크톱에서
+   *  둘은 다른 상태다. 합치면 "레이아웃은 그대로 두고 이 pane에 포커스"를 URL로
+   *  말할 방법이 없어진다. */
+  | { page: 'workspace'; id: string; pane?: number; zen?: number };
 
 export function parseRouteHash(hash: string): Route {
   if (hash === '#overview') return { page: 'overview' };
@@ -28,6 +32,8 @@ export function parseRouteHash(hash: string): Route {
     // "#w/abc/p/12"가 id "abc/p/12"인 workspace로 읽힌다 (실제로 그랬다).
     const paneMatch = wsMatch[1].match(/^(.+)\/p\/(\d+)$/);
     if (paneMatch) return { page: 'workspace', id: paneMatch[1], pane: parseInt(paneMatch[2], 10) };
+    const zenMatch = wsMatch[1].match(/^(.+)\/z\/(\d+)$/);
+    if (zenMatch) return { page: 'workspace', id: zenMatch[1], zen: parseInt(zenMatch[2], 10) };
     return { page: 'workspace', id: wsMatch[1] };
   }
   return { page: 'dashboard' };
@@ -40,7 +46,10 @@ export function routeToHash(route: Route): string {
     case 'overview': return 'overview';
     case 'session': return `s/${route.id}`;
     case 'viewer': return `v/${route.id}`;
-    case 'workspace': return route.pane !== undefined ? `w/${route.id}/p/${route.pane}` : `w/${route.id}`;
+    case 'workspace':
+      if (route.zen !== undefined) return `w/${route.id}/z/${route.zen}`;
+      if (route.pane !== undefined) return `w/${route.id}/p/${route.pane}`;
+      return `w/${route.id}`;
   }
 }
 

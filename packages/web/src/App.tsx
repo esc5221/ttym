@@ -538,7 +538,7 @@ const zenStageStyle: React.CSSProperties = {
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; pane: number | null; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
+function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; pane: number | null; zen: number | null; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
   const U = UI_STYLES[uiStyle];
   const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
@@ -554,8 +554,19 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
   }, [pane]);
   const [zoomedSid, setZoomedSid] = useState<number | null>(null);
   /** zen 읽기 모드로 보고 있는 pane. zoom과 다른 물건이다 — zoom은 레이아웃 투영이고,
-   *  zen은 크롬을 전부 걷어내고 고정 폭으로 읽는 화면이다. */
-  const [zenSid, setZenSid] = useState<number | null>(null);
+   *  zen은 크롬을 전부 걷어내고 고정 폭으로 읽는 화면이다.
+   *
+   *  상태가 아니라 URL(#w/<id>/z/<sid>)이 원천이다. 컴포넌트에 들고 있으면
+   *  새로고침 한 번에 레이아웃으로 튕기고, 읽던 화면을 링크로 보낼 수도 없다. */
+  const zenSid = zen;
+  const openZen = useCallback((sid: number | null) => {
+    // 들어갈 때는 히스토리에 쌓아 뒤로가기로 나올 수 있게, 나올 때는 갈아끼워
+    // 뒤로가기가 zen으로 되돌아가지 않게.
+    navigate(
+      sid === null ? { page: 'workspace', id: workspaceId } : { page: 'workspace', id: workspaceId, zen: sid },
+      sid === null ? { replace: true } : undefined,
+    );
+  }, [workspaceId]);
   const surface = useSurface();
   const touch = surface !== 'desktop';
   // 폰의 [맞춤] 토글: 이 pane의 PTY를 폰 크기로 빌려 쓴다 (떠나면 자동 반납)
@@ -655,10 +666,15 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
 
   const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
 
-  // pane이 사라졌는데 zen에 남아 있으면 빈 화면에 갇힌다.
+  // pane이 사라졌는데 zen에 남아 있으면 빈 화면에 갇힌다. 주소도 같이 되돌린다.
   useEffect(() => {
-    if (zenSid !== null && !sessionIds.includes(zenSid)) setZenSid(null);
-  }, [sessionIds.join(','), zenSid]);
+    if (zenSid !== null && sessionIds.length > 0 && !sessionIds.includes(zenSid)) openZen(null);
+  }, [sessionIds.join(','), zenSid, openZen]);
+
+  // zen으로 들어온 pane은 포커스도 그쪽이어야 한다 — 나갔을 때 그 자리에 선다.
+  useEffect(() => {
+    if (zenSid !== null) setFocusedSid(zenSid);
+  }, [zenSid]);
 
   // ⌘. 토글. Esc는 못 쓴다 — 터미널이 Esc의 주인이라 가로채면 vim·claude에서
   // Esc가 죽는다. 기존 단축키가 전부 ⌘ 기반이고 ⌘.이 비어 있다.
@@ -667,11 +683,12 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
     const handler = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key !== '.') return;
       event.preventDefault();
-      setZenSid((cur) => (cur !== null ? null : focusedSid ?? sessionIds[0] ?? null));
+      if (zenSid !== null) openZen(null);
+      else openZen(focusedSid ?? sessionIds[0] ?? null);
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [touch, focusedSid, sessionIds.join(',')]);
+  }, [touch, focusedSid, zenSid, openZen, sessionIds.join(',')]);
 
   const restoreAgent = useCallback((sid: number) => {
     if (!lastAgentIds[sid]) return;
@@ -1020,7 +1037,7 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
               <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="resume last agent session">restore</button>
             ) : null}
             {touch ? null : (
-              <button className="reveal" onClick={(e) => { e.stopPropagation(); setZenSid(sid); }} style={miniLinkBtnStyle} title="zen · ⌘.">zen</button>
+              <button className="reveal" onClick={(e) => { e.stopPropagation(); openZen(sid); }} style={miniLinkBtnStyle} title="zen · ⌘.">zen</button>
             )}
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('right', sid); }} style={miniLinkBtnStyle} title="split right">│</button>
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('down', sid); }} style={miniLinkBtnStyle} title="split down">─</button>
@@ -1116,7 +1133,7 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
             deadSessions={deadSessions}
             bells={bells}
             focusedSid={focusedSid}
-            pane={pane}
+            pane={pane ?? zen}
             fontSize={fontSize}
             // 위치는 URL이 갖는다. 목록에서 열 때만 히스토리에 쌓고, pane 사이를
             // 넘길 때와 목록으로 나올 때는 갈아끼운다 — 안 그러면 여섯 번 넘긴 뒤
@@ -1156,9 +1173,9 @@ function WorkspacePage({ mux, workspaceId, pane, localEchoEnabled, agentStates, 
           cols={ZEN_DEFAULT_COLS}
           localEchoEnabled={localEchoEnabled}
           fontFamily={fontFamily}
-          onExit={() => setZenSid(null)}
+          onExit={() => openZen(null)}
           onBell={() => setBells((prev) => new Set(prev).add(zenSid))}
-          onSessionExit={() => { setDeadSessions((prev) => new Set(prev).add(zenSid)); setZenSid(null); }}
+          onSessionExit={() => { setDeadSessions((prev) => new Set(prev).add(zenSid)); openZen(null); }}
         />
       ) : null}
       <div style={{ flex: 1, minHeight: 0, background: 'var(--bg0)', padding: U.wrapPad }}>
@@ -1833,7 +1850,7 @@ function App() {
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} pane={route.pane ?? null} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} fontFamily={fontFamily} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} pane={route.pane ?? null} zen={route.zen ?? null} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} fontFamily={fontFamily} />;
       break;
     default:
       page = mainView === 'map'

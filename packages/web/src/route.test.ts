@@ -49,3 +49,23 @@ describe('routeToHash', () => {
     expect(routeToHash({ page: 'workspace', id: 'x', pane: 0 })).toBe('w/x/p/0');
   });
 });
+
+describe('zen 칸', () => {
+  it('#w/<id>/z/<sid> 를 읽는다', () => {
+    expect(parseRouteHash('#w/ad6d3100/z/994')).toEqual({ page: 'workspace', id: 'ad6d3100', zen: 994 });
+  });
+
+  it('pane 과 zen 은 서로 다른 칸이다 — 데스크톱에서 다른 상태라서', () => {
+    expect(parseRouteHash('#w/x/p/1')).toEqual({ page: 'workspace', id: 'x', pane: 1 });
+    expect(parseRouteHash('#w/x/z/1')).toEqual({ page: 'workspace', id: 'x', zen: 1 });
+  });
+
+  it('되돌린 해시를 다시 읽으면 같다', () => {
+    const route: Route = { page: 'workspace', id: 'x', zen: 12 };
+    expect(parseRouteHash(`#${routeToHash(route)}`)).toEqual(route);
+  });
+
+  it('z 처럼 생겼지만 아닌 꼬리는 id 의 일부다', () => {
+    expect(parseRouteHash('#w/abc/z/x')).toEqual({ page: 'workspace', id: 'abc/z/x' });
+  });
+});
