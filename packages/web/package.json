@@ -13,6 +13,8 @@
     "@ttym/ui": "workspace:*",
     "@ttym/vt": "workspace:*",
     "@xterm/xterm": "^6.0.0",
+    "dompurify": "^3",
+    "marked": "^15",
     "react": "^18.3.0",
     "react-dom": "^18.3.0"
   },

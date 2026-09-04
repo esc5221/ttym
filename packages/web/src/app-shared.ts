@@ -176,20 +176,22 @@ export type Surface = 'phone' | 'tablet' | 'desktop';
  *  오므리는 것으로 데스크톱 글자까지 바뀐다. */
 /** zen 읽기 모드의 글자 크기. 이 기기에서 읽기 편한 크기라 서버가 아니라 여기 둔다.
  *  120 cols × 17px 모노 ≈ 1200px — 문서 폭이 저절로 나온다. */
-export const ZEN_FONT_SIZE_STORAGE_KEY = 'ttym-zen-font-size';
+/** zen 글자 크기는 절대값이 아니라 터미널 글자 크기에 대한 차이로 기억한다.
+ *  절대값(기본 17)이던 시절에는 pane 글자를 바꿔도 zen만 따로 놀았다. 0이면 같다. */
+export const ZEN_FONT_DELTA_STORAGE_KEY = 'ttym-zen-font-delta';
 export const ZEN_DEFAULT_COLS = 120;
 
-export function readZenFontSize(fallback = 17): number {
+export function readZenFontDelta(): number {
   try {
-    const raw = localStorage.getItem(ZEN_FONT_SIZE_STORAGE_KEY);
-    if (raw === null) return fallback;
+    const raw = localStorage.getItem(ZEN_FONT_DELTA_STORAGE_KEY);
+    if (raw === null) return 0;
     const value = Number(raw);
-    return Number.isFinite(value) && value >= 9 && value <= 32 ? value : fallback;
-  } catch { return fallback; }
+    return Number.isFinite(value) && Math.abs(value) <= 20 ? value : 0;
+  } catch { return 0; }
 }
 
-export function writeZenFontSize(value: number): void {
-  try { localStorage.setItem(ZEN_FONT_SIZE_STORAGE_KEY, String(value)); } catch {}
+export function writeZenFontDelta(value: number): void {
+  try { localStorage.setItem(ZEN_FONT_DELTA_STORAGE_KEY, String(value)); } catch {}
 }
 
 export const PHONE_FONT_SIZE_STORAGE_KEY = 'ttym-phone-font-size';

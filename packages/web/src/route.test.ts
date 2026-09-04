@@ -69,3 +69,15 @@ describe('zen 칸', () => {
     expect(parseRouteHash('#w/abc/z/x')).toEqual({ page: 'workspace', id: 'abc/z/x' });
   });
 });
+
+describe('viewer full 칸', () => {
+  it('#w/<id>/o/<sid>/<vid> 를 읽고 되돌린다', () => {
+    const route = { page: 'workspace', id: 'ad6d3100', open: { sid: 994, vid: 'a1b2c3' } } as const;
+    expect(parseRouteHash('#w/ad6d3100/o/994/a1b2c3')).toEqual(route);
+    expect(routeToHash(route)).toBe('w/ad6d3100/o/994/a1b2c3');
+  });
+
+  it('탭이 없는 꼬리는 id 의 일부로 둔다 — active 탭은 URL이 말해야 하므로', () => {
+    expect(parseRouteHash('#w/x/o/1')).toEqual({ page: 'workspace', id: 'x/o/1' });
+  });
+});

@@ -16,12 +16,17 @@ import {
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
-import { actionBtnStyle, apiDeleteWorkspace, groupByStream, isNameConflict, readZenFontSize, writeZenFontSize, ZEN_DEFAULT_COLS, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { actionBtnStyle, apiDeleteWorkspace, groupByStream, isNameConflict, readZenFontDelta, writeZenFontDelta, ZEN_DEFAULT_COLS, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
 import { KeyBar } from './KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
 import { MapPage } from './MapPage.js';
 import { SettingsModal } from './SettingsModal.js';
+import { useViewerState } from './viewer/useViewerState.js';
+import { ViewerPanel } from './viewer/ViewerPanel.js';
+import { ViewerOverlay } from './viewer/ViewerOverlay.js';
+import { viewSrc } from './viewer/content.js';
+import type { ViewerFocus } from './route.js';
 
 /** crypto.randomUUID fallback for non-secure contexts (HTTP over LAN) */
 function uuid(): string {
@@ -428,7 +433,7 @@ function TabContextMenu({ target, streams, onClose, onRename, onDelete, onMove }
  *  바가 absolute인 것이 핵심이다. 흐름에 두면 마우스를 위로 올릴 때마다 컨테이너
  *  높이가 줄고 → rows가 바뀌고 → PTY가 리플로우된다. 읽는 중에 화면이 다시
  *  그려지는 최악의 경우다. */
-function ZenView({ mux, sid, name, cwd, cols, localEchoEnabled, fontFamily, onExit, onBell, onSessionExit }: {
+function ZenView({ mux, sid, name, cwd, cols, localEchoEnabled, fontFamily, baseFontSize, onExit, onBell, onSessionExit, side, sideOpen, onToggleSide }: {
   mux: TerminalMux;
   sid: number;
   name?: string;
@@ -436,11 +441,38 @@ function ZenView({ mux, sid, name, cwd, cols, localEchoEnabled, fontFamily, onEx
   cols: number;
   localEchoEnabled: boolean;
   fontFamily: string;
+  /** pane의 글자 크기. zen은 여기에 기억된 차이만 더한다 — 기본은 같은 크기. */
+  baseFontSize: number;
   onExit: () => void;
   onBell: () => void;
   onSessionExit: () => void;
+  /** 이 세션의 뷰어. 있으면 바에 토글이 생기고, 열면 터미널 오른쪽에 나란히 선다. */
+  side?: React.ReactNode;
+  sideOpen?: boolean;
+  onToggleSide?: () => void;
 }) {
-  const [fontSize, setFontSize] = useState(() => readZenFontSize());
+  const [delta, setDelta] = useState(() => readZenFontDelta());
+  const fontSize = Math.min(32, Math.max(9, baseFontSize + delta));
+  // 좌우 비율은 이 브라우저의 것. 터미널은 cols가 고정이라 왼쪽이 좁아지면 잘린다 —
+  // 그래서 기본을 터미널 쪽에 넉넉히 준다.
+  const [sideRatio, setSideRatio] = useState(() => { try { const v = Number(window.localStorage.getItem('ttym-zen-side-ratio')); return v > 0 && v < 1 ? v : 0.55; } catch { return 0.55; } });
+  const startSideDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const container = (e.currentTarget as HTMLElement).parentElement;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const el = e.currentTarget;
+    el.classList.add('drag');
+    let last = sideRatio;
+    const move = (ev: PointerEvent) => { last = Math.min(0.85, Math.max(0.15, (ev.clientX - rect.left) / rect.width)); setSideRatio(last); };
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      el.classList.remove('drag');
+      try { window.localStorage.setItem('ttym-zen-side-ratio', String(last)); } catch {}
+    };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+  const split = !!side && !!sideOpen;
   // 들어올 때 한 번은 보여준다 — 안 보여주면 나가는 법을 알 도리가 없다.
   const [hintOpen, setHintOpen] = useState(true);
   useEffect(() => {
@@ -448,43 +480,59 @@ function ZenView({ mux, sid, name, cwd, cols, localEchoEnabled, fontFamily, onEx
     return () => clearTimeout(timer);
   }, []);
   useEffect(() => {
-    const timer = setTimeout(() => writeZenFontSize(fontSize), 300);
+    const timer = setTimeout(() => writeZenFontDelta(delta), 300);
     return () => clearTimeout(timer);
-  }, [fontSize]);
+  }, [delta]);
 
-  const bump = (delta: number) => setFontSize((v) => Math.min(32, Math.max(9, v + delta)));
+  const bump = (by: number) => setDelta((d) => Math.min(20, Math.max(-20, d + by)));
 
   return createPortal(
     <div style={zenOverlayStyle}>
       {/* 상단 44px만 바를 깨운다. 본문 위에서 마우스를 움직여도 안 뜬다 —
           읽는 중에 크롬이 번쩍이지 않게. */}
-      <div className="zen-top" style={zenTopZoneStyle}>
-        <div className={`zen-bar${hintOpen ? ' zen-bar-show' : ''}`} style={zenBarStyle}>
+      {/* 나란히 볼 때는 바를 숨기지 않는다 — 흐름에 두면 높이가 고정이라 rows도 안 흔들린다. */}
+      <div className="zen-top" style={split ? { flexShrink: 0 } : zenTopZoneStyle}>
+        <div className={`zen-bar${hintOpen || split ? ' zen-bar-show' : ''}`} style={zenBarStyle}>
           <span style={{ color: 'var(--text)', fontWeight: 700 }}>{name || `#${sid}`}</span>
           {cwd ? <span style={{ color: 'var(--cwd)', fontSize: 11 }}>{formatCwd(cwd)}</span> : null}
-          <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{cols} cols</span>
+          {split ? null : <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{cols} cols</span>}
           <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <button onClick={() => bump(-1)} style={miniLinkBtnStyle} title="smaller">A−</button>
-            <span style={{ color: 'var(--text-dim)', fontSize: 11, minWidth: 18, textAlign: 'center' }}>{fontSize}</span>
+            <span onClick={() => setDelta(0)} style={{ color: delta === 0 ? 'var(--text-dim)' : 'var(--warn)', fontSize: 11, minWidth: 18, textAlign: 'center', cursor: delta === 0 ? 'default' : 'pointer' }} title={delta === 0 ? 'same as the pane' : 'click: back to the pane size'}>{fontSize}</span>
             <button onClick={() => bump(1)} style={miniLinkBtnStyle} title="larger">A+</button>
+            {side ? (
+              <button onClick={onToggleSide} style={{ ...miniLinkBtnStyle, marginLeft: 8, ...(sideOpen ? { color: 'var(--accent)' } : null) }} title="viewer beside the terminal">
+                {sideOpen ? 'viewer ▸' : '◂ viewer'}
+              </button>
+            ) : null}
             <button onClick={onExit} style={{ ...miniLinkBtnStyle, marginLeft: 8 }} title="exit zen · ⌘.">⌘. exit</button>
           </span>
         </div>
       </div>
-      <div style={zenStageStyle}>
-        <Terminal
-          mux={mux}
-          attachId={sid}
-          fontSize={fontSize}
-          fontFamily={fontFamily}
-          localEcho={localEchoEnabled}
-          geometry="borrow"
-          fixedCols={cols}
-          // 100% 폭이면 wrapper(max-content)가 그 안 왼쪽에 붙어 가운데 정렬이 안 먹는다.
-          style={{ width: 'max-content', height: '100%' }}
-          onExit={onSessionExit}
-          onBell={onBell}
-        />
+      <div style={split ? { ...zenStageStyle, justifyContent: 'stretch', padding: '6px 0 0' } : zenStageStyle}>
+        <div style={split ? { flex: `0 0 ${sideRatio * 100}%`, minWidth: 0, display: 'flex', overflow: 'hidden', padding: '0 6px' } : { display: 'contents' }}>
+          <Terminal
+            mux={mux}
+            attachId={sid}
+            fontSize={fontSize}
+            fontFamily={fontFamily}
+            localEcho={localEchoEnabled}
+            geometry="borrow"
+            // 나란히 볼 때는 고정 cols 대신 왼쪽 영역에 맞춘다 — splitter를 끌면 PTY도 따라온다.
+            // borrow는 그대로라 zen을 나가면 서버가 이전 기하를 되돌린다.
+            fixedCols={split ? undefined : cols}
+            // 100% 폭이면 wrapper(max-content)가 그 안 왼쪽에 붙어 가운데 정렬이 안 먹는다.
+            style={split ? { width: '100%', height: '100%' } : { width: 'max-content', height: '100%' }}
+            onExit={onSessionExit}
+            onBell={onBell}
+          />
+        </div>
+        {split ? (
+          <>
+            <div className="viewer-splitter col" onPointerDown={startSideDrag} title="drag to resize" />
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', borderLeft: '1px solid var(--line)' }}>{side}</div>
+          </>
+        ) : null}
       </div>
     </div>,
     document.body,
@@ -500,10 +548,12 @@ const zenOverlayStyle: React.CSSProperties = {
   flexDirection: 'column',
 };
 
+/** 바(여백 5 + 높이 34 = 39px)보다 커야 한다. 34였을 때는 바 아래 5px에 마우스를
+ *  두면 바가 도로 꺼졌다. absolute라 행을 잡아먹지 않으니 넉넉히. */
 const zenTopZoneStyle: React.CSSProperties = {
   position: 'absolute',
   top: 0, left: 0, right: 0,
-  height: 34,
+  height: 48,
   zIndex: 1,
 };
 
@@ -538,7 +588,7 @@ const zenStageStyle: React.CSSProperties = {
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; pane: number | null; zen: number | null; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
+function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; pane: number | null; zen: number | null; open: ViewerFocus | null; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
   const U = UI_STYLES[uiStyle];
   const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});
@@ -666,6 +716,36 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
 
   const sessionIds = ws ? layoutToSessionIds(ws.layout).filter((id) => id > 0) : [];
 
+  // ── viewer (`ttym open`) ──
+  // full 모드는 zen과 같은 자리(URL #w/<id>/o/<sid>/<vid>)라 둘은 배타적이다.
+  const openFull = useCallback((sid: number, vid: string) => {
+    navigate({ page: 'workspace', id: workspaceId, open: { sid, vid } });
+  }, [workspaceId]);
+  const exitFull = useCallback(() => {
+    navigate({ page: 'workspace', id: workspaceId }, { replace: true });
+  }, [workspaceId]);
+  const viewer = useViewerState(mux, sessionIds, (sid, vid, presentation) => {
+    if (presentation === 'full') openFull(sid, vid);
+    else if (open?.sid === sid) exitFull();
+  });
+  const fullState = open !== null ? viewer.states[open.sid] ?? null : null;
+  /** zen에서 뷰어를 옆에 펼쳐 두는지 — 탭이 있을 때만 의미가 있고, 기본은 펼침. */
+  const [zenSideOpen, setZenSideOpen] = useState<boolean>(() => { try { return window.localStorage.getItem('ttym-zen-side') !== '0'; } catch { return true; } });
+  const toggleZenSide = useCallback(() => setZenSideOpen((v) => { try { window.localStorage.setItem('ttym-zen-side', v ? '0' : '1'); } catch {} return !v; }), []);
+  const zenViewer = zenSid !== null ? viewer.states[zenSid] ?? null : null;
+  // full로 보던 탭이 닫혔거나 pane이 빠졌으면 빈 오버레이에 갇힌다 — 주소를 되돌린다.
+  useEffect(() => {
+    if (open === null) return;
+    if (sessionIds.length > 0 && !sessionIds.includes(open.sid)) { exitFull(); return; }
+    if (open.sid in viewer.states && !viewer.states[open.sid]) exitFull();
+  }, [open?.sid, open?.vid, sessionIds.join(','), viewer.states, exitFull]);
+  // URL이 말하는 탭이 곧 active — 새로고침해도 같은 탭.
+  useEffect(() => {
+    if (open !== null) viewer.setActive(open.sid, open.vid);
+  }, [open?.sid, open?.vid]);
+  /** 헤더의 ⟳ — 뷰어 탭 본문을 다시 마운트한다. 세션별 카운터면 충분하다. */
+  const [viewerReload, setViewerReload] = useState<Record<number, number>>({});
+
   // pane이 사라졌는데 zen에 남아 있으면 빈 화면에 갇힌다. 주소도 같이 되돌린다.
   useEffect(() => {
     if (zenSid !== null && sessionIds.length > 0 && !sessionIds.includes(zenSid)) openZen(null);
@@ -683,12 +763,13 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
     const handler = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.key !== '.') return;
       event.preventDefault();
-      if (zenSid !== null) openZen(null);
+      if (open !== null) exitFull();
+      else if (zenSid !== null) openZen(null);
       else openZen(focusedSid ?? sessionIds[0] ?? null);
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [touch, focusedSid, zenSid, openZen, sessionIds.join(',')]);
+  }, [touch, focusedSid, zenSid, openZen, sessionIds.join(','), open, exitFull]);
 
   const restoreAgent = useCallback((sid: number) => {
     if (!lastAgentIds[sid]) return;
@@ -913,6 +994,12 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
     const agent = agentStates[sid];
     const agentColor = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
     const canRestore = !agent?.active && (lastAgentIds[sid]?.claude || lastAgentIds[sid]?.codex);
+    // 헤더의 탭. 왼쪽 덩어리(이름·#id·cwd)가 터미널 탭이고, 그 오른쪽에 뷰어 탭이 선다.
+    // full로 나가 있으면 pane 안에서는 안 그린다 — 같은 탭을 두 번 마운트하지 않는다.
+    const viewerState = open?.sid === sid ? null : (viewer.states[sid] ?? null);
+    const activeVid = viewer.active[sid];
+    const paneTab = viewerState && activeVid && viewerState.items.some((i) => i.id === activeVid) ? activeVid : 'term';
+    const paneItem = paneTab === 'term' ? null : viewerState!.items.find((i) => i.id === paneTab)!;
     return (
       <div
         key={sid}
@@ -996,14 +1083,17 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
           onDragEnd={() => setDragSid(null)}
           onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
           onDrop={(e) => { e.preventDefault(); if (dragSid !== null && dragSid !== sid) commitSwap(dragSid, sid); setDragSid(null); }}
-          onDoubleClick={() => setZoomedSid((z) => (z === sid ? null : sid))}
-          title="double-click: zoom · drag: swap"
+          title="drag: swap"
         >
           <span
+            className={`pane-tab pane-tab-term${paneTab === 'term' ? ' on' : ''}`}
+            onClick={() => { if (paneTab !== 'term') viewer.setActive(sid, 'term'); }}
+            onDoubleClick={() => setZoomedSid((z) => (z === sid ? null : sid))}
+            title={paneTab === 'term' ? 'double-click: zoom' : 'back to the terminal'}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 10px',
               // frame: 포커스 신호는 텍스트 밝기 하나. classic: 바 배경이 말한다.
-              flexGrow: 1, flexShrink: 1, minWidth: 0, overflow: 'hidden',
+              flexGrow: viewerState ? 0 : 1, flexShrink: 1, minWidth: 0, overflow: 'hidden',
               height: '100%',
               opacity: U.headerBar ? 1 : isFocused ? 1 : 0.45,
             }}
@@ -1025,6 +1115,21 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
               </span>
             ) : null}
           </span>
+          {viewerState ? (
+            <span className="pane-tabs" onDoubleClick={(e) => e.stopPropagation()}>
+              {viewerState.items.map((item) => (
+                <span
+                  key={item.id}
+                  className={`pane-tab${item.id === paneTab ? ' on' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); viewer.setActive(sid, item.id); }}
+                  title={item.target}
+                >
+                  <span className="pane-tab-label">{item.name}</span>
+                  <button className="pane-tab-x" onClick={(e) => { e.stopPropagation(); void viewer.close(sid, item.id); }} title="close tab">×</button>
+                </span>
+              ))}
+            </span>
+          ) : null}
           <span style={{
             position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
             display: 'inline-flex', alignItems: 'center', gap: 6, zIndex: 2,
@@ -1033,6 +1138,13 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
               <span title="bell" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)', boxShadow: '0 0 6px var(--warn)', flexShrink: 0 }} />
             ) : null}
             {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'var(--mono)' }}>zoom</span> : null}
+            {paneItem ? (
+              <>
+                <button onClick={(e) => { e.stopPropagation(); setViewerReload((prev) => ({ ...prev, [sid]: (prev[sid] ?? 0) + 1 })); }} style={miniLinkBtnStyle} title="reload">⟳</button>
+                <a href={viewSrc(paneItem)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={miniLinkBtnStyle} title="open in a browser tab">↗</a>
+                <button onClick={(e) => { e.stopPropagation(); openFull(sid, paneItem.id); }} style={miniLinkBtnStyle} title="fill the workspace">full</button>
+              </>
+            ) : null}
             {canRestore ? (
               <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="resume last agent session">restore</button>
             ) : null}
@@ -1057,6 +1169,7 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
           </span>
         </div>
+        <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, minHeight: 0, padding: U.termPad, ...(touch ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}>
           {!dead ? (
             <Terminal
@@ -1080,9 +1193,30 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
             </div>
           )}
         </div>
+        {/* 뷰어 탭은 터미널 위에 덮는다. 터미널을 떼거나 숨기면 PTY 크기가 흔들리고 돌아올 때
+            다시 fit해야 한다 — 그대로 깔아두면 탭을 되돌리는 순간 그 화면이다. */}
+        {/* z-index: xterm의 레이어(link·decoration)가 자기 z-index를 갖고 있어, 없으면
+            오버레이가 그 밑으로 들어가 휠·클릭을 터미널이 먹는다(elementFromPoint로 실측). */}
+        {paneItem && viewerState ? (
+          <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', background: 'var(--bg0)' }}>
+            <ViewerPanel
+              sid={sid}
+              state={viewerState}
+              activeId={paneItem.id}
+              chrome="none"
+              reloadKey={viewerReload[sid] ?? 0}
+              onSelect={(vid) => viewer.setActive(sid, vid)}
+              onClose={(vid) => void viewer.close(sid, vid)}
+              onCloseAll={() => void viewer.closeAll(sid)}
+              onOpen={(targets) => void viewer.open(sid, targets)}
+              mode="pane"
+            />
+          </div>
+        ) : null}
+        </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane, viewer, open, viewerReload, openFull]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
@@ -1164,6 +1298,19 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {actionsSlot ? createPortal(stripActions, actionsSlot) : null}
+      {open !== null && fullState && sessionIds.includes(open.sid) ? (
+        <ViewerOverlay
+          sid={open.sid}
+          name={memberNames[open.sid]}
+          state={fullState}
+          activeId={viewer.active[open.sid] ?? open.vid}
+          onSelect={(vid) => { viewer.setActive(open.sid, vid); navigate({ page: 'workspace', id: workspaceId, open: { sid: open.sid, vid } }, { replace: true }); }}
+          onClose={(vid) => void viewer.close(open.sid, vid)}
+          onCloseAll={() => void viewer.closeAll(open.sid)}
+          onOpen={(targets) => void viewer.open(open.sid, targets)}
+          onExit={exitFull}
+        />
+      ) : null}
       {zenSid !== null && sessionIds.includes(zenSid) ? (
         <ZenView
           mux={mux}
@@ -1173,9 +1320,24 @@ function WorkspacePage({ mux, workspaceId, pane, zen, localEchoEnabled, agentSta
           cols={ZEN_DEFAULT_COLS}
           localEchoEnabled={localEchoEnabled}
           fontFamily={fontFamily}
+          baseFontSize={fontSize}
           onExit={() => openZen(null)}
           onBell={() => setBells((prev) => new Set(prev).add(zenSid))}
           onSessionExit={() => { setDeadSessions((prev) => new Set(prev).add(zenSid)); openZen(null); }}
+          sideOpen={zenSideOpen}
+          onToggleSide={toggleZenSide}
+          side={zenViewer ? (
+            <ViewerPanel
+              sid={zenSid}
+              state={zenViewer}
+              activeId={viewer.active[zenSid] ?? null}
+              onSelect={(vid) => viewer.setActive(zenSid, vid)}
+              onClose={(vid) => void viewer.close(zenSid, vid)}
+              onCloseAll={() => void viewer.closeAll(zenSid)}
+              onOpen={(targets) => void viewer.open(zenSid, targets)}
+              mode="pane"
+            />
+          ) : undefined}
         />
       ) : null}
       <div style={{ flex: 1, minHeight: 0, background: 'var(--bg0)', padding: U.wrapPad }}>
@@ -1850,7 +2012,7 @@ function App() {
       page = <ViewerPage mux={mux} sessionId={route.id} />;
       break;
     case 'workspace':
-      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} pane={route.pane ?? null} zen={route.zen ?? null} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} fontFamily={fontFamily} />;
+      page = <WorkspacePage key={route.id} mux={mux} workspaceId={route.id} pane={route.pane ?? null} zen={route.zen ?? null} open={route.open ?? null} localEchoEnabled={localEchoEnabled} agentStates={agentStates} actionsSlot={stripSlot} uiStyle={uiStyle} fontSize={fontSize} fontFamily={fontFamily} />;
       break;
     default:
       page = mainView === 'map'

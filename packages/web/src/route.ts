@@ -18,7 +18,12 @@ export type Route =
    *  zen은 데스크톱의 읽기 모드다. pane과 칸을 나눠 쓰지 않는 이유: 데스크톱에서
    *  둘은 다른 상태다. 합치면 "레이아웃은 그대로 두고 이 pane에 포커스"를 URL로
    *  말할 방법이 없어진다. */
-  | { page: 'workspace'; id: string; pane?: number; zen?: number };
+  | { page: 'workspace'; id: string; pane?: number; zen?: number; open?: ViewerFocus };
+
+/** full 모드 뷰어: 어느 pane의 어느 탭을 화면 전체로 보고 있나. zen과 같은 자리이므로
+ *  둘은 배타적이다 — 한 URL이 둘 다 말할 수 없다. 탭(vid)이 URL에 있는 이유는
+ *  active 탭이 클라이언트 상태라서다: 새로고침해도 같은 탭이 와야 한다. */
+export interface ViewerFocus { sid: number; vid: string }
 
 export function parseRouteHash(hash: string): Route {
   if (hash === '#overview') return { page: 'overview' };
@@ -34,6 +39,8 @@ export function parseRouteHash(hash: string): Route {
     if (paneMatch) return { page: 'workspace', id: paneMatch[1], pane: parseInt(paneMatch[2], 10) };
     const zenMatch = wsMatch[1].match(/^(.+)\/z\/(\d+)$/);
     if (zenMatch) return { page: 'workspace', id: zenMatch[1], zen: parseInt(zenMatch[2], 10) };
+    const openMatch = wsMatch[1].match(/^(.+)\/o\/(\d+)\/([A-Za-z0-9]+)$/);
+    if (openMatch) return { page: 'workspace', id: openMatch[1], open: { sid: parseInt(openMatch[2], 10), vid: openMatch[3] } };
     return { page: 'workspace', id: wsMatch[1] };
   }
   return { page: 'dashboard' };
@@ -47,6 +54,7 @@ export function routeToHash(route: Route): string {
     case 'session': return `s/${route.id}`;
     case 'viewer': return `v/${route.id}`;
     case 'workspace':
+      if (route.open !== undefined) return `w/${route.id}/o/${route.open.sid}/${route.open.vid}`;
       if (route.zen !== undefined) return `w/${route.id}/z/${route.zen}`;
       if (route.pane !== undefined) return `w/${route.id}/p/${route.pane}`;
       return `w/${route.id}`;
