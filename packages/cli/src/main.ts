@@ -9,6 +9,7 @@ import { cmdAgent } from './agent.js';
 import { cmdMap } from './map.js';
 import { cmdService } from './service.js';
 import { cmdUpgrade, cmdVersion } from './upgrade.js';
+import { cmdOpen, cmdView } from './viewer.js';
 import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr, cmdCommandsAddr, cmdOutputAddr } from './sessions.js';
 
 // ───── Main ─────
@@ -29,6 +30,8 @@ function printHelp() {
   console.log('  await <addr> -- "prompt"     Ask an agent (or run a shell command) and wait');
   console.log('  commands <addr>              Command history with exit codes (shell integration)');
   console.log('  output <addr> [--cmd N]      One command output, precisely sliced');
+  console.log('  open <path|url>... [--to <addr>] [--full|--pane] [--root <dir>]  Open inside the pane (md·csv·html·images·dirs·urls)');
+  console.log('  view list|close              Viewer tabs of a pane (close <target> | --id <vid> | --all)');
   console.log('  map refresh [--model haiku]  AI-summarize stale sessions into the work map');
   console.log('  status                       Show server & session info');
   console.log('  current                      Show current workspace/member context');
@@ -63,6 +66,8 @@ switch (cmd) {
   case 'await':   await cmdAwaitAddr(); break;
   case 'commands': await cmdCommandsAddr(); break;
   case 'output':  await cmdOutputAddr(); break;
+  case 'open':    await cmdOpen(); break;
+  case 'view':    await cmdView(); break;
   case 'start':   cmdStart(); break;
   case 'stop':    cmdStop(); break;
   case 'restart': await cmdRestart(); break;

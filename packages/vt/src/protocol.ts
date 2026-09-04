@@ -6,4 +6,4 @@ export {
   CMD, encode, encodeData, encodeSnapshot, decode, decodeServerFrame, decodeClientFrame, jsonPayload, parseJson,
   HEADER_BYTES, DATA_HEADER_BYTES,
 } from '@ttym/protocol';
-export type { DecodedFrame, CmdValue } from '@ttym/protocol';
+export type { DecodedFrame, CmdValue, ViewItem, ViewerState, ViewChangeEvent, ViewRenderer, ViewPresentation } from '@ttym/protocol';

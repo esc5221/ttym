@@ -14,6 +14,8 @@ export * from './sessions.js';
 export * from './workspaces.js';
 export * from './interactions.js';
 export * from './config.js';
+export * from './views.js';
+export type { ViewItem, ViewerState, ViewRenderer, ViewPresentation, ViewChangeEvent, ViewOpenRequest } from '@ttym/protocol';
 
 import type { BaseUrl } from './transport.js';
 import * as sessions from './sessions.js';

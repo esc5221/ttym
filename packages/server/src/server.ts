@@ -13,6 +13,9 @@ import { ConfigStore } from './config-file.js';
 import { agentKindOf } from './agent-providers.js';
 import { getHomeDir, type Session } from './session.js';
 import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
+import { ViewerStore } from './viewer/store.js';
+import { ViewerService } from './viewer/service.js';
+import { handleViewerApi, handleViewContent } from './viewer/http.js';
 import { execFile } from 'node:child_process';
 
 let mapRefreshInFlight = false;
@@ -221,9 +224,14 @@ export interface TtymServer {
 
 let bootSafeMode = false;
 
-function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void): boolean {
+function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void, viewer?: { store: ViewerStore; service: ViewerService }): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
+
+  // A sandboxed <iframe> (the viewer's local HTML) has an opaque origin and
+  // sends `Origin: null`. With `*` below it could still call PATCH/DELETE
+  // here; that one origin is refused before anything else.
+  if (req.headers.origin === 'null') { res.writeHead(403); res.end('forbidden origin'); return true; }
 
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -246,6 +254,12 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     req.on('data', (c) => body += c);
     req.on('end', () => resolve(body));
   });
+
+  // /api/sessions/:id/views — viewer tabs (`ttym open`). Lives in viewer/http.ts.
+  if (viewer && handleViewerApi(req, path, {
+    store: viewer.store, service: viewer.service,
+    sessionExists: (id) => !!manager.get(id), json, readBody, log,
+  })) return true;
 
   // POST /api/upload?name=<filename> — the web half of file drag-and-drop.
   // A browser cannot learn a dropped file's real path (by design), so the
@@ -1151,6 +1165,10 @@ export async function createServer(port: number): Promise<TtymServer> {
   // they can be revived later by adding them back to a workspace.
   const workspaceStore = new WorkspaceStore(manager.runtimeDir);
   await workspaceStore.load();
+  const viewerStore = new ViewerStore(manager.runtimeDir);
+  await viewerStore.load();
+  const viewerService = new ViewerService(viewerStore);
+  const viewer = { store: viewerStore, service: viewerService };
   const markCleanExit = () => {
     try {
       const p = resolve(getHomeDir(), 'boot.json');
@@ -1213,6 +1231,8 @@ export async function createServer(port: number): Promise<TtymServer> {
           if (removed.length > 0) console.log(`[gc] swept ${removed.length} orphaned files`);
         })
         .catch(() => {});
+      const prunedViews = viewerStore.prune(keep);
+      if (prunedViews > 0) console.log(`[gc] dropped viewer tabs of ${prunedViews} gone sessions`);
       sweepDropsDir(resolve(getHomeDir(), 'drops'), gcDays * 24 * 60 * 60 * 1000)
         .then(({ removed }) => {
           if (removed.length > 0) console.log(`[gc] swept ${removed.length} expired drops`);
@@ -1234,7 +1254,9 @@ export async function createServer(port: number): Promise<TtymServer> {
 
   const httpServer = createHttpServer((req, res) => {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
-    if (handleHttpApi(manager, workspaceStore, interactions, configStore, req, res, broadcastAgentState, broadcastConfig)) return;
+    // /view/<cap>/… before the SPA catch-all, which would otherwise answer with index.html.
+    if (handleViewContent(req, res, (req.url || '/').split('?')[0]!, { store: viewerStore })) return;
+    if (handleHttpApi(manager, workspaceStore, interactions, configStore, req, res, broadcastAgentState, broadcastConfig, viewer)) return;
     if (handleDemoApp(req, res)) return;
     res.writeHead(404);
     res.end('not found');
@@ -1329,6 +1351,16 @@ export async function createServer(port: number): Promise<TtymServer> {
     log(`MAP timer armed: every ${Math.round(ms / 1000)}s`);
   }
   armMapTimer(configStore.get());
+
+  // Viewer tabs push the moment `ttym open` lands — whole state, never a diff.
+  viewerStore.onChange((event) => {
+    const frame = encode(0, CMD.VIEW, jsonPayload(event));
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        try { client.send(frame); } catch {}
+      }
+    }
+  });
 
   function broadcastConfig(values: Record<string, string>) {
     armMapTimer(values); // 설정이 바뀌면 즉시 재장전 — 재시작 불필요
@@ -1881,6 +1913,7 @@ export async function createServer(port: number): Promise<TtymServer> {
       // and returns before that queued write lands — the last edit before a
       // restart was quietly dropped.
       await workspaceStore.flush();
+      await viewerStore.flush();
       await manager.shutdown(); // persist + don't kill holders
       await new Promise<void>((resolve, reject) => {
         wss.close((error) => {

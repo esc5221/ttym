@@ -1,4 +1,5 @@
 import { CMD, encode, decode } from './protocol';
+import type { ViewChangeEvent } from '@ttym/protocol';
 
 type DataCallback = (data: Uint8Array, seq?: number) => void;
 type ExitCallback = () => void;
@@ -50,6 +51,8 @@ export interface ConfigChangeEvent {
   values: Record<string, string>;
 }
 
+export type { ViewChangeEvent } from '@ttym/protocol';
+
 interface PendingCreate {
   resolve: (id: number) => void;
   reject: (error: Error) => void;
@@ -87,6 +90,7 @@ export class TerminalMux {
   private workspaceListeners = new Set<(event: WorkspaceChangeEvent) => void>();
   private agentListeners = new Set<(event: AgentStateEvent) => void>();
   private configListeners = new Set<(event: ConfigChangeEvent) => void>();
+  private viewListeners = new Set<(event: ViewChangeEvent) => void>();
 
   constructor(url: string) {
     this.url = url;
@@ -315,6 +319,17 @@ export class TerminalMux {
         break;
       }
 
+      case CMD.VIEW: {
+        let event: ViewChangeEvent | null = null;
+        try { event = JSON.parse(this.decoder.decode(payload)); } catch {}
+        if (event && typeof event.sessionId === 'number') {
+          for (const listener of this.viewListeners) {
+            try { listener(event); } catch {}
+          }
+        }
+        break;
+      }
+
       case CMD.DESTROY: {
         this.sessions.get(sessionId)?.onExit?.();
         this.sessions.delete(sessionId);
@@ -424,6 +439,12 @@ export class TerminalMux {
   onConfig(listener: (event: ConfigChangeEvent) => void): () => void {
     this.configListeners.add(listener);
     return () => this.configListeners.delete(listener);
+  }
+
+  /** Subscribe to viewer-tab pushes (`ttym open`). Returns the unsubscribe. */
+  onView(listener: (event: ViewChangeEvent) => void): () => void {
+    this.viewListeners.add(listener);
+    return () => this.viewListeners.delete(listener);
   }
 
   /** Subscribe to agent state pushes. Returns the unsubscribe. */

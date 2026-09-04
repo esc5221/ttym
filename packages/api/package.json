@@ -9,6 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@ttym/shared": "workspace:*"
+    "@ttym/shared": "workspace:*",
+    "@ttym/protocol": "workspace:*"
   }
 }

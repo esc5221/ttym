@@ -20,7 +20,7 @@
  * during the last swap a v2 CLI ran against a v3 server for hours with no way
  * to tell.
  */
-export const API_VERSION = 3;
+export const API_VERSION = 4;
 /** 서버가 아직 이해하는 가장 오래된 클라이언트 계약 — 비파괴 업그레이드는
  *  API_VERSION만 올리고 이 값은 유지해, 직전 CLI가 exit 5로 죽지 않게 한다. */
 export const MIN_API_VERSION = 3;
@@ -49,6 +49,8 @@ export const CMD = {
   AGENT: 0x0f,
   /** Server → client: the config file changed — full values, never a diff. */
   CONFIG: 0x10,
+  /** Server → client: a session's viewer tabs changed — the whole set, never a diff. */
+  VIEW: 0x11,
 } as const;
 
 export type CmdValue = (typeof CMD)[keyof typeof CMD];
@@ -169,3 +171,5 @@ export function payloadText(payload: Uint8Array): string {
 }
 
 export { isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from './meta.js';
+export type { ViewKind, ViewRenderer, ViewPresentation, ViewItem, ViewOpenRequest, ViewerState, ViewChangeEvent } from './viewer.js';
+export { VIEW_MAX_TABS } from './viewer.js';

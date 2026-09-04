@@ -97,6 +97,30 @@ Codex도 Stop hook을 지원한다 (v0.114.0+, `codex_hooks` feature flag 필요
 - `~/.codex/hooks.json`에 Stop 이벤트 등록 (`scripts/ttym-codex-stop-hook.sh`)
 - await 명령은 Claude/Codex 모두 동작. Node.js 내부에서 CR 바이트를 직접 전송하므로 shell escaping 문제 없음.
 
+## 뷰어 (`ttym open`)
+
+pane 안에서 파일·URL을 연다. macOS `open` 대체 — 크롬 새 탭이 아니라 그 pane의 헤더 탭으로 붙는다.
+
+```sh
+ttym open report.html                    # 이 pane. 경로는 CLI cwd 기준
+ttym open a.md b.csv --full              # 여러 개 = 탭 여러 개. --full은 workspace 전체 덮기
+ttym open out.html --to :reviewer        # 다른 pane
+ttym open dist/                          # 디렉터리. index.html 있으면 사이트로
+ttym open --root dist dist/app/x.html    # 파일 탭의 권한을 dist/** 로 넓힘
+ttym open http://localhost:9003          # URL은 iframe 그대로
+ttym view list  [--to <addr>]
+ttym view close (<target> | --id <vid> | --all)
+```
+
+- 같은 target을 다시 열면 새 탭이 아니라 그 탭 재로드(rev+1). 에이전트가 "다시 만들었다"를 같은 명령으로 말한다.
+- renderer는 서버가 확장자로 정한다: html·pdf·url → iframe(sandbox), md → markdown, csv·tsv·jsonl → 표,
+  json, 코드, 이미지, 디렉터리 목록.
+- 파일 탭이 서빙하는 범위는 **그 파일 + 부모 폴더의 정적 자산(png/css/js/폰트…)뿐**. `.json`·`.env`·`.txt`는 403.
+  넓히려면 디렉터리를 열거나 `--root`. 근거·구조는 docs/local/260904_viewer-plan.md.
+- 상태: `~/.ttym/<runtime>/viewer.json` (server/src/viewer/). meta annotation이 아니다 — PATCH로 우회 못 하게.
+  push는 CMD.VIEW(0x11), 전체 스냅샷. active 탭·pane/full·스크롤은 클라이언트(localStorage).
+- 콘텐츠는 `/view/<cap>/…` (cap = 128bit 토큰, GET/HEAD, 읽기 전용 CORS). 제어는 `/api/sessions/:id/views`.
+
 ## 작업 지도 (map)
 
 메인 화면의 두 번째 모드(settings → main view → map). 세션별 AI 요약 + workspace 줄기 배치.
