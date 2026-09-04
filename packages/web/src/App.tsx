@@ -27,6 +27,8 @@ import { ViewerPanel } from './viewer/ViewerPanel.js';
 import { ViewerOverlay } from './viewer/ViewerOverlay.js';
 import { viewSrc } from './viewer/content.js';
 import { PaneTabs } from './viewer/PaneTabs.js';
+import { SelectionOpen, type SelectionTarget } from './viewer/SelectionOpen.js';
+import { parsePathCandidate } from './viewer/paths.js';
 import type { ViewerFocus } from './route.js';
 
 /** crypto.randomUUID fallback for non-secure contexts (HTTP over LAN) */
@@ -746,6 +748,28 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
   }, [open?.sid, open?.vid]);
   /** 헤더의 ⟳ — 뷰어 탭 본문을 다시 마운트한다. 세션별 카운터면 충분하다. */
   const [viewerReload, setViewerReload] = useState<Record<number, number>>({});
+  /** 터미널에서 경로를 선택했을 때 뜨는 open 버튼. 한 번에 하나. */
+  const [selOpen, setSelOpen] = useState<SelectionTarget | null>(null);
+  /** ~ 를 풀 홈 디렉터리 — 서버가 안 알려주므로 세션 cwd에서 /Users/x · /home/x 를 읽는다. */
+  const homeDir = useMemo(() => {
+    for (const cwd of Object.values(sessionCwds)) {
+      const m = /^(\/Users\/[^/]+|\/home\/[^/]+)(?:\/|$)/.exec(cwd);
+      if (m) return m[1]!;
+    }
+    return undefined;
+  }, [sessionCwds]);
+  const offerSelection = useCallback((sid: number, e: React.MouseEvent<HTMLDivElement>) => {
+    const pane = e.currentTarget;
+    const px = e.clientX; const py = e.clientY;
+    // 선택은 mouseup 뒤에 확정된다 — 한 틱 늦게 읽는다.
+    setTimeout(() => {
+      const text = getHost(sid)?.term.getSelection() ?? '';
+      const candidate = parsePathCandidate(text, sessionCwds[sid], homeDir);
+      if (!candidate) { setSelOpen((cur) => (cur?.sid === sid ? null : cur)); return; }
+      const rect = pane.getBoundingClientRect();
+      setSelOpen({ sid, x: px - rect.left, y: py - rect.top, candidate, text });
+    }, 0);
+  }, [sessionCwds, homeDir]);
 
   // pane이 사라졌는데 zen에 남아 있으면 빈 화면에 갇힌다. 주소도 같이 되돌린다.
   useEffect(() => {
@@ -1005,7 +1029,8 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
       <div
         key={sid}
         data-pane-sid={sid}
-        onMouseDown={() => { setFocusedSid(sid); setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; }); }}
+        onMouseDown={() => { setFocusedSid(sid); setSelOpen(null); setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; }); }}
+        onMouseUp={(e) => { if (paneTab === 'term' && e.button === 0) offerSelection(sid, e); }}
         onDragOver={(e) => {
           // 파일 드래그만 받는다 — 헤더의 pane 교환 드래그는 Files 타입이 없다.
           if (!e.dataTransfer.types.includes('Files')) return;
@@ -1067,6 +1092,17 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
             <span onClick={() => { const h = getHost(sid); h?.findNext(search.query); }} style={{ cursor: 'pointer', color: 'var(--text-soft)' }}>↓</span>
             <span onClick={() => { const h = getHost(sid); h?.clearSearch(); h?.focusTerminal(); setSearch(null); }} style={{ cursor: 'pointer', color: 'var(--text-dim)' }}>✕</span>
           </div>
+        ) : null}
+        {selOpen?.sid === sid ? (
+          <SelectionOpen
+            target={selOpen}
+            onDismiss={() => setSelOpen((cur) => (cur?.sid === sid ? null : cur))}
+            onOpen={async (candidate) => {
+              const results = await viewer.open(sid, [candidate.target], undefined, candidate.line !== undefined ? { line: candidate.line, col: candidate.col } : undefined);
+              const r = results[0];
+              return r && !r.ok ? r.error.replace(/^not found: .*$/, 'not found') : null;
+            }}
+          />
         ) : null}
         <div
           className="reveal-parent"
@@ -1216,6 +1252,7 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
               activeId={paneItem.id}
               chrome="none"
               reloadKey={viewerReload[sid] ?? 0}
+              jump={viewer.jump[sid]}
               onSelect={(vid) => viewer.setActive(sid, vid)}
               onClose={(vid) => void viewer.close(sid, vid)}
               onCloseAll={() => void viewer.closeAll(sid)}
@@ -1227,7 +1264,7 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane, viewer, open, viewerReload, openFull]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane, viewer, open, viewerReload, openFull, selOpen, offerSelection]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
@@ -1319,6 +1356,7 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
           onClose={(vid) => void viewer.close(open.sid, vid)}
           onCloseAll={() => void viewer.closeAll(open.sid)}
           onOpen={(targets) => void viewer.open(open.sid, targets)}
+          jump={viewer.jump[open.sid]}
           onExit={exitFull}
         />
       ) : null}

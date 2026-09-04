@@ -59,6 +59,9 @@ export interface HostOptions {
 }
 
 const registry = new Map<number, TerminalHost>();
+// Automation hook: the WebGL renderer leaves no text in the DOM, so a script
+// that wants to select or read a pane has to go through the host itself.
+if (typeof window !== 'undefined') (window as unknown as { __ttymHosts?: Map<number, TerminalHost> }).__ttymHosts = registry;
 
 // A refresh mounts every visible pane in the same tick; letting them all
 // attach at once stacks N snapshot parses on one main-thread frame. The

@@ -19,7 +19,7 @@ import './viewer.css';
  * Only the active tab is mounted. Ten tabs of three.js in one pane would
  * otherwise all be running.
  */
-export function ViewerPanel({ sid, state, activeId, onSelect, onClose, onCloseAll, onOpen, onFull, onPane, mode, chrome = 'tabs', reloadKey = 0 }: {
+export function ViewerPanel({ sid, state, activeId, onSelect, onClose, onCloseAll, onOpen, onFull, onPane, mode, chrome = 'tabs', reloadKey = 0, jump }: {
   sid: number;
   state: ViewerState;
   activeId: string | null;
@@ -35,6 +35,8 @@ export function ViewerPanel({ sid, state, activeId, onSelect, onClose, onCloseAl
   chrome?: 'tabs' | 'none';
   /** Bumped by the host to remount the active view. */
   reloadKey?: number;
+  /** Land on this line when the active tab is the one it names (from `a.ts:12` selections). */
+  jump?: { vid: string; line: number; col?: number; nonce: number };
 }) {
   const items = state.items;
   const item = items.find((i) => i.id === activeId) ?? items[items.length - 1] ?? null;
@@ -56,19 +58,19 @@ export function ViewerPanel({ sid, state, activeId, onSelect, onClose, onCloseAl
     <div className="viewer-panel" data-viewer-sid={sid}>
       {chrome === 'tabs' ? <ViewerTabs items={items} activeId={item?.id ?? null} onSelect={onSelect} onClose={onClose} trailing={trailing} /> : null}
       <div className="viewer-body">
-        {item ? <ViewBody key={`${item.id}:${item.rev}:${reloadNonce}:${reloadKey}`} item={item} onOpen={onOpen} /> : null}
+        {item ? <ViewBody key={`${item.id}:${item.rev}:${reloadNonce}:${reloadKey}`} item={item} onOpen={onOpen} jump={jump && jump.vid === item.id ? jump : undefined} /> : null}
       </div>
     </div>
   );
 }
 
-function ViewBody({ item, onOpen }: { item: ViewItem; onOpen: (targets: string[]) => void }) {
+function ViewBody({ item, onOpen, jump }: { item: ViewItem; onOpen: (targets: string[]) => void; jump?: { line: number; col?: number; nonce: number } }) {
   switch (item.renderer) {
     case 'frame': return <FrameView item={item} />;
     case 'markdown': return <MarkdownView item={item} />;
     case 'table': return <TableView item={item} />;
     case 'json': return <JsonView item={item} />;
-    case 'code': return <CodeView item={item} />;
+    case 'code': return <CodeView item={item} jump={jump} />;
     case 'image': return <ImageView item={item} />;
     case 'dir': return <DirView item={item} onOpen={onOpen} />;
   }

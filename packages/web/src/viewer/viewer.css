@@ -93,6 +93,19 @@
 .viewer-code .ln { display: block; padding-right: 16px; white-space: pre; }
 .viewer-code .ln::before { counter-increment: line; content: counter(line); display: inline-block; width: 3.5em; text-align: right; margin-right: 1.2em; padding-right: .8em; color: var(--text-dim); border-right: 1px solid var(--line); user-select: none; }
 .viewer-code .trunc { color: var(--text-dim); font-style: italic; }
+.viewer-code .ln.hit { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* "open" button over a selected path in the terminal */
+.sel-open {
+  position: absolute; z-index: 20; display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: 6px; background: var(--bg2); border: 1px solid var(--line-strong);
+  color: var(--text); font-family: var(--mono); font-size: 11px; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  user-select: none; white-space: nowrap; max-width: 60%;
+}
+.sel-open:hover { border-color: var(--accent); }
+.sel-open .path { color: var(--cwd); overflow: hidden; text-overflow: ellipsis; }
+.sel-open .key { color: var(--text-dim); }
+.sel-open.err { color: var(--err); cursor: default; }
 
 .viewer-json { margin: 0; padding: 12px 16px 40px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text); white-space: pre; }
 .viewer-json .jk { color: var(--ok); } .viewer-json .js { color: var(--accent); } .viewer-json .jn { color: var(--warn); } .viewer-json .jb { color: var(--err); } .viewer-json .jnull { color: var(--text-dim); }

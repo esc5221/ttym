@@ -25,8 +25,13 @@ export interface ViewerHook {
   setActive: (sid: number, vid: string) => void;
   close: (sid: number, vid: string) => Promise<void>;
   closeAll: (sid: number) => Promise<void>;
-  open: (sid: number, targets: string[], presentation?: ViewPresentation) => Promise<void>;
+  open: (sid: number, targets: string[], presentation?: ViewPresentation, at?: { line: number; col?: number }) => Promise<OpenOutcome[]>;
+  /** A line to land on, per session, for the tab an `open` just produced. Client-only; nonce forces a re-scroll. */
+  jump: Record<number, ViewJump>;
 }
+
+export interface ViewJump { vid: string; line: number; col?: number; nonce: number }
+export type OpenOutcome = { target: string; ok: true; id: string } | { target: string; ok: false; error: string };
 
 export function useViewerState(
   mux: TerminalMux,
@@ -35,6 +40,7 @@ export function useViewerState(
 ): ViewerHook {
   const [states, setStates] = useState<Record<number, ViewerState | null>>({});
   const [active, setActiveMap] = useState<Record<number, string>>({});
+  const [jump, setJump] = useState<Record<number, ViewJump>>({});
   const seenSerial = useRef<Map<number, number>>(new Map());
   const presentRef = useRef(onPresent);
   presentRef.current = onPresent;
@@ -115,14 +121,19 @@ export function useViewerState(
     try { await api.closeAllViews(API_BASE, sid); accept(sid, null); } catch {}
   }, [accept]);
 
-  const open = useCallback(async (sid: number, targets: string[], presentation?: ViewPresentation) => {
+  const open = useCallback(async (sid: number, targets: string[], presentation?: ViewPresentation, at?: { line: number; col?: number }): Promise<OpenOutcome[]> => {
     try {
-      const { state } = await api.openViews(API_BASE, sid, { targets, presentation });
+      const { state, results } = await api.openViews(API_BASE, sid, { targets, presentation });
       accept(sid, state);
-    } catch {}
+      const first = results.find((r) => r.ok);
+      if (at && first && first.ok) setJump((prev) => ({ ...prev, [sid]: { vid: first.id, line: at.line, col: at.col, nonce: (prev[sid]?.nonce ?? 0) + 1 } }));
+      return results.map((r) => (r.ok ? { target: r.target, ok: true, id: r.id } : { target: r.target, ok: false, error: r.error }));
+    } catch (e) {
+      return targets.map((target) => ({ target, ok: false, error: String((e as Error).message ?? e) }));
+    }
   }, [accept]);
 
-  return { states, active, setActive, close, closeAll, open };
+  return { states, active, setActive, close, closeAll, open, jump };
 }
 
 function readActive(sid: number): string | null {

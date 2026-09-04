@@ -1,5 +1,5 @@
 import { useScrollMemory } from '../useScrollMemory.js';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ViewItem } from '@ttym/api';
 import { completeLines, fetchText, humanSize, viewSrc } from '../content.js';
 import { highlightHtml, languageFor, splitHighlightedLines } from '../highlight.js';
@@ -9,8 +9,10 @@ const MAX_LINES = 10_000;
 const HIGHLIGHT_MAX_BYTES = 512 * 1024;
 
 /** Text with line numbers, coloured by the file's grammar when one is known (see highlight.ts). */
-export function CodeView({ item }: { item: ViewItem }) {
+export function CodeView({ item, jump }: { item: ViewItem; jump?: { line: number; col?: number; nonce: number } }) {
   const scrollRef = useScrollMemory(item.cap ?? item.id);
+  const preRef = useRef<HTMLPreElement | null>(null);
+  const [hit, setHit] = useState<number | null>(null);
   const [data, setData] = useState<{ lines: string[]; html: string[] | null; lang: string | null; total: number; partial: boolean; all: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,6 +39,17 @@ export function CodeView({ item }: { item: ViewItem }) {
     return () => { cancelled = true; };
   }, [item.cap, item.rev]);
 
+  // `a.ts:12` from the terminal: scroll the line into the middle and flash it.
+  useEffect(() => {
+    if (!jump || !data) return;
+    const el = preRef.current?.children[jump.line - 1] as HTMLElement | undefined;
+    if (!el) return;
+    el.scrollIntoView({ block: 'center' });
+    setHit(jump.line);
+    const t = setTimeout(() => setHit(null), 1800);
+    return () => clearTimeout(t);
+  }, [jump?.nonce, data !== null]);
+
   if (error) return <div className="viewer-empty viewer-error">{error}</div>;
   if (!data) return <div className="viewer-empty">loading…</div>;
   const note = data.partial
@@ -45,10 +58,10 @@ export function CodeView({ item }: { item: ViewItem }) {
   return (
     <div className="viewer-scroll" ref={scrollRef}>
       <div className="viewer-note">{note}{data.lang ? <span className="viewer-note-lang">{data.lang}</span> : null}</div>
-      <pre className="viewer-code">
+      <pre className="viewer-code" ref={preRef}>
         {data.html
-          ? data.html.map((line, i) => <span key={i} className="ln" dangerouslySetInnerHTML={{ __html: line + '\n' }} />)
-          : data.lines.map((line, i) => <span key={i} className="ln">{line}{'\n'}</span>)}
+          ? data.html.map((line, i) => <span key={i} className={`ln${hit === i + 1 ? ' hit' : ''}`} dangerouslySetInnerHTML={{ __html: line + '\n' }} />)
+          : data.lines.map((line, i) => <span key={i} className={`ln${hit === i + 1 ? ' hit' : ''}`}>{line}{'\n'}</span>)}
         {data.all > data.lines.length ? <span className="ln trunc">… {(data.all - data.lines.length).toLocaleString()} more lines</span> : null}
       </pre>
     </div>

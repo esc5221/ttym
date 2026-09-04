@@ -8,7 +8,7 @@ import { ViewerPanel } from './ViewerPanel.js';
  * viewer is not a terminal. The bar names the pane so the reader knows
  * whose tab they are looking at.
  */
-export function ViewerOverlay({ sid, name, state, activeId, onSelect, onClose, onCloseAll, onOpen, onExit }: {
+export function ViewerOverlay({ sid, name, state, activeId, onSelect, onClose, onCloseAll, onOpen, onExit, jump }: {
   sid: number;
   name?: string;
   state: ViewerState;
@@ -18,6 +18,7 @@ export function ViewerOverlay({ sid, name, state, activeId, onSelect, onClose, o
   onCloseAll: () => void;
   onOpen: (targets: string[]) => void;
   onExit: () => void;
+  jump?: { vid: string; line: number; col?: number; nonce: number };
 }) {
   return createPortal(
     <div className="viewer-overlay">
@@ -35,6 +36,7 @@ export function ViewerOverlay({ sid, name, state, activeId, onSelect, onClose, o
           onCloseAll={() => { onCloseAll(); onExit(); }}
           onOpen={onOpen}
           onPane={onExit}
+          jump={jump}
           mode="full"
         />
       </div>
