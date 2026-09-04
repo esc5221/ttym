@@ -26,6 +26,7 @@ import { useViewerState } from './viewer/useViewerState.js';
 import { ViewerPanel } from './viewer/ViewerPanel.js';
 import { ViewerOverlay } from './viewer/ViewerOverlay.js';
 import { viewSrc } from './viewer/content.js';
+import { PaneTabs } from './viewer/PaneTabs.js';
 import type { ViewerFocus } from './route.js';
 
 /** crypto.randomUUID fallback for non-secure contexts (HTTP over LAN) */
@@ -1085,16 +1086,17 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
           onDrop={(e) => { e.preventDefault(); if (dragSid !== null && dragSid !== sid) commitSwap(dragSid, sid); setDragSid(null); }}
           title="drag: swap"
         >
+          {/* 터미널 탭 = 이름·#id (절대 안 줄어든다) + cwd (탭에 자리를 먼저 내준다). 두 형제로 나눈
+              이유: 한 덩어리로 두면 flex가 덩어리째 줄여 이름까지 사라진다 — 탭 10개에서 실측. */}
           <span
             className={`pane-tab pane-tab-term${paneTab === 'term' ? ' on' : ''}`}
             onClick={() => { if (paneTab !== 'term') viewer.setActive(sid, 'term'); }}
             onDoubleClick={() => setZoomedSid((z) => (z === sid ? null : sid))}
             title={paneTab === 'term' ? 'double-click: zoom' : 'back to the terminal'}
             style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 10px',
+              display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 0 2px 10px',
+              flexShrink: 0, height: '100%',
               // frame: 포커스 신호는 텍스트 밝기 하나. classic: 바 배경이 말한다.
-              flexGrow: viewerState ? 0 : 1, flexShrink: 1, minWidth: 0, overflow: 'hidden',
-              height: '100%',
               opacity: U.headerBar ? 1 : isFocused ? 1 : 0.45,
             }}
           >
@@ -1109,42 +1111,44 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
               {name || `#${sid}`}
             </span>
             {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)', flexShrink: 0 }}>#{sid}</span> : null}
+          </span>
+          <span
+            onClick={() => { if (paneTab !== 'term') viewer.setActive(sid, 'term'); }}
+            onDoubleClick={() => setZoomedSid((z) => (z === sid ? null : sid))}
+            title={cwd}
+            style={{
+              flexGrow: viewerState ? 0 : 1, flexShrink: viewerState ? 4 : 1, minWidth: 0, overflow: 'hidden',
+              padding: '2px 10px 2px 6px', height: '100%', display: 'inline-flex', alignItems: 'center',
+              opacity: U.headerBar ? 1 : isFocused ? 1 : 0.45,
+            }}
+          >
             {cwd ? (
-              <span style={{ color: 'var(--cwd)', fontSize: 10, fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }} title={cwd}>
+              <span style={{ color: 'var(--cwd)', fontSize: 10, fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                 {formatCwd(cwd)}
               </span>
             ) : null}
           </span>
           {viewerState ? (
-            <span className="pane-tabs" onDoubleClick={(e) => e.stopPropagation()}>
-              {viewerState.items.map((item) => (
-                <span
-                  key={item.id}
-                  className={`pane-tab${item.id === paneTab ? ' on' : ''}`}
-                  onClick={(e) => { e.stopPropagation(); viewer.setActive(sid, item.id); }}
-                  title={item.target}
-                >
-                  <span className="pane-tab-label">{item.name}</span>
-                  <button className="pane-tab-x" onClick={(e) => { e.stopPropagation(); void viewer.close(sid, item.id); }} title="close tab">×</button>
-                </span>
-              ))}
-            </span>
+            <PaneTabs
+              items={viewerState.items}
+              activeId={paneTab === 'term' ? null : paneTab}
+              onSelect={(vid) => viewer.setActive(sid, vid)}
+              onClose={(vid) => void viewer.close(sid, vid)}
+              // 항상 보이는 우측 버튼(⟳ ↗ full · ×)이 absolute라 그만큼 스트립 오른쪽을 비운다.
+              reserveRight={paneItem ? 124 : 8}
+            />
           ) : null}
           <span style={{
             position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
             display: 'inline-flex', alignItems: 'center', gap: 6, zIndex: 2,
+            // hover로 펼쳐지는 버튼들은 탭 끝을 잠깐 덮는다 — cwd를 덮던 것과 같은 규칙. 바탕은 깔지
+            // 않는다: 투명한 버튼도 폭을 차지해서, 바탕이 있으면 hover 전에도 탭을 가린다(실측).
           }}>
             {bells.has(sid) ? (
               <span title="bell" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)', boxShadow: '0 0 6px var(--warn)', flexShrink: 0 }} />
             ) : null}
             {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'var(--mono)' }}>zoom</span> : null}
-            {paneItem ? (
-              <>
-                <button onClick={(e) => { e.stopPropagation(); setViewerReload((prev) => ({ ...prev, [sid]: (prev[sid] ?? 0) + 1 })); }} style={miniLinkBtnStyle} title="reload">⟳</button>
-                <a href={viewSrc(paneItem)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={miniLinkBtnStyle} title="open in a browser tab">↗</a>
-                <button onClick={(e) => { e.stopPropagation(); openFull(sid, paneItem.id); }} style={miniLinkBtnStyle} title="fill the workspace">full</button>
-              </>
-            ) : null}
+
             {canRestore ? (
               <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="resume last agent session">restore</button>
             ) : null}
@@ -1166,6 +1170,13 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
             ) : null}
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={miniLinkBtnStyle} title="detach · session keeps running">detach</button>
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void copySessionUrl(sid); }} style={miniLinkBtnStyle}>copy</button>
+            {paneItem ? (
+              <>
+                <button onClick={(e) => { e.stopPropagation(); setViewerReload((prev) => ({ ...prev, [sid]: (prev[sid] ?? 0) + 1 })); }} style={miniLinkBtnStyle} title="reload">⟳</button>
+                <a href={viewSrc(paneItem)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={miniLinkBtnStyle} title="open in a browser tab">↗</a>
+                <button onClick={(e) => { e.stopPropagation(); openFull(sid, paneItem.id); }} style={miniLinkBtnStyle} title="fill the workspace">full</button>
+              </>
+            ) : null}
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
           </span>
         </div>

@@ -21,20 +21,32 @@
 .viewer-tab-x:hover { color: var(--err); background: var(--bg3); }
 .viewer-tabs-trailing { display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; flex-shrink: 0; }
 
-/* pane header tabs: the terminal is the first tab, viewer tabs follow */
-.pane-tabs { display: inline-flex; align-items: stretch; height: 100%; min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; margin-right: 8px; }
-.pane-tabs::-webkit-scrollbar { display: none; }
+/* pane header tabs: the terminal is the first tab, viewer tabs follow (rules in PaneTabs.tsx) */
+.pane-tabs { display: inline-flex; align-items: stretch; height: 100%; min-width: 0; flex: 1 1 auto; }
+.pane-tabs-scroll { display: inline-flex; align-items: stretch; height: 100%; min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: none; }
+.pane-tabs-scroll::-webkit-scrollbar { display: none; }
+.pane-tabs-scroll.fade-l { mask-image: linear-gradient(90deg, transparent, #000 18px); }
+.pane-tabs-scroll.fade-r { mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
+.pane-tabs-scroll.fade-l.fade-r { mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 18px), transparent); }
 .pane-tab { cursor: pointer; }
 .pane-tab-term.on { cursor: default; }
-.pane-tabs .pane-tab {
-  display: inline-flex; align-items: center; gap: 3px; padding: 0 3px 0 9px; height: 100%; white-space: nowrap; max-width: 200px;
+.pane-tabs-scroll .pane-tab {
+  display: inline-flex; align-items: center; height: 100%; white-space: nowrap;
+  flex: 1 1 0; box-sizing: border-box; padding: 0 4px 0 9px; position: relative;
   color: var(--text-dim); font-family: var(--mono); font-size: 11px; border-left: 1px solid var(--line);
 }
-.pane-tabs .pane-tab:hover { color: var(--text-soft); background: var(--bg3); }
-.pane-tabs .pane-tab.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
-.pane-tab-label { overflow: hidden; text-overflow: ellipsis; }
-.pane-tab-x { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 4px; border-radius: 3px; font-family: var(--mono); }
+.pane-tabs-scroll .pane-tab:hover { color: var(--text-soft); background: var(--bg3); }
+.pane-tabs-scroll .pane-tab.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.pane-tab-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pane-tab-x {
+  flex: 0 0 auto; background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 0 4px; margin-left: 2px; border-radius: 3px; font-family: var(--mono);
+}
 .pane-tab-x:hover { color: var(--err); background: var(--bg3); }
+/* narrow tabs: × only where it cannot be hit by accident — the active tab, or the one under the pointer */
+.pane-tabs-scroll.compact .pane-tab:not(.on):not(:hover) .pane-tab-x { display: none; }
+.pane-tabs-scroll.compact .pane-tab:not(.on):hover .pane-tab-x { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); background: var(--bg3); }
+@media (hover: none) { .pane-tabs-scroll .pane-tab:not(.on) .pane-tab-x { display: none; } }
 
 /* zen side-by-side */
 .viewer-splitter { height: 5px; flex-shrink: 0; cursor: row-resize; background: var(--line); opacity: .6; }
