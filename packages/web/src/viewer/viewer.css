@@ -128,3 +128,33 @@
   --accent: #0969da; --hl: rgba(0, 0, 0, .04);
   background: var(--bg0);
 }
+
+/* syntax colour — one palette, two bindings. Dark values sit on :root, light on the app's
+   light theme and on the markdown light page, so a fence inside a light .md matches. */
+:root {
+  --syn-comment: #7d8590; --syn-keyword: #c792ea; --syn-string: #a5d6a7; --syn-number: #f0b040;
+  --syn-fn: #82aaff; --syn-type: #ffcb6b; --syn-var: #e0e0e0; --syn-attr: #89ddff; --syn-tag: #f07178;
+  --syn-meta: #7ec8e8; --syn-add: #0dbc79; --syn-del: #f14c4c;
+}
+:root[data-theme='light'], .viewer-md-light {
+  --syn-comment: #6e7781; --syn-keyword: #8250df; --syn-string: #0a7d3a; --syn-number: #953800;
+  --syn-fn: #0550ae; --syn-type: #b35900; --syn-var: #24292f; --syn-attr: #0969da; --syn-tag: #cf222e;
+  --syn-meta: #1f7fae; --syn-add: #1a7f37; --syn-del: #cf222e;
+}
+.viewer-note-lang { margin-left: auto; color: var(--text-dim); }
+.hljs-comment, .hljs-quote { color: var(--syn-comment); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-doctag, .hljs-formula { color: var(--syn-keyword); }
+.hljs-string, .hljs-regexp, .hljs-template-tag, .hljs-symbol { color: var(--syn-string); }
+.hljs-number, .hljs-bullet, .hljs-link { color: var(--syn-number); }
+.hljs-title, .hljs-title.function_, .hljs-section, .hljs-name { color: var(--syn-fn); }
+.hljs-type, .hljs-title.class_, .hljs-built_in, .hljs-class .hljs-title { color: var(--syn-type); }
+.hljs-variable, .hljs-template-variable, .hljs-params, .hljs-property, .hljs-operator, .hljs-punctuation { color: var(--syn-var); }
+.hljs-attr, .hljs-attribute, .hljs-selector-attr, .hljs-selector-pseudo, .hljs-selector-id, .hljs-selector-class, .hljs-char.escape_ { color: var(--syn-attr); }
+.hljs-tag { color: var(--syn-tag); }
+.hljs-tag .hljs-name { color: var(--syn-tag); }
+.hljs-tag .hljs-attr { color: var(--syn-attr); }
+.hljs-meta, .hljs-meta .hljs-keyword, .hljs-subst { color: var(--syn-meta); }
+.hljs-addition { color: var(--syn-add); background: color-mix(in srgb, var(--syn-add) 12%, transparent); }
+.hljs-deletion { color: var(--syn-del); background: color-mix(in srgb, var(--syn-del) 12%, transparent); }
+.hljs-emphasis { font-style: italic; } .hljs-strong { font-weight: 700; }
+.viewer-md pre code .hljs-comment { font-style: italic; }

@@ -2,6 +2,7 @@ import { useScrollMemory } from '../useScrollMemory.js';
 import { useEffect, useState } from 'react';
 import type { ViewItem } from '@ttym/api';
 import { fetchText, humanSize, viewBase, viewSrc } from '../content.js';
+import { highlightHtml, languageForTag } from '../highlight.js';
 
 /**
  * Markdown, rendered here in the app's own type and colours. The parser
@@ -31,7 +32,18 @@ export function MarkdownView({ item }: { item: ViewItem }) {
         if (cancelled) return;
         const raw = marked.parse(res.text, { gfm: true, breaks: true }) as string;
         const clean = DOMPurify.sanitize(raw, { ADD_ATTR: ['target'] });
-        setHtml(rebase(clean, viewBase(item)));
+        const doc = rebase(clean, viewBase(item));
+        // Fences carry their tag as `language-xxx`; colour those we have a grammar for.
+        // hljs escapes its own output, and the text it reads is already sanitised.
+        for (const code of Array.from(doc.querySelectorAll('pre > code'))) {
+          const tag = Array.from(code.classList).find((c) => c.startsWith('language-'))?.slice('language-'.length) ?? '';
+          const lang = languageForTag(tag);
+          if (!lang) continue;
+          const colored = await highlightHtml(code.textContent ?? '', lang);
+          if (cancelled) return;
+          if (colored !== null) code.innerHTML = colored;
+        }
+        setHtml(doc.body.innerHTML);
         if (res.partial) setNote(`preview — first ${humanSize(res.text.length)} of ${humanSize(res.total)}`);
       } catch (e) {
         if (!cancelled) setError(String((e as Error).message ?? e));
@@ -54,7 +66,7 @@ export function MarkdownView({ item }: { item: ViewItem }) {
 }
 
 /** Point relative src/href at the tab's base; leave absolute and anchor links alone. Links open outside. */
-function rebase(html: string, base: string): string {
+function rebase(html: string, base: string): Document {
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const isRelative = (v: string) => v && !/^(?:[a-z]+:|\/|#)/i.test(v);
   for (const img of Array.from(doc.querySelectorAll('img[src]'))) {
@@ -68,5 +80,5 @@ function rebase(html: string, base: string): string {
     a.setAttribute('target', '_blank');
     a.setAttribute('rel', 'noreferrer');
   }
-  return doc.body.innerHTML;
+  return doc;
 }
