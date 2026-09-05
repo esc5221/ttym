@@ -23,6 +23,8 @@ export interface ViewerHttpDeps {
   store: ViewerStore;
   service: ViewerService;
   sessionExists: (sessionId: number) => boolean;
+  /** The session's cwd, for suffix matching a path that does not exist. */
+  sessionCwd: (sessionId: number) => Promise<string | undefined>;
   json: (status: number, body: unknown) => void;
   readBody: () => Promise<string>;
   log?: (...args: unknown[]) => void;
@@ -47,14 +49,15 @@ export function handleViewerApi(req: IncomingMessage, path: string, deps: Viewer
   if (!itemId && req.method === 'POST') {
     deps.readBody().then(async (body) => {
       if (body.length > BODY_MAX_BYTES) { json(413, { error: 'body too large' }); return; }
-      let parsed: { targets?: unknown; presentation?: unknown; root?: unknown };
+      let parsed: { targets?: unknown; presentation?: unknown; root?: unknown; cwd?: unknown };
       try { parsed = JSON.parse(body); } catch { json(400, { error: 'invalid body' }); return; }
       const targets = Array.isArray(parsed.targets) ? parsed.targets.filter((t): t is string => typeof t === 'string') : [];
       if (targets.length === 0) { json(400, { error: 'targets required' }); return; }
       const presentation: ViewPresentation | undefined = parsed.presentation === 'full' ? 'full' : parsed.presentation === 'pane' ? 'pane' : undefined;
       const root = typeof parsed.root === 'string' && parsed.root.startsWith('/') ? parsed.root : undefined;
-      const { state, results } = await service.open(sessionId, targets, { presentation, root });
-      deps.log?.(`VIEW open session=${sessionId} ${results.map((r) => (r.ok ? `${r.id}:${r.rev}` : `!${r.error}`)).join(' ')}`);
+      const cwd = typeof parsed.cwd === 'string' && parsed.cwd.startsWith('/') ? parsed.cwd : await deps.sessionCwd(sessionId);
+      const { state, results } = await service.open(sessionId, targets, { presentation, root, cwd });
+      deps.log?.(`VIEW open session=${sessionId} ${results.map((r) => (r.ok ? `${r.id}:${r.rev}${r.matched ? ` matched=${r.matched} for=${r.target}` : ''}` : `!${r.error}`)).join(' ')}`);
       const anyOk = results.some((r) => r.ok);
       json(anyOk ? 200 : 404, { state: state ? toPublicState(state) : null, results });
     }).catch(() => json(500, { error: 'open failed' }));

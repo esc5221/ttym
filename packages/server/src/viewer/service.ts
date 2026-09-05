@@ -24,15 +24,18 @@ import { basename, dirname, extname, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { VIEW_MAX_TABS, type ViewPresentation, type ViewRenderer } from '@ttym/protocol';
 import { ViewerStore, type StoredItem, type StoredState, type ViewScope } from './store.js';
+import { findNearest, describeNearest } from './nearest.js';
 
 export interface OpenOptions {
   presentation?: ViewPresentation;
   /** Absolute directory; widens file tabs to this subtree. Must contain the file. */
   root?: string;
+  /** The pane's cwd — the fallback root when a path does not exist and its tail is searched for. */
+  cwd?: string;
 }
 
 export type OpenResult =
-  | { target: string; ok: true; id: string; rev: number }
+  | { target: string; ok: true; id: string; rev: number; /** set when the tab is a suffix match, not the path as given */ matched?: string }
   | { target: string; ok: false; error: string };
 
 const RENDERER_BY_EXT: Record<string, ViewRenderer> = {
@@ -84,10 +87,11 @@ function newCap(): string {
   return randomBytes(16).toString('hex');
 }
 
-type Classified =
+type Classified = (
   | { kind: 'url'; target: string; name: string; renderer: 'frame' }
   | { kind: 'file'; target: string; name: string; renderer: ViewRenderer; root: string; scope: ViewScope }
-  | { kind: 'dir'; target: string; name: string; renderer: ViewRenderer; root: string; scope: 'tree' };
+  | { kind: 'dir'; target: string; name: string; renderer: ViewRenderer; root: string; scope: 'tree' }
+) & { matched?: string };
 
 async function classify(raw: string, opts: OpenOptions): Promise<{ ok: true; value: Classified } | { ok: false; error: string }> {
   const text = String(raw ?? '').trim();
@@ -100,14 +104,21 @@ async function classify(raw: string, opts: OpenOptions): Promise<{ ok: true; val
   }
   if (!text.startsWith('/')) return { ok: false, error: `path must be absolute: ${text}` };
   let real: string;
-  try { real = await realpath(text); } catch { return { ok: false, error: `not found: ${text}` }; }
+  let matched: string | undefined;
+  try { real = await realpath(text); } catch {
+    // The path as given is not there. Its tail usually is — see nearest.ts.
+    const near = await findNearest(text, opts.cwd);
+    if (near.kind !== 'hit') return { ok: false, error: describeNearest(near, text) };
+    real = near.path;
+    matched = real;
+  }
   let info;
   try { info = await stat(real); } catch { return { ok: false, error: `not found: ${text}` }; }
 
   if (info.isDirectory()) {
     let hasIndex = false;
     try { hasIndex = (await stat(`${real}/index.html`)).isFile(); } catch {}
-    return { ok: true, value: { kind: 'dir', target: real, name: basename(real) || real, renderer: hasIndex ? 'frame' : 'dir', root: real, scope: 'tree' } };
+    return { ok: true, value: { kind: 'dir', target: real, name: basename(real) || real, renderer: hasIndex ? 'frame' : 'dir', root: real, scope: 'tree', matched } };
   }
   if (!info.isFile()) return { ok: false, error: `not a file or directory: ${text}` };
 
@@ -116,9 +127,9 @@ async function classify(raw: string, opts: OpenOptions): Promise<{ ok: true; val
     let root: string;
     try { root = await realpath(opts.root); } catch { return { ok: false, error: `root not found: ${opts.root}` }; }
     if (!isUnder(real, root)) return { ok: false, error: `${text} is not under --root ${opts.root}` };
-    return { ok: true, value: { kind: 'file', target: real, name: basename(real), renderer, root, scope: 'tree' } };
+    return { ok: true, value: { kind: 'file', target: real, name: basename(real), renderer, root, scope: 'tree', matched } };
   }
-  return { ok: true, value: { kind: 'file', target: real, name: basename(real), renderer, root: dirname(real), scope: 'assets' } };
+  return { ok: true, value: { kind: 'file', target: real, name: basename(real), renderer, root: dirname(real), scope: 'assets', matched } };
 }
 
 export class ViewerService {
@@ -149,7 +160,7 @@ export class ViewerService {
           renderer: next.renderer,
           ...(widened ? { root: next.root, scope: 'tree' } : null),
         };
-        results.push({ target: raw, ok: true, id: prev.id, rev: prev.rev + 1 });
+        results.push({ target: raw, ok: true, id: prev.id, rev: prev.rev + 1, ...(next.matched ? { matched: next.matched } : null) });
         lastItemId = prev.id;
         continue;
       }
@@ -161,7 +172,7 @@ export class ViewerService {
       };
       if (next.kind !== 'url') { item.cap = newCap(); item.root = next.root; item.scope = next.scope; }
       items.push(item);
-      results.push({ target: raw, ok: true, id, rev: 1 });
+      results.push({ target: raw, ok: true, id, rev: 1, ...(next.matched ? { matched: next.matched } : null) });
       lastItemId = id;
     }
 

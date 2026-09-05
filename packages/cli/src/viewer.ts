@@ -67,7 +67,8 @@ export async function cmdOpen() {
   const port = getPort();
   await ensureCompatibleServer(port);
   const { sessionId, label } = await resolveTargetSession(port, args);
-  const body: Record<string, unknown> = { targets: targets.map(absolutize) };
+  // cwd rides along: a path that does not exist as typed is searched for by its tail under here.
+  const body: Record<string, unknown> = { targets: targets.map(absolutize), cwd: process.cwd() };
   if (hasFlag('--full')) body.presentation = 'full';
   else if (hasFlag('--pane')) body.presentation = 'pane';
   const root = readOption(args, '--root');
@@ -78,11 +79,11 @@ export async function cmdOpen() {
     console.error(`open failed: ${data?.error ?? 'no response'}`);
     process.exit(data?.error === 'not found' ? EXIT.NOT_FOUND : EXIT.FAIL);
   }
-  const results: Array<{ target: string; ok: boolean; id?: string; rev?: number; error?: string }> = data.results ?? [];
+  const results: Array<{ target: string; ok: boolean; id?: string; rev?: number; error?: string; matched?: string }> = data.results ?? [];
   if (hasFlag('--json')) return printOutput({ session: label, sessionId, state: data.state, results }, true);
   let failed = 0;
   for (const r of results) {
-    if (r.ok) console.log(`${r.id}  ${r.target}${(r.rev ?? 1) > 1 ? `  (reloaded, rev ${r.rev})` : ''}  → ${label}`);
+    if (r.ok) console.log(`${r.id}  ${r.matched ?? r.target}${(r.rev ?? 1) > 1 ? `  (reloaded, rev ${r.rev})` : ''}  → ${label}${r.matched ? `\n   ↳ matched by tail; asked for ${r.target}` : ''}`);
     else { failed++; console.error(`!  ${r.target}: ${r.error}`); }
   }
   if (failed === results.length) process.exit(EXIT.NOT_FOUND);

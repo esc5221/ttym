@@ -259,6 +259,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
   if (viewer && handleViewerApi(req, path, {
     store: viewer.store, service: viewer.service,
     sessionExists: (id) => !!manager.get(id), json, readBody, log,
+    sessionCwd: async (id) => { const meta = await manager.getMeta(id); return typeof meta.cwd === 'string' ? meta.cwd : undefined; },
   })) return true;
 
   // POST /api/upload?name=<filename> — the web half of file drag-and-drop.

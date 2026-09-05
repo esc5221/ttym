@@ -5,7 +5,7 @@ import type { ViewerState, ViewPresentation } from '@ttym/protocol';
 
 export interface OpenViewsResult {
   state: ViewerState | null;
-  results: Array<{ target: string; ok: true; id: string; rev: number } | { target: string; ok: false; error: string }>;
+  results: Array<{ target: string; ok: true; id: string; rev: number; matched?: string } | { target: string; ok: false; error: string }>;
 }
 
 export function getViews(base: BaseUrl, sessionId: number): Promise<ViewerState | null> {
@@ -15,7 +15,7 @@ export function getViews(base: BaseUrl, sessionId: number): Promise<ViewerState 
 export function openViews(
   base: BaseUrl,
   sessionId: number,
-  options: { targets: string[]; presentation?: ViewPresentation; root?: string },
+  options: { targets: string[]; presentation?: ViewPresentation; root?: string; cwd?: string },
 ): Promise<OpenViewsResult> {
   return request(base, `/api/sessions/${sessionId}/views`, { method: 'POST', body: options });
 }
