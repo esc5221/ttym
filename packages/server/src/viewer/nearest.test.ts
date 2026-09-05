@@ -66,3 +66,25 @@ describe('no guessing', () => {
     expect(r).toMatchObject({ kind: 'hit', path: real });
   });
 });
+
+describe('relative to a deeper cwd', () => {
+  it('cwd/some.css → the one some.css below cwd', async () => {
+    const real = file('web/styles/some.css');
+    const r = await findNearest(join(root, 'web/some.css'), join(root, 'web'));
+    expect(r).toMatchObject({ kind: 'hit', path: real });
+  });
+  it('a repo-relative path from a cwd below the file climbs to the .git root', async () => {
+    mkdirSync(join(root, '.git'));
+    const real = file('web/styles/some.css');
+    mkdirSync(join(root, 'web/styles/sub'), { recursive: true });
+    const cwd = join(root, 'web/styles/sub');
+    const r = await findNearest(join(cwd, 'web/styles/some.css'), cwd);
+    expect(r).toMatchObject({ kind: 'hit', path: real, score: 3 });
+  });
+  it('without a .git above, a deeper cwd stays a miss', async () => {
+    file('web/styles/some.css');
+    mkdirSync(join(root, 'web/styles/sub'), { recursive: true });
+    const cwd = join(root, 'web/styles/sub');
+    expect((await findNearest(join(cwd, 'some.css'), cwd)).kind).toBe('none');
+  });
+});

@@ -67,6 +67,28 @@ export async function findNearest(requested: string, cwd: string | undefined, no
   if (cwd && (prefix.depth < 2 || prefix.depth < cwdDepth) ) root = cwd;
   try { root = await realpath(root); } catch { return { kind: 'none', root, capped: false }; }
 
+  const first = await searchUnder(root, wanted, name, now);
+  if (first.kind !== 'none' || first.capped) return first;
+  // Nothing below. Agents print repository-relative paths from deep cwds, so
+  // climb to the repo root (the nearest ancestor with .git) and look once more.
+  const repo = await repoRootAbove(root);
+  if (!repo || repo === root) return first;
+  const second = await searchUnder(repo, wanted, name, now);
+  return second.kind === 'none' && !second.capped ? first : second;
+}
+
+async function repoRootAbove(dir: string): Promise<string | null> {
+  let cur = dir;
+  for (let i = 0; i < 12; i++) {
+    const up = dirname(cur);
+    if (up === cur) return null;
+    cur = up;
+    try { await stat(join(cur, '.git')); return cur; } catch {}
+  }
+  return null;
+}
+
+async function searchUnder(root: string, wanted: string[], name: string, now: () => number): Promise<NearestResult> {
   const generic = GENERIC.has(name.toLowerCase());
   const minScore = generic ? 2 : 1;
   const started = now();
