@@ -39,7 +39,7 @@ export type OpenResult =
   | { target: string; ok: false; error: string };
 
 const RENDERER_BY_EXT: Record<string, ViewRenderer> = {
-  '.html': 'frame', '.htm': 'frame', '.pdf': 'frame',
+  '.html': 'frame', '.htm': 'frame', '.pdf': 'pdf',
   '.md': 'markdown', '.markdown': 'markdown',
   '.csv': 'table', '.tsv': 'table', '.jsonl': 'table', '.ndjson': 'table',
   '.json': 'json',

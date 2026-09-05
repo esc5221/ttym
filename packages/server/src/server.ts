@@ -62,6 +62,8 @@ const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.ico': 'image/x-icon',
   '.js': 'text/javascript; charset=utf-8',
+  // PDF.js ships its worker as .mjs; a module import refuses anything but a JS MIME type.
+  '.mjs': 'text/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
   '.png': 'image/png',

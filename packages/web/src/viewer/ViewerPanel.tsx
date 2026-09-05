@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import type { ViewItem, ViewerState } from '@ttym/api';
 import { ViewerTabs, viewerBtnStyle } from './ViewerTabs.js';
 import { FrameView } from './renderers/FrameView.js';
+import { PdfView } from './renderers/PdfView.js';
 import { MarkdownView } from './renderers/MarkdownView.js';
 import { TableView } from './renderers/TableView.js';
 import { JsonView } from './renderers/JsonView.js';
@@ -67,6 +68,7 @@ export function ViewerPanel({ sid, state, activeId, onSelect, onClose, onCloseAl
 function ViewBody({ item, onOpen, jump }: { item: ViewItem; onOpen: (targets: string[]) => void; jump?: { line: number; col?: number; nonce: number } }) {
   switch (item.renderer) {
     case 'frame': return <FrameView item={item} />;
+    case 'pdf': return <PdfView item={item} />;
     case 'markdown': return <MarkdownView item={item} />;
     case 'table': return <TableView item={item} />;
     case 'json': return <JsonView item={item} />;

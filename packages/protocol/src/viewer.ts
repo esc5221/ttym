@@ -15,7 +15,7 @@
 export type ViewKind = 'file' | 'dir' | 'url';
 
 /** How the web app draws a tab. Decided by the server so the rule lives once. */
-export type ViewRenderer = 'frame' | 'markdown' | 'table' | 'json' | 'code' | 'image' | 'dir';
+export type ViewRenderer = 'frame' | 'pdf' | 'markdown' | 'table' | 'json' | 'code' | 'image' | 'dir';
 
 export type ViewPresentation = 'pane' | 'full';
 

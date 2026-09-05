@@ -66,6 +66,7 @@ export function handleViewerApi(req: IncomingMessage, path: string, deps: Viewer
 
   if (!itemId && req.method === 'DELETE') {
     service.closeAll(sessionId);
+    deps.log?.(`VIEW close session=${sessionId} all`);
     json(200, { state: null });
     return true;
   }
@@ -74,6 +75,7 @@ export function handleViewerApi(req: IncomingMessage, path: string, deps: Viewer
     const before = store.get(sessionId);
     if (!before || !before.items.some((item) => item.id === itemId)) { json(404, { error: 'no such tab' }); return true; }
     const state = service.close(sessionId, itemId);
+    deps.log?.(`VIEW close session=${sessionId} ${itemId} left=${state?.items.length ?? 0}`);
     json(200, { state: state ? toPublicState(state) : null });
     return true;
   }
