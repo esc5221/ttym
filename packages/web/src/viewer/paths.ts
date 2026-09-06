@@ -34,6 +34,9 @@ export function parsePathCandidate(raw: string, cwd: string | undefined, home?: 
   text = text.replace(/^[\s"'`<([{]+/, '').replace(/[\s"'`>\]}]+$/, '');
   // Trailing punctuation from prose: "see a.ts," / "in a.ts."
   text = text.replace(/[.,;!?]+$/, '');
+  // A Korean particle glued to the extension: "a.html에", "b.md를". One to three
+  // syllables right after an extension only — a path may carry Hangul elsewhere.
+  text = text.replace(/(\.[A-Za-z0-9]{1,8})[가-힣]{1,3}$/, '$1');
   if (!text) return null;
 
   let line: number | undefined;

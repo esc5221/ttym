@@ -38,6 +38,13 @@ describe('paths a terminal actually prints', () => {
     expect(p('<https://example.com/x>')).toEqual({ target: 'https://example.com/x' });
   });
 
+  it('a Korean particle glued to the extension is dropped; Hangul elsewhere stays', () => {
+    expect(p('plans/260904_ADR_drive_text_write.html에')).toEqual({ target: `${cwd}/plans/260904_ADR_drive_text_write.html` });
+    expect(p('docs/a.md입니다.')).toEqual({ target: `${cwd}/docs/a.md` });
+    expect(p('FEATURES/260904_인터랙티브/7.IA_v2_AI튜터.html')).toEqual({ target: `${cwd}/FEATURES/260904_인터랙티브/7.IA_v2_AI튜터.html` });
+    expect(p('보고서.md')).toEqual({ target: `${cwd}/보고서.md` });
+  });
+
   it('refuses what is not one path', () => {
     expect(p('hello')).toBeNull();
     expect(p('two words.ts')).toBeNull();

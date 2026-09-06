@@ -24,7 +24,7 @@ import { basename, dirname, extname, sep } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { VIEW_MAX_TABS, type ViewPresentation, type ViewRenderer } from '@ttym/protocol';
 import { ViewerStore, type StoredItem, type StoredState, type ViewScope } from './store.js';
-import { findNearest, describeNearest } from './nearest.js';
+import { findNearest, describeNearest, stripTrailingParticle } from './nearest.js';
 
 export interface OpenOptions {
   presentation?: ViewPresentation;
@@ -106,10 +106,17 @@ async function classify(raw: string, opts: OpenOptions): Promise<{ ok: true; val
   let real: string;
   let matched: string | undefined;
   try { real = await realpath(text); } catch {
-    // The path as given is not there. Its tail usually is — see nearest.ts.
-    const near = await findNearest(text, opts.cwd);
-    if (near.kind !== 'hit') return { ok: false, error: describeNearest(near, text) };
-    real = near.path;
+    // The path as given is not there. A particle glued to the extension
+    // (`x.html에`) is dropped first; then its tail is searched for — see nearest.ts.
+    const clean = stripTrailingParticle(text);
+    let found: string | null = null;
+    if (clean !== text) { try { found = await realpath(clean); } catch {} }
+    if (!found) {
+      const near = await findNearest(clean, opts.cwd);
+      if (near.kind !== 'hit') return { ok: false, error: describeNearest(near, text) };
+      found = near.path;
+    }
+    real = found;
     matched = real;
   }
   let info;
