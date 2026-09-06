@@ -1217,7 +1217,10 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
           </span>
         </div>
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ flex: 1, minHeight: 0, padding: U.termPad, ...(touch ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}>
+        {/* isolation: xterm 6의 스크롤바는 보일 때 z-index 11이 된다(vscode scrollable-element).
+            터미널을 자기 스태킹 컨텍스트에 가두지 않으면, 뷰어가 앞에 있어도 출력이 흐를 때마다
+            터미널 스크롤바가 뷰어(z 10) 위로 떠오른다 — elementsFromPoint로 실측. */}
+        <div style={{ flex: 1, minHeight: 0, padding: U.termPad, isolation: 'isolate', ...(touch ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}>
           {!dead ? (
             <Terminal
               mux={mux}

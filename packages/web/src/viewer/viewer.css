@@ -63,9 +63,19 @@
 
 /* renderers */
 .viewer-frame { border: none; width: 100%; height: 100%; background: #fff; }
-.viewer-scroll { flex: 1; min-width: 0; overflow: auto; padding: 0; scrollbar-width: none; }
-.viewer-scroll::-webkit-scrollbar, .viewer-image::-webkit-scrollbar { display: none; }
-.viewer-image { scrollbar-width: none; }
+/* A thin scrollbar of the viewer's own: track invisible, thumb on hover — the app's .thin-scroll look.
+   (It was hidden outright before; with the terminal's bar isolated below, this one is the only bar in the pane.) */
+.viewer-scroll { flex: 1; min-width: 0; overflow: auto; padding: 0; }
+/* Chrome ignores ::-webkit-scrollbar once scrollbar-width/color are set (121+), so the standard
+   properties go only where the pseudo-elements do not exist (Firefox). */
+@supports not selector(::-webkit-scrollbar) {
+  .viewer-scroll,   .viewer-scroll:hover, .viewer-image:hover { scrollbar-color: var(--line-strong, #3c3c3c) transparent; }
+}
+.viewer-scroll::-webkit-scrollbar, .viewer-image::-webkit-scrollbar { width: 6px; height: 6px; }
+.viewer-scroll::-webkit-scrollbar-track, .viewer-image::-webkit-scrollbar-track { background: transparent; }
+.viewer-scroll::-webkit-scrollbar-thumb, .viewer-image::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+.viewer-scroll:hover::-webkit-scrollbar-thumb, .viewer-image:hover::-webkit-scrollbar-thumb { background: var(--line-strong, #3c3c3c); }
+.viewer-scroll::-webkit-scrollbar-thumb:hover, .viewer-image::-webkit-scrollbar-thumb:hover { background: var(--text-dim, #6e6e6e); }
 .viewer-note-btn { background: var(--bg2); color: var(--text-soft); border: 1px solid var(--line); border-radius: 4px; padding: 1px 8px; font-family: var(--mono); font-size: 11px; cursor: pointer; }
 .viewer-note-btn:hover { color: var(--text); border-color: var(--line-strong); }
 .viewer-note { color: var(--text-dim); font-family: var(--mono); font-size: 11px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--bg1); display: flex; gap: 12px; align-items: center; }
