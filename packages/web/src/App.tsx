@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes, getHost, ensureFontsRegistered } from '@ttym/ui';
+import { TerminalMux, Terminal, LayoutView, refreshTerminalThemes, getHost, ensureFontsRegistered, resetAllHosts, reactivateHosts } from '@ttym/ui';
 import * as api from '@ttym/api';
 import type { SessionInfo } from '@ttym/ui';
 import '@xterm/xterm/css/xterm.css';
@@ -1659,6 +1659,9 @@ function App() {
   }, [renamingId, renameDraft]);
 
   const [connectNote, setConnectNote] = useState('connecting to ttym server...');
+  // 첫 접속 전에만 화면을 통째로 내준다. 그 뒤의 끊김은 배너로만 말한다 —
+  // 트리를 버리면 host가 언마운트되고, 그게 곧 화면 상실이다.
+  const [everConnected, setEverConnected] = useState(false);
 
   useEffect(() => {
     const wsUrl = `${isSecure ? 'wss' : 'ws'}://${TTYM_HOST}/ws`;
@@ -1671,7 +1674,7 @@ function App() {
       while (!cancelled) {
         try {
           await mux.connect();
-          if (!cancelled) setConnected(true);
+          if (!cancelled) { setConnected(true); setEverConnected(true); }
           return;
         } catch {
           setConnectNote(`retrying in ${Math.round(delayMs / 1000) || 1}s…`);
@@ -1682,12 +1685,15 @@ function App() {
     };
     void attempt(500);
 
-    // 접속 후 끊기면 조용히 재접속하고 리로드한다. 리로드는 스냅샷 경로라
-    // 공짜는 아니지만(워터마크는 페이지와 함께 죽는 게 정직하다), 1000줄
-    // 캡 + 스태거로 부담이 작고, 재연결 후의 host 상태 복원 문제를 통째로
-    // 피한다. 리로드 없는 재연결은 host 리셋 훅이 생기면 그때.
+    // 끊기면 조용히 재접속하고 살아있는 버퍼 위에 delta를 잇는다. 예전엔
+    // 여기서 리로드했다 — host 복원을 통째로 피하는 대신 워터마크와 xterm
+    // 버퍼를 같이 버려서, 복귀할 때마다 fromSeq=0 풀 스냅샷이 됐다.
+    //
+    // 순서가 전부다: 끊긴 즉시 host를 idle로 되돌려야(resetAllHosts) 그 사이
+    // 탭이 돌아와도 ATTACH 없는 연결에 RESUME_VIEW를 쏘지 않는다.
     const unsubscribe = mux.onDisconnect(() => {
       if (cancelled) return;
+      resetAllHosts();
       setConnected(false);
       setConnectNote('disconnected · reconnecting…');
       const retry = async () => {
@@ -1695,7 +1701,10 @@ function App() {
         while (!cancelled) {
           try {
             await mux.connect();
-            window.location.reload();
+            if (cancelled) return;
+            setConnected(true);
+            // 워터마크는 mux.cleanup()을 살아남았다 — 재부착은 그 지점부터다.
+            reactivateHosts();
             return;
           } catch {
             await new Promise((r) => setTimeout(r, delay));
@@ -2038,7 +2047,7 @@ function App() {
     void api.patchConfig(API_BASE, patch).catch(() => {});
   }, []);
 
-  if (!connected || !muxRef.current) {
+  if (!muxRef.current || (!connected && !everConnected)) {
     return (
       <div style={{ color: 'var(--text-soft)', padding: 40, fontFamily: 'var(--mono)' }}>
         {connectNote}
@@ -2087,6 +2096,16 @@ function App() {
       // 목록으로 튕기던 것(pull-to-refresh)을 끊는다.
       ...(appSurface !== 'desktop' ? { touchAction: 'pan-y', overscrollBehavior: 'none' as const } : null),
     }}>
+      {connected ? null : (
+        // 흐름에 끼우지 않고 떠 있는다: 한 줄이라도 자리를 차지하면 pane 높이가
+        // 바뀌고, fit이 그걸 PTY resize로 번역해 끊긴 김에 화면까지 재배치된다.
+        <div style={{
+          position: 'fixed', top: 6, right: 8, zIndex: 90,
+          padding: '3px 9px', borderRadius: 999,
+          background: 'var(--warn-bg, #4a3a1a)', color: 'var(--warn-fg, #f0d090)',
+          font: '11px var(--mono)', pointerEvents: 'none', opacity: 0.92,
+        }}>{connectNote}</div>
+      )}
       <div
         {...(IS_NATIVE ? { 'data-tauri-drag-region': true } : {})}
         style={{ ...tabStripStyle, background: UI_STYLES[uiStyle].stripBg, borderBottom: UI_STYLES[uiStyle].stripLine, paddingLeft: IS_NATIVE ? 84 : 10 }}

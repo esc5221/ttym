@@ -44,7 +44,7 @@ vi.mock('@xterm/addon-web-fonts', () => ({ WebFontsAddon: class { dispose() {} }
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class { dispose() {} } }));
 vi.mock('@xterm/addon-clipboard', () => ({ ClipboardAddon: class { dispose() {} } }));
 
-import { acquireHost, destroyAllHosts } from './terminal-host.js';
+import { acquireHost, destroyAllHosts, resetAllHosts, reactivateHosts } from './terminal-host.js';
 import type { TerminalMux } from '@ttym/vt';
 
 interface FakeMux {
@@ -181,6 +181,41 @@ describe('TerminalHost stream state machine', () => {
     await vi.advanceTimersByTimeAsync(50);
     await flushMicrotasks();
     expect(mux.attachCalls).toBe(1);
+  });
+
+  it('a dropped socket re-attaches the panes in view and leaves the rest idle', async () => {
+    // 소켓이 죽어도 버퍼는 산다. 재부착은 그 버퍼 위에 delta를 잇는 경로이므로
+    // forgetSeq(워터마크 파기)가 끼면 안 되고, 보고 있지 않던 pane까지 되살리면
+    // pauseView가 사둔 침묵을 재연결이 되돌려놓는 꼴이 된다.
+    const mux = fakeMux();
+    const visible = acquireHost(mux, 9, { mode: 'readwrite', fontSize: 14, enableWebgl: false, localEcho: false });
+    const hidden = acquireHost(mux, 10, { mode: 'readwrite', fontSize: 14, enableWebgl: false, localEcho: false });
+    visible.mount(fakeElement(), () => {});
+    hidden.mount(fakeElement(), () => {});
+    visible.activate();
+    hidden.activate();
+    await vi.advanceTimersByTimeAsync(100);
+    await flushMicrotasks();
+    hidden.pauseView(); // 탭 숨김 / 뷰포트 밖
+    expect(mux.attachCalls).toBe(2);
+
+    resetAllHosts();
+    expect(mux.forgotten).toEqual([]); // 워터마크는 버퍼와 함께 산다
+
+    reactivateHosts();
+    await vi.advanceTimersByTimeAsync(100);
+    await flushMicrotasks();
+    expect(mux.attachCalls).toBe(3); // 보고 있던 pane 하나만
+
+    // 숨은 pane은 idle이라 RESUME_VIEW가 아니라 ATTACH로 돌아온다 —
+    // 부착된 적 없는 연결에 resume을 쏘면 서버가 콜백 없는 viewer를 resync한다.
+    const resumedBefore = mux.resumed.length;
+    hidden.resumeView();
+    expect(mux.resumed.length).toBe(resumedBefore);
+    hidden.activate();
+    await vi.advanceTimersByTimeAsync(100);
+    await flushMicrotasks();
+    expect(mux.attachCalls).toBe(4);
   });
 
   it('follow geometry never announces or sends a size — and wears the server one', async () => {

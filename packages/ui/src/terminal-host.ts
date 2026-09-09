@@ -131,6 +131,32 @@ export function destroyAllHosts() {
   registry.clear();
 }
 
+/**
+ * The socket died: drop every stream, keep every buffer. Called the instant
+ * the drop is known, not when the reconnect lands — a host left in `paused`
+ * would answer the next visibilitychange with RESUME_VIEW on a connection
+ * that never saw its ATTACH.
+ *
+ * dispose() is deliberately not used here: it forgets the seq watermark, and
+ * a watermark forgotten while its buffer lives is exactly what turns a
+ * reconnect back into a full snapshot.
+ */
+export function resetAllHosts() {
+  for (const host of registry.values()) host.disconnect();
+}
+
+/**
+ * The socket is back: re-attach from the watermark, so the server replays
+ * delta onto the buffer that is still on screen. Only panes someone is
+ * actually looking at come back: a hidden tab or an off-screen pane keeps the
+ * silence pauseView bought it, and its next syncViewState re-activates it.
+ */
+export function reactivateHosts() {
+  for (const host of registry.values()) {
+    if (host.isMounted && host.wantsStream) host.activate();
+  }
+}
+
 function evictIdleHosts() {
   if (registry.size <= MAX_IDLE_HOSTS) return;
   for (const [id, host] of registry) {
@@ -257,6 +283,7 @@ export class TerminalHost {
   private attachRetries = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private mounted = false;
+  private wants = false;
   private inputDisposables: IDisposable[] = [];
   private onAction: ActionHandler = () => {};
   private resizeObserver: ResizeObserver | null = null;
@@ -314,6 +341,13 @@ export class TerminalHost {
 
   get isMounted(): boolean { return this.mounted; }
 
+  /**
+   * What the viewport and the tab last asked for, independent of whether the
+   * stream is actually up. A reconnect re-attaches only what someone is
+   * looking at — the same rule pauseView applies while the socket is alive.
+   */
+  get wantsStream(): boolean { return this.wants; }
+
   /** Reparent the wrapper into a container. Never re-creates the terminal. */
   mount(container: HTMLElement, onAction: ActionHandler) {
     if (this.disposed) return;
@@ -354,6 +388,7 @@ export class TerminalHost {
    * subscription.
    */
   activate() {
+    this.wants = true;
     if (this.disposed || this.stream !== 'idle') return;
     if (!this.opened) {
       this.opened = true;
@@ -446,6 +481,10 @@ export class TerminalHost {
 
   /** Out of viewport (or tab hidden): stop the stream, keep everything else. */
   pauseView() {
+    // The intent is recorded even when there is no stream to pause: a socket
+    // that died while the pane was on screen must not re-attach a pane the
+    // user has since navigated away from.
+    this.wants = false;
     // Only an attached stream can pause — a PAUSE/RESUME fired before ATTACH
     // made the server resync a viewer that had no callbacks registered yet.
     if (this.stream !== 'attached') return;
@@ -455,6 +494,7 @@ export class TerminalHost {
 
   /** Back in view: resume from the last seq — delta replay, or one snapshot. */
   resumeView() {
+    this.wants = true;
     if (this.stream !== 'paused') return;
     this.stream = 'attached';
     // Unparsed queued bytes sit above the acked watermark the resume will

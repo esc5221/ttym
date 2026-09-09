@@ -29,6 +29,9 @@ const BATCH_MS = 4;
 const MAX_BATCH_BYTES = 64 * 1024;
 const IMMEDIATE_THRESHOLD = 512; // bytes — flush immediately for interactive typing
 const WS_HIGH_WATER = 1 << 20;
+// Comfortably under the ~125s idle cutoff measured on the tunnel path, and
+// under the 100s Cloudflare documents, with room for one lost round.
+const WS_PING_INTERVAL_MS = 30_000;
 // Ack-based viewer backpressure (vscode terminal model): measure what the
 // client has *parsed*, not what the network delivered. Wide hysteresis keeps
 // the stream from stuttering at the boundary.
@@ -1264,6 +1267,30 @@ export async function createServer(port: number): Promise<TtymServer> {
   });
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
+  // Keepalive. A viewer whose tab is hidden sends PAUSE_VIEW, so its socket
+  // carries zero bytes — and a proxy in front of us (Cloudflare tunnel, measured)
+  // drops idle WebSockets at ~125s. That drop is what made "switch tabs, come
+  // back" a reconnect + full snapshot. RFC 6455 ping frames keep the path warm;
+  // browsers pong automatically, so nothing changes on the wire protocol.
+  //
+  // Server-sent, not client-sent: a background tab's timers are throttled to
+  // once a minute or worse, which is exactly when the keepalive must not slip.
+  // It also runs outside the batcher — a paused viewer must still be pinged.
+  const alive = new WeakMap<WebSocket, boolean>();
+  const heartbeat = setInterval(() => {
+    for (const client of wss.clients) {
+      if (alive.get(client) === false) {
+        // Missed a full round — the socket is a corpse the OS has not reaped.
+        // Terminate (not close): a half-open socket never answers the handshake.
+        try { client.terminate(); } catch {}
+        continue;
+      }
+      alive.set(client, false);
+      try { client.ping(); } catch {}
+    }
+  }, WS_PING_INTERVAL_MS);
+  heartbeat.unref();
+
   // Workspace changes push to every connected client — full tree +
   // generation. Clients stop polling; a missed event costs nothing because
   // the next one carries the entire state again.
@@ -1383,6 +1410,8 @@ export async function createServer(port: number): Promise<TtymServer> {
   });
 
   wss.on('connection', (ws: WebSocket) => {
+    alive.set(ws, true);
+    ws.on('pong', () => alive.set(ws, true));
     const viewerId = randomUUID();
     const clientSessions = new Set<number>();
     const batchers = new Map<number, SessionBatcher>();
@@ -1898,6 +1927,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     close: async () => {
       markCleanExit();
       clearInterval(agentExpirySweep);
+      clearInterval(heartbeat);
       unsubscribeWorkspaceChanges();
       if (gcTimer) clearInterval(gcTimer);
       fileBridge?.stop?.();
