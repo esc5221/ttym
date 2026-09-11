@@ -276,21 +276,30 @@ export function getSessionUrl(sessionId: number): string {
   return `${getTtymUiBase()}/#s/${sessionId}`;
 }
 
-export async function copySessionUrl(sessionId: number) {
-  const url = getSessionUrl(sessionId);
+/**
+ * Copy text. `navigator.clipboard` exists only in a secure context — over
+ * plain http (ttym-ui.lullu.lan) it is undefined, and the legacy path is
+ * the only one there. execCommand needs a user gesture: call from a click.
+ */
+export async function copyText(text: string): Promise<boolean> {
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(url);
-    return;
+    try { await navigator.clipboard.writeText(text); return true; } catch { /* fall through */ }
   }
-
-  const input = document.createElement('input');
-  input.value = url;
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', '');
   input.style.position = 'fixed';
   input.style.opacity = '0';
   document.body.appendChild(input);
   input.select();
-  document.execCommand('copy');
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
   document.body.removeChild(input);
+  return ok;
+}
+
+export async function copySessionUrl(sessionId: number) {
+  await copyText(getSessionUrl(sessionId));
 }
 
 export async function fetchSessionMeta(sessionId: number): Promise<SessionMeta> {

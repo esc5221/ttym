@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { PathCandidate } from './paths.js';
+import { copyText } from '../app-shared.js';
 
 /**
  * The small menu that appears above a path selected in a pane's terminal:
@@ -39,7 +40,8 @@ export function SelectionOpen({ target, onOpen, onDismiss }: {
   };
 
   const copy = async () => {
-    try { await navigator.clipboard.writeText(target.candidate.target); } catch { return; }
+    const ok = await copyText(target.candidate.target);
+    if (!ok) { setError('copy failed'); setTimeout(onDismiss, 1200); return; }
     setCopied(true);
     setTimeout(onDismiss, 700);
   };
