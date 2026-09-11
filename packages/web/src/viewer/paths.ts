@@ -32,6 +32,14 @@ export function parsePathCandidate(raw: string, cwd: string | undefined, home?: 
 
   // Wrappers: quotes, backticks, brackets. The closing ')' waits: it may belong to `a.ts(12,5)`.
   text = text.replace(/^[\s"'`<([{]+/, '').replace(/[\s"'`>\]}]+$/, '');
+  // `file:///x/y.png` and `file:/x/y.png` (Codex prints the latter) are paths.
+  text = text.replace(/^file:\/*(?=\/)/i, '');
+  // `KEY=/path` — an env line, a task's `O=/…/x.output`. The value is the path.
+  text = text.replace(/^[A-Za-z_][A-Za-z0-9_]*=(?=[~./])/, '');
+  // A brace opened right after the name — `x.{png,pdf}` selected halfway — is not the extension.
+  text = text.replace(/\.\{[^}]*$/, '');
+  // Shell-escaped spaces: `My\ File.pdf` is one path. Set aside — not as nbsp, `\s` matches that.
+  text = text.replace(/\\ /g, '\uE000');
   // Trailing punctuation from prose: "see a.ts," / "in a.ts."
   text = text.replace(/[.,;!?]+$/, '');
   // A Korean particle glued to the extension: "a.html에", "b.md를". One to three
@@ -51,8 +59,9 @@ export function parsePathCandidate(raw: string, cwd: string | undefined, home?: 
   } else if (line === undefined && (m = /^(.*?)#L(\d+)(?:-L?\d+)?$/.exec(text))) { text = m[1]!; line = Number(m[2]); }
   if (!text) return null;
 
-  // Unquoted whitespace: not one path.
+  // Unquoted whitespace: not one path. (Escaped spaces were set aside above.)
   if (/\s/.test(text)) return null;
+  text = text.replace(/\uE000/g, ' ');
   // git diff prefixes.
   text = text.replace(/^[ab]\//, '');
 

@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import type { PathCandidate } from './paths.js';
 
 /**
- * The small "open" button that appears above a path selected in a pane's
- * terminal. Placed at the pointer, not the cell: xterm's cell→pixel maths
- * is private, and the pointer is where the eye already is.
+ * The small menu that appears above a path selected in a pane's terminal:
+ * "open" (the main action, ⌘⏎) and under it "copy path" (⌘⇧C) — the
+ * absolute path the parser resolved, not the fragment on screen. Placed
+ * at the pointer, not the cell: xterm's cell→pixel maths is private, and
+ * the pointer is where the eye already is.
  *
- * Lives until the next mousedown, Esc, a few seconds, or the open itself.
+ * Lives until the next mousedown, Esc, a few seconds, or an action.
  * On a miss the server's word ("not found") shows in place, then goes.
  */
 export interface SelectionTarget {
@@ -26,6 +28,7 @@ export function SelectionOpen({ target, onOpen, onDismiss }: {
 }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const go = async () => {
     if (busy) return;
@@ -35,10 +38,17 @@ export function SelectionOpen({ target, onOpen, onDismiss }: {
     if (err) { setError(err); setTimeout(onDismiss, 1600); } else onDismiss();
   };
 
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(target.candidate.target); } catch { return; }
+    setCopied(true);
+    setTimeout(onDismiss, 700);
+  };
+
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { onDismiss(); return; }
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); void go(); }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'c' || e.key === 'C')) { e.preventDefault(); void copy(); }
     };
     window.addEventListener('keydown', key, true);
     const timer = setTimeout(onDismiss, 6000);
@@ -50,16 +60,22 @@ export function SelectionOpen({ target, onOpen, onDismiss }: {
   return (
     <span
       className={`sel-open${error ? ' err' : ''}`}
-      style={{ left: Math.max(4, target.x - 12), top: Math.max(2, target.y - 34) }}
+      style={{ left: Math.max(4, target.x - 12), top: Math.max(2, target.y - 58) }}
       onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
-      onClick={(e) => { e.stopPropagation(); if (!error) void go(); }}
       title={target.candidate.target}
     >
-      {error ? <span>{error}</span> : (
+      {error ? <span className="sel-open-row">{error}</span> : (
         <>
-          <span>open</span>
-          <span className="path">{label}{where}</span>
-          <span className="key">⌘⏎</span>
+          <span className="sel-open-row main" onClick={(e) => { e.stopPropagation(); void go(); }}>
+            <span>open</span>
+            <span className="path">{label}{where}</span>
+            <span className="key">⌘⏎</span>
+          </span>
+          <span className="sel-open-row" onClick={(e) => { e.stopPropagation(); void copy(); }}>
+            <span>{copied ? 'copied' : 'copy path'}</span>
+            <span className="path">{target.candidate.target}</span>
+            <span className="key">⌘⇧C</span>
+          </span>
         </>
       )}
     </span>

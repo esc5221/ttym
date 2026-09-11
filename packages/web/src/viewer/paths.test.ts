@@ -45,6 +45,18 @@ describe('paths a terminal actually prints', () => {
     expect(p('보고서.md')).toEqual({ target: `${cwd}/보고서.md` });
   });
 
+  it('the dressings the log showed after the first deploy', () => {
+    // Codex prints file: URLs; a task line prints O=/path; a glob selected halfway; an escaped space.
+    expect(p('file:/Users/me/.codex/img/x.png')).toEqual({ target: '/Users/me/.codex/img/x.png' });
+    expect(p('file:///Users/me/a.pdf')).toEqual({ target: '/Users/me/a.pdf' });
+    expect(p('O=/private/tmp/tasks/b7d5.output')).toEqual({ target: '/private/tmp/tasks/b7d5.output' });
+    expect(p('FOO_BAR=~/x/y.md')).toEqual({ target: '/Users/me/x/y.md' });
+    expect(p('figures/edge_audit.{png')).toEqual({ target: `${cwd}/figures/edge_audit` });
+    expect(p('figures/edge_audit.{png,pdf}')).toEqual({ target: `${cwd}/figures/edge_audit` });
+    expect(p('docs/My\\ File.pdf')).toEqual({ target: `${cwd}/docs/My File.pdf` });
+    expect(p('a=b')).toBeNull(); // a value that is not a path stays a word
+  });
+
   it('refuses what is not one path', () => {
     expect(p('hello')).toBeNull();
     expect(p('two words.ts')).toBeNull();
