@@ -3,7 +3,7 @@ import type { PathCandidate } from './paths.js';
 
 /**
  * The small menu that appears above a path selected in a pane's terminal:
- * "open" (the main action, ⌘⏎) and under it "copy path" (⌘⇧C) — the
+ * "copy path" (⌘⇧C) and under it, nearest the pointer, "open" (the main action, ⌘⏎) — the
  * absolute path the parser resolved, not the fragment on screen. Placed
  * at the pointer, not the cell: xterm's cell→pixel maths is private, and
  * the pointer is where the eye already is.
@@ -60,21 +60,21 @@ export function SelectionOpen({ target, onOpen, onDismiss }: {
   return (
     <span
       className={`sel-open${error ? ' err' : ''}`}
-      style={{ left: Math.max(4, target.x - 12), top: Math.max(2, target.y - 58) }}
+      style={{ left: Math.max(4, target.x - 12), top: Math.max(2, target.y - 66) }}
       onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
       title={target.candidate.target}
     >
       {error ? <span className="sel-open-row">{error}</span> : (
         <>
-          <span className="sel-open-row main" onClick={(e) => { e.stopPropagation(); void go(); }}>
-            <span>open</span>
-            <span className="path">{label}{where}</span>
-            <span className="key">⌘⏎</span>
-          </span>
           <span className="sel-open-row" onClick={(e) => { e.stopPropagation(); void copy(); }}>
             <span>{copied ? 'copied' : 'copy path'}</span>
             <span className="path">{target.candidate.target}</span>
             <span className="key">⌘⇧C</span>
+          </span>
+          <span className="sel-open-row main" onClick={(e) => { e.stopPropagation(); void go(); }}>
+            <span>open</span>
+            <span className="path">{label}{where}</span>
+            <span className="key">⌘⏎</span>
           </span>
         </>
       )}
