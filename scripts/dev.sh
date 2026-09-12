@@ -9,8 +9,8 @@
 # Building inside the prod tree would overwrite the web dist the live server
 # reads from disk — so this script refuses to run there.
 #
-#   git worktree add ../ttym-<branch> <branch>
-#   cd ../ttym-<branch> && scripts/dev.sh up        build everything, start (self-daemonised)
+#   git worktree add .worktrees/<branch> <branch>      (.worktrees/ is gitignored)
+#   cd .worktrees/<branch> && scripts/dev.sh up      build everything, start (self-daemonised)
 #   scripts/dev.sh web                              rebuild the web app only — reload the browser
 #   scripts/dev.sh restart                          server/holder changed
 #   scripts/dev.sh down | status | logs
@@ -40,7 +40,7 @@ if [ -f "$PLIST" ]; then
   PROD_ROOT="$(cd "$(dirname "${PROD_JS:-/nonexistent}")/.." 2>/dev/null && pwd || true)"
   if [ -n "$PROD_ROOT" ] && [ "$PROD_ROOT" = "$ROOT" ]; then
     echo "refusing: $ROOT is the production tree (launchd runs $PROD_JS)." >&2
-    echo "  git worktree add ../ttym-<branch> <branch>  and run this from there." >&2
+    echo "  git worktree add .worktrees/<branch> <branch>  and run this from there." >&2
     exit 1
   fi
 fi

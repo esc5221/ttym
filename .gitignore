@@ -24,3 +24,6 @@ npm-staging/
 
 # Per-machine Claude Code notes (loads after CLAUDE.md, never shared)
 CLAUDE.local.md
+
+# branch worktrees for scripts/dev.sh:  git worktree add .worktrees/<branch> <branch>
+.worktrees/
