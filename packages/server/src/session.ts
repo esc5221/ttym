@@ -718,6 +718,7 @@ export class Session {
 
   removeViewer(viewerId: string): void {
     this.viewers.delete(viewerId);
+    this.resyncCbs.delete(viewerId);
     this.releaseBorrow(viewerId); // 빌린 채 떠나면 자동 반납 — 데스크톱 원상복구
     if (this.viewers.size === 0) {
       this._detachedAt = Date.now();
@@ -740,6 +741,42 @@ export class Session {
     const { prevCols, prevRows } = this.borrow;
     this.borrow = null;
     this.resize(prevCols, prevRows);
+  }
+
+  // ── Sleep support: an input gate and a frozen screen ──────────────────
+  // While an agent is asleep (its process gone, the shell idle underneath),
+  // input must wake it instead of reaching the shell, and viewers must keep
+  // seeing the agent's last screen rather than the shell prompt. Both live
+  // here because every input path ends in write() and every output path in
+  // emitViewerChunk(); the sleeper only installs and removes them.
+
+  /** Consumes input while set. Return true to swallow the bytes (they were queued). */
+  inputGate: ((data: Buffer) => boolean) | null = null;
+  private frozen: { snapshot: string; seq: number } | null = null;
+  /** Wall-clock of the last real input / output — the idle clocks. */
+  lastInputAt = 0;
+  lastOutputAt = 0;
+
+  /** Stop forwarding output to viewers; they keep the screen as it is now. */
+  freeze(snapshot?: string): void {
+    this.frozen = { snapshot: snapshot ?? this.viewerSnapshot(), seq: this.lastSeq };
+  }
+  /** Forward output again. The caller re-snapshots viewers; nothing here replays what was hidden. */
+  thaw(): void { this.frozen = null; }
+  get isFrozen(): boolean { return this.frozen !== null; }
+  /** The screen a viewer should see while frozen, and the seq it stands for. */
+  frozenView(): { snapshot: string; seq: number } | null { return this.frozen; }
+
+  /** Per-viewer "send me a fresh snapshot" hooks — the connection layer registers them. */
+  private resyncCbs = new Map<string, () => void>();
+  onResync(viewerId: string, cb: () => void): void { this.resyncCbs.set(viewerId, cb); }
+  /** Every viewer gets the current screen as one snapshot (after thaw: the hidden delta is skipped). */
+  resyncAll(): void { for (const cb of this.resyncCbs.values()) { try { cb(); } catch {} } }
+
+  /** Bypass the gate — the sleeper's own commands to the shell. */
+  writeRaw(data: Buffer): void {
+    if (this.closed || !this.sock) return;
+    writeFrame(this.sock, H_CMD_DATA_IN, data);
   }
 
   hasViewer(viewerId: string): boolean { return this.viewers.has(viewerId); }
@@ -848,6 +885,8 @@ export class Session {
 
   write(data: Buffer): void {
     if (this.closed || !this.sock) return;
+    if (this.inputGate && this.inputGate(data)) return;
+    this.lastInputAt = Date.now();
     writeFrame(this.sock, H_CMD_DATA_IN, data);
   }
 
@@ -923,7 +962,8 @@ export class Session {
   private emitViewerChunk(data: Buffer, broadcast: boolean): void {
     if (data.length === 0) return;
     const viewerSeq = this.ring.push(data);
-    if (!broadcast) return;
+    this.lastOutputAt = Date.now();
+    if (!broadcast || this.frozen) return;
     for (const viewer of this.viewers.values()) {
       if (!viewer.paused) viewer.dataCb(data, viewerSeq);
     }

@@ -16,6 +16,7 @@ import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { ViewerStore } from './viewer/store.js';
 import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
+import { AgentSleeper, psProcesses, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
 
 let mapRefreshInFlight = false;
@@ -229,7 +230,7 @@ export interface TtymServer {
 
 let bootSafeMode = false;
 
-function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void, viewer?: { store: ViewerStore; service: ViewerService }): boolean {
+function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void, viewer?: { store: ViewerStore; service: ViewerService }, sleeper?: AgentSleeper): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
 
@@ -515,9 +516,15 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         // that decides how long that claim holds is not theirs to set.
         if (patch.claudeActive === true || patch.codexActive === true) {
           patch.agentActiveAt = Date.now();
+          // A turn is open from UserPromptSubmit (active, no source) until the next Stop.
+          // SessionStart also says "active" but names its source; that is a boot, not a turn.
+          if (patch.claudeSource === undefined) patch.claudeTurnOpen = true;
         }
+        if (patch.claudeActive === false) patch.claudeTurnOpen = false;
         const merged = await manager.setMeta(id, patch);
         log(`AGENT META session=${id} keys=${Object.keys(patch).join(',')}`);
+        // A SessionStart (session id + source) while the pane is waking: the agent is up.
+        if (typeof patch.claudeSessionId === 'string' && patch.claudeSource !== undefined) sleeper?.noteAgentStart(id);
         onAgentMeta?.(id, merged as Record<string, unknown>);
         json(200, merged);
       } catch {
@@ -549,6 +556,28 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         json(200, { ok: true, interaction: settled });
       });
     });
+    return true;
+  }
+
+  // Agent sleep: POST /api/sessions/:id/sleep · /wake · /pin {pin}, GET /api/agent-sleep
+  const sleepMatch = path.match(/^\/api\/sessions\/(\d+)\/(sleep|wake|pin)$/);
+  if (sleepMatch && req.method === 'POST') {
+    const id = parseInt(sleepMatch[1], 10);
+    const verb = sleepMatch[2];
+    if (!sleeper) { json(503, { error: 'sleep not available' }); return true; }
+    readBody().then(async (body) => {
+      let parsed: Record<string, unknown> = {};
+      try { parsed = body ? JSON.parse(body) : {}; } catch { json(400, { error: 'invalid body' }); return; }
+      if (verb === 'pin') { await sleeper.pin(id, parsed.pin === true); json(200, { ok: true, pin: parsed.pin === true }); return; }
+      const r = verb === 'sleep' ? await sleeper.sleep(id, 'manual') : await sleeper.wake(id, 'manual');
+      if (r.ok) json(200, { ok: true, sleep: sleeper.stateOf(id) });
+      else json(409, { error: r.error, sleep: sleeper.stateOf(id) });
+    });
+    return true;
+  }
+  if (path === '/api/agent-sleep' && req.method === 'GET') {
+    if (!sleeper) { json(200, { sleeping: [], reclaimedBytes: 0, afterMs: 0 }); return true; }
+    sleeper.status().then((st) => json(200, st));
     return true;
   }
 
@@ -650,7 +679,9 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     const id = parseInt(screenMatch[1], 10);
     const session = manager.get(id);
     if (!session || session.isDead) { json(404, { error: 'not found' }); return true; }
-    json(200, { screen: session.snapshot() });
+    // A sleeping agent's pane reports the agent's last screen, as the viewers see it.
+    const frozen = session.frozenView();
+    json(200, { screen: frozen ? frozen.snapshot : session.snapshot(), ...(sleeper?.stateOf(id) ? { sleep: sleeper.stateOf(id) } : null) });
     return true;
   }
 
@@ -1258,11 +1289,14 @@ export async function createServer(port: number): Promise<TtymServer> {
   // Inject TTYM_BUS_URL into SessionManager for holder env
   manager.setBusUrl(`http://127.0.0.1:${port}/api`);
 
+  // Idle agents sleep; the first key wakes them. See agent-sleep.ts.
+  let sleeper: AgentSleeper | null = null;
+
   const httpServer = createHttpServer((req, res) => {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
     // /view/<cap>/… before the SPA catch-all, which would otherwise answer with index.html.
     if (handleViewContent(req, res, (req.url || '/').split('?')[0]!, { store: viewerStore })) return;
-    if (handleHttpApi(manager, workspaceStore, interactions, configStore, req, res, broadcastAgentState, broadcastConfig, viewer)) return;
+    if (handleHttpApi(manager, workspaceStore, interactions, configStore, req, res, broadcastAgentState, broadcastConfig, viewer, sleeper ?? undefined)) return;
     if (handleDemoApp(req, res)) return;
     res.writeHead(404);
     res.end('not found');
@@ -1320,6 +1354,8 @@ export async function createServer(port: number): Promise<TtymServer> {
       sessionId,
       kind,
       active: agentIsActive(meta),
+      sleep: sleeper?.stateOf(sessionId) ?? null,
+      pin: meta.agentPin === true,
     };
     lastAnnouncedActive.set(sessionId, event.active);
     const frame = encode(0, CMD.AGENT, jsonPayload(event));
@@ -1394,6 +1430,7 @@ export async function createServer(port: number): Promise<TtymServer> {
 
   function broadcastConfig(values: Record<string, string>) {
     armMapTimer(values); // 설정이 바뀌면 즉시 재장전 — 재시작 불필요
+    sleeper?.configure(values);
     const frame = encode(0, CMD.CONFIG, jsonPayload({ values }));
     for (const client of wss.clients) {
       if (client.readyState === WebSocket.OPEN) {
@@ -1533,6 +1570,13 @@ export async function createServer(port: number): Promise<TtymServer> {
      *    seq it contains.
      */
     function sendResync(sessionId: number, session: Session, batcher: SessionBatcher, fromSeq: number) {
+      // A sleeping agent's pane shows its last screen, never the shell under it.
+      const frozen = session.frozenView();
+      if (frozen) {
+        safeSend(ws, encodeSnapshot(sessionId, frozen.seq, Buffer.from(frozen.snapshot)));
+        noteSnapshotSent(batcher, frozen.seq);
+        return;
+      }
       if (!session.shouldForceSnapshotReplay() && session.integrity === 'healthy' && fromSeq > 0
           && fromSeq <= session.lastSeq && session.ring.canReplaySince(fromSeq)) {
         const chunks = session.ring.since(fromSeq);
@@ -1633,6 +1677,11 @@ export async function createServer(port: number): Promise<TtymServer> {
       const dataCb = (data: Buffer, seq: number) => enqueueData(sessionId, batcher, data, seq);
 
       session.addViewer(viewerId, dataCb, mode);
+      session.onResync(viewerId, () => {
+        resetBatcherForResync(batcher);
+        safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
+        noteSnapshotSent(batcher, session.lastSeq);
+      });
       clientSessions.add(sessionId);
 
       // 서버→클라 RESIZE: PTY 기하의 진실은 서버 하나고, follow 뷰어(모바일)는
@@ -1788,8 +1837,10 @@ export async function createServer(port: number): Promise<TtymServer> {
         case CMD.SNAPSHOT: {
           const session = manager.get(sessionId);
           if (session && !session.isDead) {
-            safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
-            noteSnapshotSent(getBatcher(sessionId), session.lastSeq);
+            const frozen = session.frozenView();
+            const seq = frozen ? frozen.seq : session.lastSeq;
+            safeSend(ws, encodeSnapshot(sessionId, seq, Buffer.from(frozen ? frozen.snapshot : session.viewerSnapshot())));
+            noteSnapshotSent(getBatcher(sessionId), seq);
           }
           break;
         }
@@ -1921,12 +1972,32 @@ export async function createServer(port: number): Promise<TtymServer> {
   const boundPort = (httpServer.address() as { port: number } | null)?.port ?? port;
   manager.setExtraSessionEnv({ TTYM_PORT: String(boundPort) });
 
+  sleeper = new AgentSleeper({
+    sessions: {
+      get: (id) => manager.get(id),
+      ids: () => manager.list().map((s) => s.id),
+      getMeta: (id) => manager.getMeta(id),
+      setMeta: (id, patch) => manager.setMeta(id, patch),
+    },
+    hasPendingInteraction: (id) => interactions.hasPending(id),
+    listProcesses: psProcesses,
+    kill: (pid, signal) => { try { process.kill(pid, signal); } catch {} },
+    onState: (id, _sleep: SleepState | null, _pin) => { void manager.getMeta(id).then((meta) => broadcastAgentState(id, meta)); },
+    resnapshot: (id) => manager.get(id)?.resyncAll(),
+    port: boundPort,
+    runtimeDir: manager.runtimeDir,
+    log,
+  });
+  await sleeper.restore();
+  sleeper.configure(configStore.get());
+
   return {
     manager,
     agentBus,
     wss,
     httpServer,
     close: async () => {
+      sleeper?.stop();
       markCleanExit();
       clearInterval(agentExpirySweep);
       clearInterval(heartbeat);
