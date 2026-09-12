@@ -147,6 +147,20 @@ function StripMenu({ label, open, onToggle, children, align = 'right', anchorSty
 
 /** 에이전트 점 — 탭·stream 메뉴가 같은 것을 보게 하려고 한 곳에 둔다.
  *  도는 중이면 뛰고, 붙어만 있으면 흐리게. 없으면 아무것도 안 그린다. */
+function ageText(since: number): string {
+  const m = Math.max(0, Math.round((Date.now() - since) / 60000));
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return h < 48 ? `${h}h ${m % 60}m` : `${Math.floor(h / 24)}d`;
+}
+function sleepTitle(sleep: NonNullable<AgentState['sleep']>): string {
+  const mb = Math.round(sleep.rssBefore / 1048576);
+  if (sleep.state === 'sleeping') return `asleep ${ageText(sleep.since)} (${sleep.reason}) · ${mb} MB given back · any input resumes it`;
+  if (sleep.state === 'waking') return 'resuming — input is queued until the prompt is back';
+  return `resume failed: ${sleep.error ?? 'unknown'}`;
+}
+
 function AgentDot({ kind, running }: { kind: AgentState['kind'] | null | undefined; running: boolean }) {
   if (!kind) return null;
   return (
@@ -772,6 +786,23 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
   }, [sessionCwds, homeDir]);
 
   // pane이 사라졌는데 zen에 남아 있으면 빈 화면에 갇힌다. 주소도 같이 되돌린다.
+  // Agent sleep. The server does the work; these only ask and let the push update the state.
+  const sleepAgent = useCallback(async (sid: number) => {
+    try { await api.sleepAgent(API_BASE, sid); } catch (e) { setSleepNote({ sid, text: String((e as { body?: string }).body ? JSON.parse((e as { body: string }).body).error : (e as Error).message) }); }
+  }, []);
+  const wakeAgent = useCallback(async (sid: number) => {
+    try { await api.wakeAgent(API_BASE, sid); } catch {}
+  }, []);
+  const pinAgent = useCallback(async (sid: number, pin: boolean) => {
+    try { await api.pinAgent(API_BASE, sid, pin); } catch {}
+  }, []);
+  const [sleepNote, setSleepNote] = useState<{ sid: number; text: string } | null>(null);
+  useEffect(() => {
+    if (!sleepNote) return;
+    const t = setTimeout(() => setSleepNote(null), 2500);
+    return () => clearTimeout(t);
+  }, [sleepNote]);
+
   useEffect(() => {
     if (zenSid !== null && sessionIds.length > 0 && !sessionIds.includes(zenSid)) openZen(null);
   }, [sessionIds.join(','), zenSid, openZen]);
@@ -1018,7 +1049,9 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
     const cwd = sessionCwds[sid];
     const agent = agentStates[sid];
     const agentColor = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
-    const canRestore = !agent?.active && (lastAgentIds[sid]?.claude || lastAgentIds[sid]?.codex);
+    const sleep = agent?.sleep ?? null;
+    const asleep = sleep?.state === 'sleeping' || sleep?.state === 'waking';
+    const canRestore = !agent?.active && !asleep && (lastAgentIds[sid]?.claude || lastAgentIds[sid]?.codex);
     // 헤더의 탭. 왼쪽 덩어리(이름·#id·cwd)가 터미널 탭이고, 그 오른쪽에 뷰어 탭이 선다.
     // full로 나가 있으면 pane 안에서는 안 그린다 — 같은 탭을 두 번 마운트하지 않는다.
     const viewerState = open?.sid === sid ? null : (viewer.states[sid] ?? null);
@@ -1136,13 +1169,18 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
               opacity: U.headerBar ? 1 : isFocused ? 1 : 0.45,
             }}
           >
-            {agentColor ? (
+            {sleep ? (
+              <span className={`agent-sleep-mark ${sleep.state}`} title={sleepTitle(sleep)}>
+                {sleep.state === 'sleeping' ? '☾' : sleep.state === 'waking' ? '◌' : '✕'}
+              </span>
+            ) : agentColor ? (
               <span
                 className={agent?.active ? 'agent-dot-run' : undefined}
                 style={{ width: 5, height: 5, borderRadius: '50%', background: agentColor, opacity: agent?.active ? 1 : 0.4, flexShrink: 0 }}
                 title={agent?.active ? `${agent.kind} · running` : `${agent?.kind} · idle`}
               />
             ) : null}
+            {agent?.pin ? <span className="agent-pin-mark" title="kept awake — will not auto-sleep">☀</span> : null}
             <span style={{ color: agentColor ?? (isFocused ? 'var(--text)' : 'var(--text-soft)'), fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
               {name || `#${sid}`}
             </span>
@@ -1185,6 +1223,12 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
             ) : null}
             {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'var(--mono)' }}>zoom</span> : null}
 
+            {agent?.kind === 'claude-code' && !asleep && !dead ? (
+              <button className="reveal" onClick={(e) => { e.stopPropagation(); void sleepAgent(sid); }} style={miniLinkBtnStyle} title="sleep now: the process exits, the screen stays, any input resumes it">☾</button>
+            ) : null}
+            {agent?.kind === 'claude-code' && !dead ? (
+              <button className={agent.pin ? undefined : 'reveal'} onClick={(e) => { e.stopPropagation(); void pinAgent(sid, !agent.pin); }} style={{ ...miniLinkBtnStyle, ...(agent.pin ? { color: 'var(--warn)' } : null) }} title={agent.pin ? 'kept awake — click to allow auto sleep' : 'keep awake through auto sleep'}>{agent.pin ? '☀' : 'pin'}</button>
+            ) : null}
             {canRestore ? (
               <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="resume last agent session">restore</button>
             ) : null}
@@ -1220,7 +1264,7 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
         {/* isolation: xterm 6의 스크롤바는 보일 때 z-index 11이 된다(vscode scrollable-element).
             터미널을 자기 스태킹 컨텍스트에 가두지 않으면, 뷰어가 앞에 있어도 출력이 흐를 때마다
             터미널 스크롤바가 뷰어(z 10) 위로 떠오른다 — elementsFromPoint로 실측. */}
-        <div style={{ flex: 1, minHeight: 0, padding: U.termPad, isolation: 'isolate', ...(touch ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}>
+        <div className={asleep ? 'pane-asleep' : undefined} style={{ flex: 1, minHeight: 0, padding: U.termPad, isolation: 'isolate', ...(touch ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}>
           {!dead ? (
             <Terminal
               mux={mux}
@@ -1243,6 +1287,21 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
             </div>
           )}
         </div>
+        {/* Sleep pill: the one place the pane says "not live". A click wakes; so does any key,
+            which is why it must not steal focus from the terminal (mousedown is stopped, not the click). */}
+        {sleep || sleepNote?.sid === sid ? (
+          <div
+            className={`agent-sleep-pill ${sleep?.state ?? 'note'}`}
+            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
+            onClick={(e) => { e.stopPropagation(); if (sleep?.state === 'sleeping') void wakeAgent(sid); }}
+            title={sleep ? sleepTitle(sleep) : undefined}
+          >
+            {sleepNote?.sid === sid && !sleep ? <span>{sleepNote.text}</span>
+              : sleep!.state === 'sleeping' ? <><span className="mark">☾</span><span>sleeping · {ageText(sleep!.since)} · type or click to wake</span></>
+              : sleep!.state === 'waking' ? <><span className="mark spin">◌</span><span>waking…{sleep!.queued ? ` ${sleep!.queued} B queued` : ''}</span></>
+              : <><span className="mark">✕</span><span>resume failed: {sleep!.error ?? 'unknown'}</span><button onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle}>restore</button></>}
+          </div>
+        ) : null}
         {/* 뷰어 탭은 터미널 위에 덮는다. 터미널을 떼거나 숨기면 PTY 크기가 흔들리고 돌아올 때
             다시 fit해야 한다 — 그대로 깔아두면 탭을 되돌리는 순간 그 화면이다. */}
         {/* z-index: xterm의 레이어(link·decoration)가 자기 z-index를 갖고 있어, 없으면
@@ -1267,7 +1326,7 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane, viewer, open, viewerReload, openFull, selOpen, offerSelection]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane, viewer, open, viewerReload, openFull, selOpen, offerSelection, sleepAgent, wakeAgent, pinAgent, sleepNote]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
@@ -1767,7 +1826,7 @@ function App() {
         if (cancelled) return;
         const entries = memberIds.map((id) => {
           const state = all[id];
-          return [id, state ? { kind: state.kind as AgentState['kind'], active: state.active } : { kind: null, active: false }] as const;
+          return [id, state ? { kind: state.kind as AgentState['kind'], active: state.active, sleep: state.sleep ?? null, pin: state.pin === true } : { kind: null, active: false }] as const;
         });
         setAgentStates(Object.fromEntries(entries));
       } catch {}
@@ -1776,7 +1835,7 @@ function App() {
     const fallback = window.setInterval(() => { void sweep(); }, 60_000);
     const mux = muxRef.current;
     const unsubscribe = mux ? mux.onAgent((event) => {
-      setAgentStates((prev) => ({ ...prev, [event.sessionId]: { kind: event.kind, active: event.active } }));
+      setAgentStates((prev) => ({ ...prev, [event.sessionId]: { kind: event.kind, active: event.active, sleep: event.sleep ?? null, pin: event.pin === true } }));
     }) : undefined;
     return () => { cancelled = true; window.clearInterval(fallback); unsubscribe?.(); };
   }, [connected, workspaces.map((w) => w.id + ':' + layoutToSessionIds(w.layout).join('.')).join('|')]);

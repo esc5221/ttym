@@ -54,6 +54,32 @@ export function patchSessionAnnotations(
   return request(base, `/api/sessions/${sessionId}/annotations`, { method: 'PATCH', body: patch });
 }
 
-export function getAgentStates(base: BaseUrl): Promise<Record<number, { kind: string | null; active: boolean }>> {
+export interface AgentSleepInfo {
+  state: 'sleeping' | 'waking' | 'failed';
+  since: number;
+  agent: 'claude';
+  agentSessionId: string;
+  rssBefore: number;
+  reason: 'idle' | 'manual';
+  args?: string[];
+  error?: string;
+  queued?: number;
+}
+
+export function getAgentStates(base: BaseUrl): Promise<Record<number, { kind: string | null; active: boolean; sleep?: AgentSleepInfo | null; pin?: boolean }>> {
   return request(base, '/api/agent-states');
+}
+
+/** Agent sleep: the process goes, the screen stays, any input brings it back. */
+export function sleepAgent(base: BaseUrl, id: number): Promise<{ ok?: true; error?: string; sleep: AgentSleepInfo | null }> {
+  return request(base, `/api/sessions/${id}/sleep`, { method: 'POST', body: {} });
+}
+export function wakeAgent(base: BaseUrl, id: number): Promise<{ ok?: true; error?: string; sleep: AgentSleepInfo | null }> {
+  return request(base, `/api/sessions/${id}/wake`, { method: 'POST', body: {} });
+}
+export function pinAgent(base: BaseUrl, id: number, pin: boolean): Promise<{ ok: true; pin: boolean }> {
+  return request(base, `/api/sessions/${id}/pin`, { method: 'POST', body: { pin } });
+}
+export function getAgentSleepStatus(base: BaseUrl): Promise<{ sleeping: Array<{ sessionId: number } & AgentSleepInfo>; reclaimedBytes: number; afterMs: number }> {
+  return request(base, '/api/agent-sleep');
 }

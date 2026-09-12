@@ -234,6 +234,7 @@ function CustomCssField() {
 function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }) {
   return (
     <>
+      <SleepAfterField />
       <ResumeFlagsField
         agent="claude"
         configKey="agent-claude-resume-flags"
@@ -246,6 +247,54 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
       />
     </>
   );
+
+  /** Idle window before a pane's Claude is put to sleep. Off unless set; the status line shows what sleeping gave back. */
+  function SleepAfterField() {
+    const [draft, setDraft] = useState('');
+    const [loaded, setLoaded] = useState(false);
+    const [status, setStatus] = useState<{ sleeping: number; reclaimedBytes: number } | null>(null);
+
+    const refresh = () => {
+      void fetch(`${API_BASE}/api/agent-sleep`).then((r) => r.json())
+        .then((st) => setStatus({ sleeping: st.sleeping?.filter((s: { state: string }) => s.state === 'sleeping').length ?? 0, reclaimedBytes: st.reclaimedBytes ?? 0 }))
+        .catch(() => {});
+    };
+    useEffect(() => {
+      void fetch(`${API_BASE}/api/config`).then((r) => r.json()).then(({ values }) => {
+        setDraft(values['agent-sleep-after'] ?? '');
+        setLoaded(true);
+      }).catch(() => setLoaded(true));
+      refresh();
+      const t = window.setInterval(refresh, 15_000);
+      return () => window.clearInterval(t);
+    }, []);
+
+    const commit = () => onPatchConfig({ 'agent-sleep-after': draft.trim() || null });
+    const mb = status ? Math.round(status.reclaimedBytes / 1048576) : 0;
+
+    return (
+      <Field
+        label="sleep idle claude after"
+        hint="a pane's Claude Code exits after this long with no input, output or open turn; its screen stays, and the first key resumes it (3–5 s). empty or 0 = never. e.g. 30m · 2h"
+      >
+        <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
+          <input
+            value={loaded ? draft : ''}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+            placeholder="off"
+            style={{ ...inputStyle, width: 80 }}
+          />
+          {status ? (
+            <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
+              {status.sleeping > 0 ? `☾ ${status.sleeping} asleep · ${mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`} given back` : 'nothing asleep'}
+            </span>
+          ) : null}
+        </span>
+      </Field>
+    );
+  }
 
   function ResumeFlagsField({ agent, configKey, placeholder }: { agent: string; configKey: string; placeholder: string }) {
     const [draft, setDraft] = useState('');

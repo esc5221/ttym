@@ -58,3 +58,30 @@ body {
   background: var(--bg0);
   color: var(--text);
 }
+
+/* ── agent sleep ─────────────────────────────────────────────────────────
+   A sleeping pane keeps its last screen; the moon in the header and the pill
+   at the bottom are the only signs. Desaturated a little so "not live" reads
+   at a glance, but never dark — a dead pane has its own red banner. */
+.pane-asleep .xterm { filter: saturate(.7) brightness(.9); }
+.agent-sleep-mark { font-size: 11px; line-height: 1; flex-shrink: 0; color: var(--text-dim); }
+.agent-sleep-mark.sleeping { color: #8aa2ff; }
+.agent-sleep-mark.waking { color: var(--warn); display: inline-block; animation: agent-spin 1s linear infinite; }
+.agent-sleep-mark.failed { color: var(--err); }
+.agent-pin-mark { font-size: 10px; line-height: 1; color: var(--warn); flex-shrink: 0; }
+.agent-sleep-pill {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5;
+  display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px;
+  background: var(--bg2); border: 1px solid var(--line-strong); color: var(--text);
+  font-family: var(--mono); font-size: 11px; white-space: nowrap; box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  user-select: none; cursor: default; max-width: 90%; overflow: hidden; text-overflow: ellipsis;
+}
+.agent-sleep-pill.sleeping { cursor: pointer; }
+.agent-sleep-pill.sleeping:hover { border-color: #8aa2ff; }
+.agent-sleep-pill .mark { font-size: 13px; line-height: 1; }
+.agent-sleep-pill.sleeping .mark { color: #8aa2ff; }
+.agent-sleep-pill.waking .mark { color: var(--warn); }
+.agent-sleep-pill.failed { border-color: var(--err); color: var(--err); }
+.agent-sleep-pill.note { color: var(--warn); }
+.agent-sleep-pill .spin { display: inline-block; animation: agent-spin 1s linear infinite; }
+@keyframes agent-spin { to { transform: rotate(360deg); } }

@@ -825,7 +825,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     const sessions = manager.list();
     Promise.all(sessions.map(async (info) => {
       const meta = await manager.getMeta(info.id);
-      return [info.id, { kind: agentKindOf(meta), active: agentIsActive(meta) }] as const;
+      return [info.id, { kind: agentKindOf(meta), active: agentIsActive(meta), sleep: sleeper?.stateOf(info.id) ?? null, pin: meta.agentPin === true }] as const;
     })).then((entries) => {
       json(200, Object.fromEntries(entries));
     }).catch(() => json(500, { error: 'assembly failed' }));

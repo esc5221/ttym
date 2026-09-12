@@ -110,7 +110,15 @@ export function readUiStyle(): UiStyle {
 // 에이전트 식별색 — 정체는 이름의 색, 활동은 4px 점. 필 배지는 쓰지 않는다.
 export const AGENT_COLORS: Record<string, string> = { 'claude-code': 'var(--agent-claude)', codex: 'var(--agent-codex)' };
 
-export interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean }
+export interface AgentSleep {
+  state: 'sleeping' | 'waking' | 'failed';
+  since: number;
+  rssBefore: number;
+  reason: 'idle' | 'manual';
+  error?: string;
+  queued?: number;
+}
+export interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean; sleep?: AgentSleep | null; pin?: boolean }
 
 export function readLocalEchoEnabled(): boolean {
   try {
