@@ -121,6 +121,26 @@ ttym view close (<target> | --id <vid> | --all)
   push는 CMD.VIEW(0x11), 전체 스냅샷. active 탭·pane/full·스크롤은 클라이언트(localStorage).
 - 콘텐츠는 `/view/<cap>/…` (cap = 128bit 토큰, GET/HEAD, 읽기 전용 CORS). 제어는 `/api/sessions/:id/views`.
 
+## 에이전트 절전 (agent sleep)
+
+안 쓰는 pane의 Claude Code를 내리고(200~600MB/개), 입력이 오면 그 화면 그대로 되살린다. server/src/agent-sleep.ts.
+
+```sh
+ttym agent sleep <addr>        # 지금 재우기. /exit → SessionEnd 훅. 셸·PTY·세션은 그대로
+ttym agent wake <addr>         # 지금 깨우기 (입력·send·await가 오면 자동으로 깨어난다)
+ttym agent pin|unpin <addr>    # 자동 절전 제외 (헤더 ☀)
+ttym agent status              # 자는 pane 목록 + 돌려받은 RAM
+```
+
+- 자동: config `agent-sleep-after = 30m` (기본 off). 입력·출력이 그 시간 동안 없고, 열린 턴(`claudeTurnOpen`)·
+  대기 interaction·pin이 없을 때만. 한 번에 3개, 3초 간격.
+- 자는 동안 뷰어는 마지막 화면에 **frozen** — ATTACH/SNAPSHOT/`ttym screen`이 그 화면을 준다. 셸 프롬프트는 안 보인다.
+  화면은 `run/sleep-<id>.ansi`에 저장돼 서버 재시작 후에도 그대로.
+- 깨우기: 입력은 큐(64KB·20초)에 담고 `ttym agent resume claude <원래 플래그>`를 셸에 친다. SessionStart 훅 +
+  출력 500ms 정지 = 준비. 그때 스냅샷 한 장으로 갱신하고 큐를 순서대로 쓴다. 실측 1.7s. `ttym await`는 그대로 동작.
+- 상태는 meta.agentSleep(runtime key, PATCH 불가). CMD.AGENT push에 `sleep`·`pin`. 웹: 헤더 ☾/◌/✕, 하단 알약.
+- Codex는 아직 아님(RSS 40MB라 효과 작음). `--cmd claude`로 셸 없이 띄운 pane도 아직(PTY가 끝난다).
+
 ## 작업 지도 (map)
 
 메인 화면의 두 번째 모드(settings → main view → map). 세션별 AI 요약 + workspace 줄기 배치.
