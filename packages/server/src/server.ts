@@ -516,15 +516,17 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         // that decides how long that claim holds is not theirs to set.
         if (patch.claudeActive === true || patch.codexActive === true) {
           patch.agentActiveAt = Date.now();
-          // A turn is open from UserPromptSubmit (active, no source) until the next Stop.
-          // SessionStart also says "active" but names its source; that is a boot, not a turn.
-          if (patch.claudeSource === undefined) patch.claudeTurnOpen = true;
+          // Claude: a turn is open from UserPromptSubmit (active, no source) until the
+          // next Stop. SessionStart also says "active" but names its source — a boot.
+          // Codex has no prompt hook; its SessionStart looks the same as a turn, so no flag.
+          if (patch.claudeActive === true && patch.claudeSource === undefined) patch.claudeTurnOpen = true;
         }
         if (patch.claudeActive === false) patch.claudeTurnOpen = false;
         const merged = await manager.setMeta(id, patch);
         log(`AGENT META session=${id} keys=${Object.keys(patch).join(',')}`);
         // A SessionStart (session id + source) while the pane is waking: the agent is up.
-        if (typeof patch.claudeSessionId === 'string' && patch.claudeSource !== undefined) sleeper?.noteAgentStart(id);
+        // Codex's SessionStart carries only the id (its Stop writes null, never a string).
+        if ((typeof patch.claudeSessionId === 'string' && patch.claudeSource !== undefined) || typeof patch.codexSessionId === 'string') sleeper?.noteAgentStart(id);
         onAgentMeta?.(id, merged as Record<string, unknown>);
         json(200, merged);
       } catch {

@@ -44,7 +44,7 @@ export interface WorkspaceChangeEvent {
 export interface AgentSleepState {
   state: 'sleeping' | 'waking' | 'failed';
   since: number;
-  agent: 'claude';
+  agent: 'claude' | 'codex';
   agentSessionId: string;
   rssBefore: number;
   reason: 'idle' | 'manual';

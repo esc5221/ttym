@@ -274,8 +274,8 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
 
     return (
       <Field
-        label="sleep idle claude after"
-        hint="a pane's Claude Code exits after this long with no input, output or open turn; its screen stays, and the first key resumes it (3–5 s). empty or 0 = never. e.g. 30m · 2h"
+        label="sleep idle agent after"
+        hint="a pane's Claude Code or Codex exits after this long with no input, output or open turn; its screen stays, and the first key resumes it (3–5 s). empty or 0 = never. e.g. 30m · 2h"
       >
         <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
           <input

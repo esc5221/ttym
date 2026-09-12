@@ -139,7 +139,10 @@ ttym agent status              # 자는 pane 목록 + 돌려받은 RAM
 - 깨우기: 입력은 큐(64KB·20초)에 담고 `ttym agent resume claude <원래 플래그>`를 셸에 친다. SessionStart 훅 +
   출력 500ms 정지 = 준비. 그때 스냅샷 한 장으로 갱신하고 큐를 순서대로 쓴다. 실측 1.7s. `ttym await`는 그대로 동작.
 - 상태는 meta.agentSleep(runtime key, PATCH 불가). CMD.AGENT push에 `sleep`·`pin`. 웹: 헤더 ☾/◌/✕, 하단 알약.
-- Codex는 아직 아님(RSS 40MB라 효과 작음). `--cmd claude`로 셸 없이 띄운 pane도 아직(PTY가 끝난다).
+- Codex도 같은 방식(실측 RSS 280~320MB). 차이: 프롬프트 훅이 없어 "턴 열림"은 최근 10초 출력으로 판단하고,
+  SessionStart가 첫 턴에야 와서 깨우기는 프로세스 감지(1.5s + 출력 2s 정지)로 끝난다(실측 4초). resume에
+  `-c check_for_update_on_startup=false`를 붙인다 — 업데이트 대화상자가 큐의 첫 키를 먹는다.
+- `--cmd claude`로 셸 없이 띄운 pane은 아직(PTY가 끝난다).
 
 ## 작업 지도 (map)
 

@@ -1,5 +1,5 @@
 /**
- * Agent sleep: put an idle Claude Code down, bring it back on the first key.
+ * Agent sleep: put an idle Claude Code or Codex down, bring it back on the first key.
  *
  * A Claude Code process holds 200–600 MB whether or not anyone is talking to
  * it; 37 of them on one machine were 10 GB of swap. What a later `--resume`
@@ -30,10 +30,11 @@ import { resolve } from 'node:path';
 import type { Session } from './session.js';
 
 export type SleepPhase = 'sleeping' | 'waking' | 'failed';
+export type AgentKind = 'claude' | 'codex';
 export interface SleepState {
   state: SleepPhase;
   since: number;
-  agent: 'claude';
+  agent: AgentKind;
   /** The agent's own session id — what `resume` will use. */
   agentSessionId: string;
   rssBefore: number;
@@ -71,6 +72,14 @@ export interface SleeperDeps {
 }
 
 export const AGENT_RE = /(^|\/)(claude|codex)(\b|[-.\/])/;
+
+/** What differs per agent: where its session id lives, and what resume needs on top of the agent's own flags. */
+const KINDS: Record<AgentKind, { idKey: string; lastKey: string; resumeExtra: string[] }> = {
+  claude: { idKey: 'claudeSessionId', lastKey: 'claudeLastSessionId', resumeExtra: [] },
+  // Codex resume opens an "Update available?" dialog when one is out; the first
+  // queued key would answer it (1 = run brew). The check is a config switch.
+  codex: { idKey: 'codexSessionId', lastKey: 'codexLastSessionId', resumeExtra: ['-c', 'check_for_update_on_startup=false'] },
+};
 export const TICK_MS = 60_000;
 const SLEEP_BATCH = 3;
 const QUEUE_MAX_BYTES = 64 * 1024;
@@ -98,11 +107,15 @@ export function isPassiveInput(data: Buffer): boolean {
  */
 export function resumeArgsFrom(command: string): string[] {
   const tokens = command.trim().split(/\s+/).slice(1);
+  // Codex names the session as a subcommand: `codex resume <id> …`. Drop both.
+  if (tokens[0] === 'resume') { tokens.shift(); if (tokens[0] && !tokens[0].startsWith('-')) tokens.shift(); }
   const out: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
     if (t === '--resume' || t === '-r' || t === '--session-id') { i++; continue; }
-    if (t === '--continue' || t === '-c') continue;
+    if (t === '--continue' || t === '--last') continue;
+    // Claude's -c is --continue; Codex's -c is a config override that takes a value.
+    if (t === '-c') { if (tokens[i + 1]?.includes('=')) { out.push(t, tokens[++i]!); } continue; }
     out.push(t);
   }
   return out;
@@ -261,14 +274,16 @@ export class AgentSleeper {
     const procs = await this.deps.listProcesses();
     const agent = findAgentProcess(procs, session.childPid);
     if (!agent) return { ok: false, error: 'no agent process under this pane' };
-    if (agent.kind !== 'claude') return { ok: false, error: `${agent.kind}: not supported yet` };
-    const agentSessionId = (meta.claudeSessionId ?? meta.claudeLastSessionId) as string | null | undefined;
-    if (typeof agentSessionId !== 'string' || !agentSessionId) return { ok: false, error: 'no claude session id to resume from' };
+    const kind = KINDS[agent.kind];
+    const agentSessionId = (meta[kind.idKey] ?? meta[kind.lastKey]) as string | null | undefined;
+    if (typeof agentSessionId !== 'string' || !agentSessionId) return { ok: false, error: `no ${agent.kind} session id to resume from` };
+    const midTurn = this.midTurn(agent.kind, session, meta);
+    if (midTurn) return { ok: false, error: midTurn };
 
     this.inFlight.add(id);
     try {
       const pin = meta.agentPin === true;
-      const state: SleepState = { state: 'sleeping', since: this.now(), agent: 'claude', agentSessionId, rssBefore: agent.rss, reason, args: resumeArgsFrom(agent.command) };
+      const state: SleepState = { state: 'sleeping', since: this.now(), agent: agent.kind, agentSessionId, rssBefore: agent.rss, reason, args: resumeArgsFrom(agent.command) };
       // Freeze first: nothing that follows (Ctrl-C notices, the shell prompt) reaches a viewer.
       const snapshot = session.viewerSnapshot();
       session.freeze(snapshot);
@@ -332,8 +347,8 @@ export class AgentSleeper {
     // ttym may predate TTYM_PORT awareness — an env prefix is harmless everywhere.
     session.writeRaw(Buffer.from([0x15]));
     await this.delay(100);
-    const extra = (l.state.args ?? []).map(shellQuote).join(' ');
-    session.writeRaw(Buffer.from(`PORT=${this.deps.port} ttym agent resume claude${extra ? ' ' + extra : ''}\r`));
+    const extra = [...KINDS[l.state.agent].resumeExtra, ...(l.state.args ?? [])].map(shellQuote).join(' ');
+    session.writeRaw(Buffer.from(`PORT=${this.deps.port} ttym agent resume ${l.state.agent}${extra ? ' ' + extra : ''}\r`));
 
     const ready = await this.waitReady(id, session);
     const cur = this.live.get(id);
@@ -394,10 +409,18 @@ export class AgentSleeper {
     session.inputGate = null;
   }
 
+  /**
+   * Claude: a turn that began with a prompt and has not seen Stop — however long
+   * ago: an unanswered permission prompt looks exactly like this, and it will not
+   * survive resume. Codex has no prompt hook (and its Stop hook may be off), so
+   * the only signal is output: anything in the last 10 s means it is working.
+   */
+  private midTurn(kind: AgentKind, session: Session, meta: Record<string, unknown>): string | null {
+    if (kind === 'claude') return meta.claudeTurnOpen === true ? 'agent is mid-turn' : null;
+    return this.now() - session.lastOutputAt < this.t(10_000) ? 'agent is mid-turn (output in the last 10 s)' : null;
+  }
+
   private async refusal(id: number, session: Session, meta: Record<string, unknown>, checkIdle: boolean): Promise<string | null> {
-    // A turn that began with a prompt and has not seen Stop — however long ago: an
-    // unanswered permission prompt looks exactly like this, and it will not survive resume.
-    if (meta.claudeTurnOpen === true) return 'agent is mid-turn';
     if (this.deps.hasPendingInteraction(id)) return 'an interaction is pending';
     if (meta.agentPin === true) return 'pinned awake';
     if (checkIdle) {
@@ -441,11 +464,12 @@ export class AgentSleeper {
       const quietFor = now - (session.lastOutputAt || startedAt);
       if (l.started && quietFor >= this.t(500)) return { ok: true };
       const elapsed = now - startedAt;
-      if (!l.started && elapsed >= this.t(3000) && quietFor >= this.t(2000) && now - lastProcCheck >= this.t(1000)) {
+      if (!l.started && elapsed >= this.t(1500) && quietFor >= this.t(2000) && now - lastProcCheck >= this.t(1000)) {
         lastProcCheck = now;
         const agent = findAgentProcess(await this.deps.listProcesses(), session.childPid);
         if (agent) {
-          this.deps.log(`WAKE session=${id} agent process up (pid ${agent.pid}) but no SessionStart hook — proceeding; check the pane's TTYM_PORT`);
+          // Codex reports SessionStart on its first turn, not at boot — the process is the normal signal there.
+          if (l.state.agent === 'claude') this.deps.log(`WAKE session=${id} agent process up (pid ${agent.pid}) but no SessionStart hook — proceeding; check the pane's TTYM_PORT`);
           l.started = true;
           continue;
         }

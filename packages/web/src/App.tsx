@@ -1223,10 +1223,10 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
             ) : null}
             {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'var(--mono)' }}>zoom</span> : null}
 
-            {agent?.kind === 'claude-code' && !asleep && !dead ? (
+            {agent?.kind && !asleep && !dead ? (
               <button className="reveal" onClick={(e) => { e.stopPropagation(); void sleepAgent(sid); }} style={miniLinkBtnStyle} title="sleep now: the process exits, the screen stays, any input resumes it">☾</button>
             ) : null}
-            {agent?.kind === 'claude-code' && !dead ? (
+            {agent?.kind && !dead ? (
               <button className={agent.pin ? undefined : 'reveal'} onClick={(e) => { e.stopPropagation(); void pinAgent(sid, !agent.pin); }} style={{ ...miniLinkBtnStyle, ...(agent.pin ? { color: 'var(--warn)' } : null) }} title={agent.pin ? 'kept awake — click to allow auto sleep' : 'keep awake through auto sleep'}>{agent.pin ? '☀' : 'pin'}</button>
             ) : null}
             {canRestore ? (

@@ -57,7 +57,7 @@ export function patchSessionAnnotations(
 export interface AgentSleepInfo {
   state: 'sleeping' | 'waking' | 'failed';
   since: number;
-  agent: 'claude';
+  agent: 'claude' | 'codex';
   agentSessionId: string;
   rssBefore: number;
   reason: 'idle' | 'manual';

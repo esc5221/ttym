@@ -112,6 +112,9 @@ describe('helpers', () => {
     expect(resumeArgsFrom('claude -c')).toEqual([]);
     expect(resumeArgsFrom('claude --session-id x -r y --verbose')).toEqual(['--verbose']);
     expect(resumeArgsFrom('claude')).toEqual([]);
+    expect(resumeArgsFrom('codex resume 01a0-9f --dangerously-bypass-approvals-and-sandbox')).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
+    expect(resumeArgsFrom('codex resume --last')).toEqual([]);
+    expect(resumeArgsFrom('codex -c model="o3" --full-auto')).toEqual(['-c', 'model="o3"', '--full-auto']);
   });
 
   it('focus reports and mouse events are passive; keys are not', () => {
@@ -187,9 +190,20 @@ describe('sleep', () => {
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
   });
 
-  it('codex is recognised but not slept yet', async () => {
-    h = harness({ procs: () => [{ pid: AGENT, ppid: SHELL, rss: 1, command: 'codex' }] });
-    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'codex: not supported yet' });
+  it('codex sleeps the same way, resumes with the update check off, and counts recent output as a turn', async () => {
+    let alive = true;
+    h = harness({ meta: { claudeLastSessionId: null, codexSessionId: 'cdx-1' }, procs: () => (alive ? [{ pid: AGENT, ppid: SHELL, rss: 40 * 1048576, command: 'codex --dangerously-bypass-approvals-and-sandbox' }] : []) });
+    let presses = 0;
+    h.session.writeRaw = (d) => { h.session.raw.push(d.toString('latin1')); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
+    h.session.lastOutputAt = Date.now();
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'agent is mid-turn (output in the last 10 s)' });
+    h.session.lastOutputAt = Date.now() - 60_000;
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
+    expect(h.meta().agentSleep).toMatchObject({ agent: 'codex', agentSessionId: 'cdx-1', args: ['--dangerously-bypass-approvals-and-sandbox'] });
+    h.session.raw = [];
+    h.session.write(Buffer.from('x'));
+    await tick(5);
+    expect(h.session.raw[1]).toBe('PORT=7692 ttym agent resume codex -c check_for_update_on_startup=false --dangerously-bypass-approvals-and-sandbox\r');
   });
 });
 
