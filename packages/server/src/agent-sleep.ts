@@ -6,9 +6,10 @@
  * needs is not the process but the session id, and ttym already has that
  * (the hooks write claudeLastSessionId every turn). So:
  *
- *   sleep   `/exit` to the agent (its own clean shutdown → SessionEnd hook),
- *           the shell underneath stays; viewers are frozen on the agent's
- *           last screen so the shell prompt never shows.
+ *   sleep   Ctrl-C ×3 to the agent (its own exit path, no transcript entry —
+ *           /exit would be replayed as a turn on every resume); the shell
+ *           underneath stays; viewers are frozen on the agent's last screen
+ *           so the shell prompt never shows.
  *   wake    the first input (a key, `ttym send`, an await) is queued, not
  *           written; `ttym agent resume` runs in the shell; when the agent's
  *           SessionStart hook has fired and output has settled, viewers get
@@ -268,7 +269,7 @@ export class AgentSleeper {
     try {
       const pin = meta.agentPin === true;
       const state: SleepState = { state: 'sleeping', since: this.now(), agent: 'claude', agentSessionId, rssBefore: agent.rss, reason, args: resumeArgsFrom(agent.command) };
-      // Freeze first: nothing that follows (Ctrl-C notice, /exit, the shell prompt) reaches a viewer.
+      // Freeze first: nothing that follows (Ctrl-C notices, the shell prompt) reaches a viewer.
       const snapshot = session.viewerSnapshot();
       session.freeze(snapshot);
       await writeFile(this.snapshotPath(id), snapshot).catch(() => {});
@@ -277,12 +278,15 @@ export class AgentSleeper {
       this.deps.onState(id, state, pin);
       this.deps.log(`SLEEP session=${id} reason=${reason} rss=${Math.round(agent.rss / 1048576)}MB agent=${agentSessionId.slice(0, 8)}`);
 
-      // Ctrl-C clears a half-typed line (an empty line just gets the "press again" notice); then /exit.
-      session.writeRaw(Buffer.from([0x03]));
-      await this.delay(250);
-      session.writeRaw(Buffer.from('/exit'));
-      await this.delay(150);
-      session.writeRaw(Buffer.from([0x0d]));
+      // Ctrl-C, three times. `/exit` would do, but it is a command: the transcript
+      // keeps it, and every resume then shows "❯ /exit ⎿ See ya!" in the middle
+      // of the conversation. Ctrl-C leaves nothing behind. The first press clears
+      // a half-typed line or shows the "press again" notice, the second exits or
+      // shows the notice, the third exits; one extra reaches the shell, harmless.
+      for (let i = 0; i < 3; i++) {
+        session.writeRaw(Buffer.from([0x03]));
+        await this.delay(220);
+      }
 
       const gone = await this.waitGone(session.childPid, agent.pid, 8000);
       if (!gone) {

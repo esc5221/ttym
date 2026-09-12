@@ -126,7 +126,7 @@ ttym view close (<target> | --id <vid> | --all)
 안 쓰는 pane의 Claude Code를 내리고(200~600MB/개), 입력이 오면 그 화면 그대로 되살린다. server/src/agent-sleep.ts.
 
 ```sh
-ttym agent sleep <addr>        # 지금 재우기. /exit → SessionEnd 훅. 셸·PTY·세션은 그대로
+ttym agent sleep <addr>        # 지금 재우기. Ctrl-C ×3 (transcript에 안 남음). 셸·PTY·세션은 그대로
 ttym agent wake <addr>         # 지금 깨우기 (입력·send·await가 오면 자동으로 깨어난다)
 ttym agent pin|unpin <addr>    # 자동 절전 제외 (헤더 ☀)
 ttym agent status              # 자는 pane 목록 + 돌려받은 RAM

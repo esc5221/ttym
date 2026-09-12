@@ -129,16 +129,17 @@ describe('sleep', () => {
   let h: ReturnType<typeof harness>;
   afterEach(() => h.cleanup());
 
-  it('freezes the screen, then Ctrl-C · /exit · CR, and records the state once the process is gone', async () => {
+  it('freezes the screen, then Ctrl-C three times, and records the state once the process is gone', async () => {
     let alive = true;
     h = harness({ procs: () => (alive ? [claudeProc(256 * 1048576)] : []) });
     // The agent exits on /exit: drop it from the table once the CR is written.
     const origRaw = h.session.writeRaw.bind(h.session);
-    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\r') alive = false; };
+    let presses = 0;
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
 
     const r = await h.sleeper.sleep(1, 'manual');
     expect(r).toEqual({ ok: true });
-    expect(h.session.raw).toEqual(['\x03', '/exit', '\r']);
+    expect(h.session.raw).toEqual(['\x03', '\x03', '\x03']);   // never /exit: that would live on in the transcript
     expect(h.session.isFrozen).toBe(true);
     expect(h.session.frozen!.snapshot).toBe('claude screen');
     expect(existsSync(join(h.dir, 'sleep-1.ansi'))).toBe(true);
@@ -147,7 +148,7 @@ describe('sleep', () => {
     expect(h.killed).toEqual([]);
   });
 
-  it('escalates to SIGTERM then SIGKILL when /exit is ignored, and gives up cleanly if even that fails', async () => {
+  it('escalates to SIGTERM then SIGKILL when Ctrl-C is ignored, and gives up cleanly if even that fails', async () => {
     h = harness();
     const r = await h.sleeper.sleep(1, 'manual');
     expect(r).toEqual({ ok: false, error: 'agent did not exit' });
@@ -181,7 +182,8 @@ describe('sleep', () => {
     let alive = true;
     h = harness({ meta: { claudeActive: true, claudeSource: 'startup' }, procs: () => (alive ? [claudeProc()] : []) });
     const origRaw = h.session.writeRaw.bind(h.session);
-    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\r') alive = false; };
+    let presses = 0;
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
   });
 
@@ -199,7 +201,8 @@ describe('wake', () => {
     let alive = true;
     h = harness({ procs: () => (alive ? [claudeProc()] : []) });
     const origRaw = h.session.writeRaw.bind(h.session);
-    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\r' && alive) alive = false; };
+    let presses = 0;
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
     h.session.raw = [];
     return { setAlive: (v: boolean) => { alive = v; } };
@@ -288,7 +291,8 @@ describe('auto sleep', () => {
     let alive = true;
     h = harness({ procs: () => (alive ? [claudeProc()] : []), config: { 'agent-sleep-after': '1m' } });
     const origRaw = h.session.writeRaw.bind(h.session);
-    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\r') alive = false; };
+    let presses = 0;
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
     h.session.lastInputAt = Date.now();
     h.session.lastOutputAt = Date.now() - 120_000;
     expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'input too recent' });
@@ -314,7 +318,8 @@ describe('restart', () => {
     let alive = true;
     h = harness({ procs: () => (alive ? [claudeProc()] : []) });
     const origRaw = h.session.writeRaw.bind(h.session);
-    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\r') alive = false; };
+    let presses = 0;
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
     const saved = { ...(h.meta().agentSleep as SleepState), state: 'waking' as const };
 
