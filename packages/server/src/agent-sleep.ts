@@ -231,7 +231,13 @@ export class AgentSleeper {
   /** The SessionStart hook: an agent came up in this pane. Ends a wake's first phase. */
   noteAgentStart(id: number): void {
     const l = this.live.get(id);
-    if (l && l.state.state === 'waking') l.started = true;
+    if (!l) return;
+    if (l.state.state === 'waking') l.started = true;
+    // An agent came up in a pane marked failed: the user fixed it themselves. Clear the mark.
+    if (l.state.state === 'failed') {
+      this.live.delete(id);
+      void this.deps.sessions.setMeta(id, { agentSleep: null }).then(() => this.deps.onState(id, null, false));
+    }
   }
 
   async pin(id: number, pin: boolean): Promise<void> {
@@ -244,6 +250,7 @@ export class AgentSleeper {
    * never the safety checks (mid-turn, pending interaction, pinned).
    */
   async sleep(id: number, reason: 'idle' | 'manual'): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (this.live.get(id)?.state.state === 'failed') this.live.delete(id); // a failed wake does not block a new sleep
     if (this.live.has(id) || this.inFlight.has(id)) return { ok: false, error: 'already sleeping' };
     const session = this.deps.sessions.get(id);
     if (!session || session.isDead) return { ok: false, error: 'not found' };
@@ -413,11 +420,15 @@ export class AgentSleeper {
   }
 
   /**
-   * Ready = SessionStart arrived and output has been quiet for 500 ms. Failed =
-   * no SessionStart and no agent process 10 s in with a quiet shell, or 45 s.
+   * Ready = the agent is up and output has been quiet for 500 ms. "Up" is the
+   * SessionStart hook, or — if the hook never reaches this server (a pane
+   * whose env names another port) — the agent process under the shell with
+   * output quiet for 2 s. Failed = no agent process 10 s in with a quiet
+   * shell, or 45 s.
    */
   private async waitReady(id: number, session: Session): Promise<{ ok: true } | { ok: false; error: string }> {
     const startedAt = this.now();
+    let lastProcCheck = 0;
     for (;;) {
       await this.delay(250);
       const l = this.live.get(id);
@@ -426,9 +437,15 @@ export class AgentSleeper {
       const quietFor = now - (session.lastOutputAt || startedAt);
       if (l.started && quietFor >= this.t(500)) return { ok: true };
       const elapsed = now - startedAt;
-      if (!l.started && elapsed >= this.t(10_000) && quietFor >= this.t(2000)) {
-        const procs = await this.deps.listProcesses();
-        if (!findAgentProcess(procs, session.childPid)) return { ok: false, error: `resume did not start: ${lastLines(session.viewerSnapshot())}` };
+      if (!l.started && elapsed >= this.t(3000) && quietFor >= this.t(2000) && now - lastProcCheck >= this.t(1000)) {
+        lastProcCheck = now;
+        const agent = findAgentProcess(await this.deps.listProcesses(), session.childPid);
+        if (agent) {
+          this.deps.log(`WAKE session=${id} agent process up (pid ${agent.pid}) but no SessionStart hook — proceeding; check the pane's TTYM_PORT`);
+          l.started = true;
+          continue;
+        }
+        if (elapsed >= this.t(10_000)) return { ok: false, error: `resume did not start: ${lastLines(session.viewerSnapshot())}` };
       }
       if (elapsed >= this.t(45_000)) return { ok: false, error: l.started ? 'agent started but never settled' : 'resume timed out' };
     }

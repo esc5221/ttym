@@ -231,8 +231,12 @@ export class SessionManager {
 
       try {
         // Preserve original sessionId so URLs and workspace layouts keep working.
+        // The same env a fresh session gets: without TTYM_PORT here, a pane the
+        // boot re-spawned had its agent hooks talking to whatever listens on 7690
+        // — on a dev server that was production, and another server's session id.
         const session = await Session.create(
           snap.id, snap.cmd, snap.cols, snap.rows, this.runtimeDir, cwd,
+          { ...this.extraSessionEnv, TTYM_SESSION_ID: String(snap.id) },
         );
         this.sessions.set(session.id, session);
         this.nextId = Math.max(this.nextId, snap.id + 1);

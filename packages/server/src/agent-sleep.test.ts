@@ -246,6 +246,17 @@ describe('wake', () => {
     expect(h.session.resyncs).toBe(1);
   });
 
+  it('an agent that comes up without its hook reaching us still counts as started (process under the shell, shell quiet)', async () => {
+    const { setAlive } = await asleep();
+    h.session.write(Buffer.from('x'));
+    await tick(5);
+    setAlive(true);              // claude appears under the shell; no SessionStart ever arrives
+    await tick(120);
+    expect(h.meta().agentSleep).toBeNull();
+    expect(h.session.writes).toEqual(['x']);
+    expect(h.logs.some((m) => /no SessionStart hook/.test(m))).toBe(true);
+  });
+
   it('a resume that never starts is reported as failed, the pane is thawed so the shell is visible, the queue is dropped', async () => {
     await asleep();
     h.session.screen = 'zsh: command not found: claude\n~ ❯';

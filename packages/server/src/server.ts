@@ -1251,6 +1251,9 @@ export async function createServer(port: number): Promise<TtymServer> {
     log('SAFE MODE: last 3 boots died within 10s — skipping session recovery (holders untouched)');
   }
 
+  // The port is known before listen (0 only in tests); panes the boot re-spawns
+  // must carry it, or their hooks address the wrong server.
+  if (port > 0) manager.setExtraSessionEnv({ TTYM_PORT: String(port) });
   await manager.boot(safeMode ? new Set<number>() : restoreAllowlist);
 
   // Sweep the accumulation of dead sessions' files. Live sessions and every
