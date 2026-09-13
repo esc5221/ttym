@@ -318,6 +318,21 @@ describe('wake', () => {
     expect(h.logs.some((m) => /no SessionStart hook/.test(m))).toBe(true);
   });
 
+  it('an agent that comes up but never goes quiet (auto-compact on resume) still gets its queue after a grace period', async () => {
+    await asleep();
+    h.session.write(Buffer.from('typed while asleep'));
+    await tick(5);
+    h.agentStarted();
+    // Output keeps flowing: a progress bar repainting.
+    const noisy = setInterval(() => h.session.output(), 2);
+    await tick(150);
+    clearInterval(noisy);
+    expect(h.meta().agentSleep).toBeNull();
+    expect(h.session.writes).toEqual(['typed while asleep']);
+    expect(h.session.isFrozen).toBe(false);
+    expect(h.logs.some((m) => /still busy after 8s — proceeding/.test(m))).toBe(true);
+  });
+
   it('a resume that never starts is reported as failed, the pane is thawed so the shell is visible, the queue is dropped', async () => {
     await asleep();
     h.session.screen = 'zsh: command not found: claude\n~ ❯';

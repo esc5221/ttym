@@ -354,7 +354,7 @@ export class AgentSleeper {
 
       const gone = await this.waitGone(session.childPid, agent.pid, 8000);
       if (!gone) {
-        this.deps.log(`SLEEP session=${id} /exit ignored → SIGTERM`);
+        this.deps.log(`SLEEP session=${id} Ctrl-C ignored → SIGTERM`);
         this.deps.kill(agent.pid, 'SIGTERM');
         if (!(await this.waitGone(session.childPid, agent.pid, 4000))) {
           this.deps.kill(agent.pid, 'SIGKILL');
@@ -531,13 +531,23 @@ export class AgentSleeper {
   private async waitReady(id: number, session: Session): Promise<{ ok: true } | { ok: false; error: string }> {
     const startedAt = this.now();
     let lastProcCheck = 0;
+    let startedSeenAt: number | null = null;
     for (;;) {
       await this.delay(250);
       const l = this.live.get(id);
       if (!l) return { ok: true };
       const now = this.now();
       const quietFor = now - (session.lastOutputAt || startedAt);
+      if (l.started && startedSeenAt === null) startedSeenAt = now;
       if (l.started && quietFor >= this.t(500)) return { ok: true };
+      // Up but never quiet: a resume into a full context runs auto-compact for
+      // minutes, progress bar and all (session 1172, 2026-09-13). The agent is
+      // there and takes typing into its composer meanwhile, so hand it the queue
+      // rather than call this a failure and drop the keys.
+      if (l.started && startedSeenAt !== null && now - startedSeenAt >= this.t(8000)) {
+        this.deps.log(`WAKE session=${id} agent up but still busy after 8s — proceeding`);
+        return { ok: true };
+      }
       const elapsed = now - startedAt;
       if (!l.started && elapsed >= this.t(1500) && quietFor >= this.t(2000) && now - lastProcCheck >= this.t(1000)) {
         lastProcCheck = now;
@@ -550,7 +560,7 @@ export class AgentSleeper {
         }
         if (elapsed >= this.t(10_000)) return { ok: false, error: `resume did not start: ${lastLines(session.viewerSnapshot())}` };
       }
-      if (elapsed >= this.t(45_000)) return { ok: false, error: l.started ? 'agent started but never settled' : 'resume timed out' };
+      if (elapsed >= this.t(45_000)) return { ok: false, error: 'resume timed out' };
     }
   }
 
