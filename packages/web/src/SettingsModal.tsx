@@ -248,47 +248,69 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
     </>
   );
 
-  /** Idle window before a pane's Claude is put to sleep. Off unless set; the status line shows what sleeping gave back. */
+  /**
+   * Auto sleep: on by default at 30m. The toggle writes "off" (an explicit
+   * value, not an empty key — an empty key means "never configured", which is
+   * on) and restores the last window when switched back.
+   */
   function SleepAfterField() {
-    const [draft, setDraft] = useState('');
-    const [loaded, setLoaded] = useState(false);
-    const [status, setStatus] = useState<{ sleeping: number; reclaimedBytes: number } | null>(null);
+    const PRESETS = ['10m', '30m', '1h', '2h'] as const;
+    const [value, setValue] = useState<string | null>(null);   // null until loaded; '' = key unset = default
+    const [status, setStatus] = useState<{ sleeping: number; reclaimedBytes: number; afterMs: number } | null>(null);
 
     const refresh = () => {
       void fetch(`${API_BASE}/api/agent-sleep`).then((r) => r.json())
-        .then((st) => setStatus({ sleeping: st.sleeping?.filter((s: { state: string }) => s.state === 'sleeping').length ?? 0, reclaimedBytes: st.reclaimedBytes ?? 0 }))
+        .then((st) => setStatus({ sleeping: st.sleeping?.filter((s: { state: string }) => s.state === 'sleeping').length ?? 0, reclaimedBytes: st.reclaimedBytes ?? 0, afterMs: st.afterMs ?? 0 }))
         .catch(() => {});
     };
     useEffect(() => {
-      void fetch(`${API_BASE}/api/config`).then((r) => r.json()).then(({ values }) => {
-        setDraft(values['agent-sleep-after'] ?? '');
-        setLoaded(true);
-      }).catch(() => setLoaded(true));
+      void fetch(`${API_BASE}/api/config`).then((r) => r.json()).then(({ values }) => setValue(values['agent-sleep-after'] ?? '')).catch(() => setValue(''));
       refresh();
       const t = window.setInterval(refresh, 15_000);
       return () => window.clearInterval(t);
     }, []);
 
-    const commit = () => onPatchConfig({ 'agent-sleep-after': draft.trim() || null });
+    const write = (next: string) => {
+      setValue(next);
+      onPatchConfig({ 'agent-sleep-after': next || null });
+      window.setTimeout(refresh, 300);
+    };
+    const off = value !== null && /^(off|never|no|0)$/i.test(value.trim());
+    // The server is the authority on the current window; show it, not the raw text.
+    const current = status && status.afterMs > 0 ? (status.afterMs % 3600_000 === 0 ? `${status.afterMs / 3600_000}h` : `${Math.round(status.afterMs / 60_000)}m`) : '';
     const mb = status ? Math.round(status.reclaimedBytes / 1048576) : 0;
 
     return (
       <Field
-        label="sleep idle agent after"
-        hint="a pane's Claude Code or Codex exits after this long with no input, output or open turn; its screen stays, and the first key resumes it (3–5 s). empty or 0 = never. e.g. 30m · 2h"
+        label="sleep idle agents"
+        hint="an idle Claude Code or Codex exits after the chosen time — 200–600 MB back each. its screen stays and the first key resumes it (2–4 s). never while it reports a background task, a scheduled wakeup, or a prompt waiting for you."
       >
         <span style={{ display: 'inline-flex', gap: 10, alignItems: 'center' }}>
-          <input
-            value={loaded ? draft : ''}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
-            placeholder="off"
-            style={{ ...inputStyle, width: 80 }}
+          <Segmented
+            options={['on', 'off'] as const}
+            value={off ? 'off' : 'on'}
+            onChange={(v) => write(v === 'off' ? 'off' : '30m')}
           />
+          {off ? null : (
+            <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+              {PRESETS.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => write(p)}
+                  style={{
+                    ...actionBtnStyle, padding: '2px 8px', fontSize: 11,
+                    background: current === p ? 'var(--accent-bg)' : 'var(--bg2)',
+                    color: current === p ? 'var(--accent)' : 'var(--text-soft)',
+                    borderColor: current === p ? 'var(--accent-dim)' : 'var(--line)',
+                  }}
+                >{p}</button>
+              ))}
+              {current && !PRESETS.includes(current as typeof PRESETS[number]) ? <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{current}</span> : null}
+            </span>
+          )}
           {status ? (
             <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>
-              {status.sleeping > 0 ? `☾ ${status.sleeping} asleep · ${mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`} given back` : 'nothing asleep'}
+              {status.sleeping > 0 ? `☾ ${status.sleeping} · ${mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`} back` : ''}
             </span>
           ) : null}
         </span>

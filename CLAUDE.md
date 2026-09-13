@@ -131,7 +131,8 @@ ttym agent wake <addr>         # 지금 깨우기 (입력·send·await가 오면
 ttym agent status              # 자는 pane 목록 + 돌려받은 RAM
 ```
 
-- 자동: config `agent-sleep-after = 30m` (기본 off). 입력·출력이 그 시간 동안 없고 아래 "바쁨" 신호가 없을 때만.
+- 자동: **기본 켜짐, 30분**. 설정(agents 탭)에서 on/off와 10m·30m·1h·2h. config 키 `agent-sleep-after` —
+  키가 없으면 기본값(30m), `off`/`never`/`0`이면 끔. 입력·출력이 그 시간 동안 없고 아래 "바쁨" 신호가 없을 때만.
   한 번에 3개, 3초 간격. pin 같은 수동 예외는 없다 — 에이전트가 스스로 말하는 것으로 판단한다.
 - "바쁨" 판정(권위 순, server/src/agent-sleep.ts `whyBusy`):
   1. `~/.claude/sessions/<pid>.json`의 status — `waiting`(permission·대화상자, `waitingFor`에 이름)·`busy`

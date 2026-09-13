@@ -81,14 +81,18 @@ function harness(opts: { procs?: () => ProcInfo[]; meta?: Record<string, unknown
 const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 
 describe('helpers', () => {
-  it('parses the idle window like map-interval: minutes by default, under a minute is off', () => {
+  it('parses the idle window: minutes by default, unset means on at 30m, "off" means off', () => {
     expect(parseSleepAfter('30m')).toBe(30 * 60_000);
     expect(parseSleepAfter('2h')).toBe(2 * 3600_000);
     expect(parseSleepAfter('90s')).toBe(90_000);
     expect(parseSleepAfter('45')).toBe(45 * 60_000);
+    // Never configured → the default, so a fresh install sleeps idle agents.
+    expect(parseSleepAfter(undefined)).toBe(30 * 60_000);
+    expect(parseSleepAfter('')).toBe(30 * 60_000);
+    expect(parseSleepAfter('off')).toBe(0);
+    expect(parseSleepAfter('Never')).toBe(0);
     expect(parseSleepAfter('0')).toBe(0);
-    expect(parseSleepAfter('30s')).toBe(0);
-    expect(parseSleepAfter(undefined)).toBe(0);
+    expect(parseSleepAfter('30s')).toBe(0); // under a minute reads as a mistake
     expect(parseSleepAfter('soon')).toBe(0);
   });
 
@@ -336,9 +340,12 @@ describe('auto sleep', () => {
   let h: ReturnType<typeof harness>;
   afterEach(() => h.cleanup());
 
-  it('off by default: an idle pane is never touched', async () => {
-    h = harness();
-    expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'auto-sleep is off (agent-sleep-after)' });
+  it('on by default — a fresh server sleeps idle panes without any config', async () => {
+    h = harness();  // no config at all
+    expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'input too recent' }); // the window applies, not "off"
+    h.cleanup();
+    h = harness({ config: { 'agent-sleep-after': 'off' } });
+    expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'auto sleep is off (settings → agents)' });
   });
 
   it('with a window set, sleeps only once input and output are both older than it', async () => {

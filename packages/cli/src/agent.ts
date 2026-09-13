@@ -214,7 +214,7 @@ export async function cmdAgent() {
       const st = await fetchJson(getPort(), '/api/agent-sleep');
       if (st) {
         const mb = (n) => `${Math.round(n / 1048576)}MB`;
-        console.log(`  sleep: ${st.afterMs > 0 ? `auto after ${Math.round(st.afterMs / 60000)}m` : 'auto off (agent-sleep-after)'}, ${st.sleeping.length} pane(s), ${mb(st.reclaimedBytes)} reclaimed`);
+        console.log(`  sleep: ${st.afterMs > 0 ? `auto after ${Math.round(st.afterMs / 60000)}m` : 'auto off'}, ${st.sleeping.length} pane(s), ${mb(st.reclaimedBytes)} reclaimed`);
         for (const s of st.sleeping) {
           const age = Math.round((Date.now() - s.since) / 60000);
           console.log(`    #${s.sessionId}  ${s.state.padEnd(8)}  ${mb(s.rssBefore)}  ${age}m  ${s.reason}${s.error ? `  ${s.error}` : ''}`);
@@ -381,7 +381,7 @@ export async function cmdAgent() {
   console.log('  info [session-id]     Show linked agent sessions');
   console.log('  sleep|wake <addr>     Put a pane\'s agent to sleep (process gone, screen kept,');
   console.log('                        any input resumes it) / wake it now. <addr> = ws:name|:name|#id');
-  console.log('                        auto sleep: config agent-sleep-after = 30m (0 = off). never while the');
+  console.log('                        auto sleep is on (30m) unless config agent-sleep-after = off. never while the');
   console.log('                        agent reports a background task, a scheduled wakeup, or a prompt waiting');
   console.log('');
   console.log('agents:');

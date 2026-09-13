@@ -96,10 +96,19 @@ export const TICK_MS = 60_000;
 const SLEEP_BATCH = 3;
 const QUEUE_MAX_BYTES = 64 * 1024;
 
-/** Duration text from config: "30m" · "2h" · "90s" · "0" (off). Under a minute is a misconfiguration → off. */
+/** Auto-sleep when the config key was never written. On, at half an hour. */
+export const SLEEP_AFTER_DEFAULT_MS = 30 * 60_000;
+
+/**
+ * Duration text from config: "30m" · "2h" · "90s". Unset means the default
+ * (auto-sleep is on out of the box); "off" · "0" · "never" turn it off. Under
+ * a minute is a misconfiguration, not a wish for a 30-second window → off.
+ */
 export function parseSleepAfter(raw: string | undefined): number {
-  if (!raw) return 0;
-  const m = String(raw).trim().match(/^(\d+)\s*(s|m|h)?$/);
+  if (raw === undefined || raw === null || String(raw).trim() === '') return SLEEP_AFTER_DEFAULT_MS;
+  const text = String(raw).trim().toLowerCase();
+  if (text === 'off' || text === 'never' || text === 'no') return 0;
+  const m = text.match(/^(\d+)\s*(s|m|h)?$/);
   if (!m) return 0;
   const n = parseInt(m[1]!, 10);
   const unit = m[2] === 'h' ? 3600 : m[2] === 's' ? 1 : 60;
@@ -491,7 +500,7 @@ export class AgentSleeper {
     if (this.deps.hasPendingInteraction(id)) return 'an interaction is pending';
     if (checkIdle) {
       const idleFloor = this.afterMs > 0 ? this.afterMs : 0;
-      if (idleFloor <= 0) return 'auto-sleep is off (agent-sleep-after)';
+      if (idleFloor <= 0) return 'auto sleep is off (settings → agents)';
       const now = this.now();
       const lastIn = session.lastInputAt || this.bootAt;
       const lastOut = session.lastOutputAt || this.bootAt;
