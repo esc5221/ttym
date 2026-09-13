@@ -146,6 +146,30 @@ export function findAgentProcess(procs: ProcInfo[], shellPid: number): (ProcInfo
   return null;
 }
 
+/**
+ * A tool command still running under the agent. Claude Code runs every Bash
+ * tool call as `zsh -c 'source ~/.claude/shell-snapshots/…'`, background ones
+ * included, and holds `caffeinate` while one runs. Neither shows in the hooks
+ * (Stop has fired, the turn is closed) nor on screen (the status line does not
+ * repaint — measured: lastSeq flat for 20 s with `sleep 150` in the background),
+ * so the process tree is the only signal. MCP servers are children too, but
+ * they are not shells sourcing a snapshot.
+ */
+export function busyChildOf(procs: ProcInfo[], agentPid: number): ProcInfo | null {
+  const byParent = new Map<number, ProcInfo[]>();
+  for (const p of procs) { const l = byParent.get(p.ppid) ?? []; l.push(p); byParent.set(p.ppid, l); }
+  const queue = [agentPid];
+  let guard = 0;
+  while (queue.length > 0 && guard++ < 500) {
+    const pid = queue.shift()!;
+    for (const child of byParent.get(pid) ?? []) {
+      if (/shell-snapshots|(^|\/)caffeinate(\s|$)/.test(child.command)) return child;
+      queue.push(child.pid);
+    }
+  }
+  return null;
+}
+
 /** macOS/Linux `ps` → ProcInfo[]. RSS in bytes. */
 export async function psProcesses(): Promise<ProcInfo[]> {
   const { execFile } = await import('node:child_process');
@@ -279,6 +303,8 @@ export class AgentSleeper {
     if (typeof agentSessionId !== 'string' || !agentSessionId) return { ok: false, error: `no ${agent.kind} session id to resume from` };
     const midTurn = this.midTurn(agent.kind, session, meta);
     if (midTurn) return { ok: false, error: midTurn };
+    const busy = busyChildOf(procs, agent.pid);
+    if (busy) return { ok: false, error: `a command is still running under the agent (${busy.command.split(/\s+/).slice(0, 2).join(' ')})` };
 
     this.inFlight.add(id);
     try {

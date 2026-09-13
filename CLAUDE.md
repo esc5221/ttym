@@ -134,6 +134,9 @@ ttym agent status              # 자는 pane 목록 + 돌려받은 RAM
 
 - 자동: config `agent-sleep-after = 30m` (기본 off). 입력·출력이 그 시간 동안 없고, 열린 턴(`claudeTurnOpen`)·
   대기 interaction·pin이 없을 때만. 한 번에 3개, 3초 간격.
+- 백그라운드 Bash(run_in_background)는 턴이 닫히고 화면도 안 움직인다(실측). 프로세스 트리로 잡는다 —
+  에이전트 아래에 `shell-snapshots`를 source한 셸이나 `caffeinate`가 있으면 안 재운다. MCP 서버 자식은 해당 없음.
+  ScheduleWakeup/cron으로 스스로 깨는 세션은 못 잡는다 → pin.
 - 자는 동안 뷰어는 마지막 화면에 **frozen** — ATTACH/SNAPSHOT/`ttym screen`이 그 화면을 준다. 셸 프롬프트는 안 보인다.
   화면은 `run/sleep-<id>.ansi`에 저장돼 서버 재시작 후에도 그대로.
 - 깨우기: 입력은 큐(64KB·20초)에 담고 `ttym agent resume claude <원래 플래그>`를 셸에 친다. SessionStart 훅 +

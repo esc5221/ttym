@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentSleeper, findAgentProcess, isPassiveInput, parseSleepAfter, resumeArgsFrom, type ProcInfo, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, busyChildOf, findAgentProcess, isPassiveInput, parseSleepAfter, resumeArgsFrom, type ProcInfo, type SleepState } from './agent-sleep.js';
 import type { Session } from './session.js';
 
 /**
@@ -188,6 +188,18 @@ describe('sleep', () => {
     let presses = 0;
     h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
+  });
+
+  it('a background command under the agent (a snapshot shell, or caffeinate) refuses sleep; an MCP server does not', async () => {
+    const mcp: ProcInfo = { pid: 300, ppid: AGENT, rss: 1, command: 'node /x/mcp-server.js' };
+    const shell: ProcInfo = { pid: 301, ppid: AGENT, rss: 1, command: '/bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1.sh && eval sleep 150' };
+    const caff: ProcInfo = { pid: 302, ppid: AGENT, rss: 1, command: 'caffeinate -i -t 300' };
+    expect(busyChildOf([claudeProc(), mcp], AGENT)).toBeNull();
+    expect(busyChildOf([claudeProc(), mcp, shell], AGENT)).toMatchObject({ pid: 301 });
+    expect(busyChildOf([claudeProc(), caff], AGENT)).toMatchObject({ pid: 302 });
+    h = harness({ procs: () => [claudeProc(), shell] });
+    expect(await h.sleeper.sleep(1, 'manual')).toMatchObject({ ok: false, error: expect.stringContaining('a command is still running') });
+    expect(h.session.isFrozen).toBe(false);
   });
 
   it('codex sleeps the same way, resumes with the update check off, and counts recent output as a turn', async () => {
