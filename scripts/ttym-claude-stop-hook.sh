@@ -22,10 +22,24 @@ HOOK_PAYLOAD=$(cat)
 CLAUDE_SESSION=$(printf '%s' "$HOOK_PAYLOAD" | jq -r '.session_id // empty' 2>/dev/null)
 
 # Agent runtime state: the turn is over; remember which claude session it was.
+# What is still alive after this turn — Claude Code (2.1.269+) lists it in the
+# Stop payload: background tasks (bash, agents, monitors, workflows) and the
+# session-scoped crons (CronCreate, ScheduleWakeup, /loop) that will wake it
+# later. Forwarded as claudeInFlight so the server knows the pane is not idle
+# even though the turn is closed and nothing moves on screen. Older versions
+# send neither key: then claudeInFlight is null and the server falls back to
+# the process tree. Trimmed: ten entries, short descriptions.
+IN_FLIGHT=$(printf '%s' "$HOOK_PAYLOAD" | jq -c '
+  if (has("background_tasks") or has("session_crons")) then
+    { tasks: ((.background_tasks // []) | map({type, status, description: ((.description // .command // "") | .[0:80])}) | .[0:10]),
+      crons: ((.session_crons // []) | map({schedule, recurring: (.recurring // false), prompt: ((.prompt // "") | .[0:80])}) | .[0:10]),
+      at: (now | floor) }
+  else null end' 2>/dev/null)
+[ -z "$IN_FLIGHT" ] && IN_FLIGHT=null
 if [ -n "$CLAUDE_SESSION" ]; then
-  AGENT_PATCH="{\"claudeActive\":false,\"claudeSessionId\":null,\"claudeLastSessionId\":\"$CLAUDE_SESSION\"}"
+  AGENT_PATCH="{\"claudeActive\":false,\"claudeSessionId\":null,\"claudeLastSessionId\":\"$CLAUDE_SESSION\",\"claudeInFlight\":$IN_FLIGHT}"
 else
-  AGENT_PATCH='{"claudeActive":false,"claudeSessionId":null}'
+  AGENT_PATCH="{\"claudeActive\":false,\"claudeSessionId\":null,\"claudeInFlight\":$IN_FLIGHT}"
 fi
 curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \
   -H 'content-type: application/json' -d "$AGENT_PATCH" >/dev/null

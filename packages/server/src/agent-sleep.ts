@@ -15,10 +15,10 @@
  *           SessionStart hook has fired and output has settled, viewers get
  *           a fresh snapshot and the queue is written in order.
  *
- * Never slept: an agent mid-turn (claudeTurnOpen), a pending interaction (an
- * unanswered permission prompt does not survive resume), output or input
- * within the idle window, a pinned pane. Auto-sleep is off until
- * `agent-sleep-after` is set.
+ * Never slept: anything Claude Code reports as alive (see whyBusy — a
+ * background task, a scheduled wakeup, a permission prompt), a pending
+ * interaction, output or input within the idle window. Auto-sleep is off
+ * until `agent-sleep-after` is set.
  *
  * Process facts come from `ps`, not from the hooks: the Stop hook clears
  * claudeSessionId every turn, so "is there an agent" is a process-tree
@@ -48,6 +48,16 @@ export interface SleepState {
 
 export interface ProcInfo { pid: number; ppid: number; rss: number; command: string }
 
+/** ~/.claude/sessions/<pid>.json — written by Claude Code for `claude ps`. `waiting` names a permission prompt or dialog. */
+export interface AgentStatusFile { status: 'busy' | 'idle' | 'waiting'; waitingFor?: string; updatedAt?: number }
+
+/** What the Stop hook forwarded from Claude Code's payload; null on versions that do not send it. */
+export interface InFlight {
+  tasks: Array<{ type: string; status?: string; description?: string }>;
+  crons: Array<{ schedule: string; recurring: boolean; prompt?: string }>;
+  at: number;
+}
+
 export interface SleeperDeps {
   sessions: {
     get(id: number): Session | undefined;
@@ -57,9 +67,11 @@ export interface SleeperDeps {
   };
   hasPendingInteraction(sessionId: number): boolean;
   listProcesses(): Promise<ProcInfo[]>;
+  /** Claude Code's own status for a process (~/.claude/sessions/<pid>.json), or null when absent. */
+  agentStatus(pid: number): Promise<AgentStatusFile | null>;
   kill(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
   /** Push the new state to clients (null = awake). */
-  onState(sessionId: number, sleep: SleepState | null, pin: boolean): void;
+  onState(sessionId: number, sleep: SleepState | null): void;
   /** Send every viewer of the session a fresh snapshot (after thaw). */
   resnapshot(sessionId: number): void;
   /** Port the pane's `ttym` must talk to — stamped into the resume command. */
@@ -170,6 +182,16 @@ export function busyChildOf(procs: ProcInfo[], agentPid: number): ProcInfo | nul
   return null;
 }
 
+/** Default reader for ~/.claude/sessions/<pid>.json. */
+export async function readAgentStatus(pid: number, home = process.env.CLAUDE_CONFIG_DIR || resolve(process.env.HOME || '/tmp', '.claude')): Promise<AgentStatusFile | null> {
+  try {
+    const raw = JSON.parse(await readFile(resolve(home, 'sessions', `${pid}.json`), 'utf8')) as Record<string, unknown>;
+    const status = raw.status;
+    if (status !== 'busy' && status !== 'idle' && status !== 'waiting') return null;
+    return { status, waitingFor: typeof raw.waitingFor === 'string' ? raw.waitingFor : undefined, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : undefined };
+  } catch { return null; }
+}
+
 /** macOS/Linux `ps` → ProcInfo[]. RSS in bytes. */
 export async function psProcesses(): Promise<ProcInfo[]> {
   const { execFile } = await import('node:child_process');
@@ -274,13 +296,8 @@ export class AgentSleeper {
     // An agent came up in a pane marked failed: the user fixed it themselves. Clear the mark.
     if (l.state.state === 'failed') {
       this.live.delete(id);
-      void this.deps.sessions.setMeta(id, { agentSleep: null }).then(() => this.deps.onState(id, null, false));
+      void this.deps.sessions.setMeta(id, { agentSleep: null }).then(() => this.deps.onState(id, null));
     }
-  }
-
-  async pin(id: number, pin: boolean): Promise<void> {
-    await this.deps.sessions.setMeta(id, { agentPin: pin ? true : null });
-    this.deps.onState(id, this.stateOf(id), pin);
   }
 
   /**
@@ -301,14 +318,11 @@ export class AgentSleeper {
     const kind = KINDS[agent.kind];
     const agentSessionId = (meta[kind.idKey] ?? meta[kind.lastKey]) as string | null | undefined;
     if (typeof agentSessionId !== 'string' || !agentSessionId) return { ok: false, error: `no ${agent.kind} session id to resume from` };
-    const midTurn = this.midTurn(agent.kind, session, meta);
-    if (midTurn) return { ok: false, error: midTurn };
-    const busy = busyChildOf(procs, agent.pid);
-    if (busy) return { ok: false, error: `a command is still running under the agent (${busy.command.split(/\s+/).slice(0, 2).join(' ')})` };
+    const busy = await this.whyBusy(agent, procs, session, meta);
+    if (busy) return { ok: false, error: busy };
 
     this.inFlight.add(id);
     try {
-      const pin = meta.agentPin === true;
       const state: SleepState = { state: 'sleeping', since: this.now(), agent: agent.kind, agentSessionId, rssBefore: agent.rss, reason, args: resumeArgsFrom(agent.command) };
       // Freeze first: nothing that follows (Ctrl-C notices, the shell prompt) reaches a viewer.
       const snapshot = session.viewerSnapshot();
@@ -316,7 +330,7 @@ export class AgentSleeper {
       await writeFile(this.snapshotPath(id), snapshot).catch(() => {});
       this.install(id, session, state);
       await this.deps.sessions.setMeta(id, { agentSleep: state });
-      this.deps.onState(id, state, pin);
+      this.deps.onState(id, state);
       this.deps.log(`SLEEP session=${id} reason=${reason} rss=${Math.round(agent.rss / 1048576)}MB agent=${agentSessionId.slice(0, 8)}`);
 
       // Ctrl-C, three times. `/exit` would do, but it is a command: the transcript
@@ -340,7 +354,7 @@ export class AgentSleeper {
             this.uninstall(id, session);
             session.thaw();
             await this.deps.sessions.setMeta(id, { agentSleep: null });
-            this.deps.onState(id, null, pin);
+            this.deps.onState(id, null);
             return { ok: false, error: 'agent did not exit' };
           }
         }
@@ -362,10 +376,8 @@ export class AgentSleeper {
     l.state = { ...l.state, state: 'waking', since: this.now(), queued: l.queuedBytes };
     l.started = false;
     l.wakeStartedAt = this.now();
-    const meta = await this.deps.sessions.getMeta(id);
-    const pin = meta.agentPin === true;
     await this.deps.sessions.setMeta(id, { agentSleep: l.state });
-    this.deps.onState(id, l.state, pin);
+    this.deps.onState(id, l.state);
     this.deps.log(`WAKE session=${id} trigger=${trigger} queued=${l.queuedBytes}B`);
 
     // Ctrl-U clears whatever sits on the shell line, then resume through the CLI so the
@@ -387,7 +399,7 @@ export class AgentSleeper {
       await unlink(this.snapshotPath(id)).catch(() => {});
       this.deps.resnapshot(id);
       await this.deps.sessions.setMeta(id, { agentSleep: cur.state });
-      this.deps.onState(id, cur.state, pin);
+      this.deps.onState(id, cur.state);
       this.deps.log(`WAKE session=${id} failed: ${ready.error}`);
       return { ok: false, error: ready.error };
     }
@@ -398,7 +410,7 @@ export class AgentSleeper {
     await unlink(this.snapshotPath(id)).catch(() => {});
     this.deps.resnapshot(id);
     await this.deps.sessions.setMeta(id, { agentSleep: null });
-    this.deps.onState(id, null, pin);
+    this.deps.onState(id, null);
     // The queue, in order, with a beat between entries so a prompt and its CR are not
     // read as one paste (the same lottery the interactions path avoids).
     for (const chunk of cur.queue) {
@@ -436,19 +448,47 @@ export class AgentSleeper {
   }
 
   /**
-   * Claude: a turn that began with a prompt and has not seen Stop — however long
-   * ago: an unanswered permission prompt looks exactly like this, and it will not
-   * survive resume. Codex has no prompt hook (and its Stop hook may be off), so
-   * the only signal is output: anything in the last 10 s means it is working.
+   * Everything that means "not idle", most authoritative first.
+   *
+   * Claude Code says so itself, twice. Its Stop payload (2.1.269+) lists what
+   * is still alive after the turn — background bash, agents, monitors, and the
+   * session crons (CronCreate, ScheduleWakeup, /loop) that will wake it later;
+   * the hook forwards that as claudeInFlight, and it holds until the next Stop
+   * replaces it. And ~/.claude/sessions/<pid>.json carries busy / idle /
+   * waiting, where waiting names a permission prompt or dialog — which a resume
+   * cannot answer. Below those: a turn opened by a prompt and not yet stopped,
+   * and the process tree (a snapshot shell or caffeinate under the agent) for
+   * versions whose Stop payload has no task list.
+   *
+   * Codex has none of this; its only signal is output within the last 10 s.
    */
-  private midTurn(kind: AgentKind, session: Session, meta: Record<string, unknown>): string | null {
-    if (kind === 'claude') return meta.claudeTurnOpen === true ? 'agent is mid-turn' : null;
-    return this.now() - session.lastOutputAt < this.t(10_000) ? 'agent is mid-turn (output in the last 10 s)' : null;
+  private async whyBusy(agent: ProcInfo & { kind: AgentKind }, procs: ProcInfo[], session: Session, meta: Record<string, unknown>): Promise<string | null> {
+    if (agent.kind === 'codex') {
+      return this.now() - session.lastOutputAt < this.t(10_000) ? 'agent is mid-turn (output in the last 10 s)' : null;
+    }
+    const status = await this.deps.agentStatus(agent.pid);
+    if (status?.status === 'waiting') return `agent is waiting for you (${status.waitingFor ?? 'input needed'})`;
+    if (status?.status === 'busy') return 'agent is busy';
+    if (meta.claudeTurnOpen === true) return 'agent is mid-turn';
+    const inFlight = meta.claudeInFlight as InFlight | null | undefined;
+    if (inFlight && typeof inFlight === 'object') {
+      if (inFlight.tasks.length > 0) {
+        const t = inFlight.tasks[0]!;
+        return `${inFlight.tasks.length} background task${inFlight.tasks.length > 1 ? 's' : ''} running (${t.type}${t.description ? `: ${t.description}` : ''})`;
+      }
+      if (inFlight.crons.length > 0) {
+        const c = inFlight.crons[0]!;
+        return `a wakeup is scheduled (${c.schedule}${inFlight.crons.length > 1 ? ` +${inFlight.crons.length - 1}` : ''}) — sleeping would lose it`;
+      }
+      return null; // this Claude reports its tasks, and reports none
+    }
+    const busy = busyChildOf(procs, agent.pid);
+    if (busy) return `a command is still running under the agent (${busy.command.split(/\s+/).slice(0, 2).join(' ')})`;
+    return null;
   }
 
   private async refusal(id: number, session: Session, meta: Record<string, unknown>, checkIdle: boolean): Promise<string | null> {
     if (this.deps.hasPendingInteraction(id)) return 'an interaction is pending';
-    if (meta.agentPin === true) return 'pinned awake';
     if (checkIdle) {
       const idleFloor = this.afterMs > 0 ? this.afterMs : 0;
       if (idleFloor <= 0) return 'auto-sleep is off (agent-sleep-after)';

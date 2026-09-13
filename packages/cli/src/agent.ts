@@ -224,8 +224,8 @@ export async function cmdAgent() {
     return;
   }
 
-  // ── sleep / wake / pin / unpin <addr> ──
-  if (action === 'sleep' || action === 'wake' || action === 'pin' || action === 'unpin') {
+  // ── sleep / wake <addr> ──
+  if (action === 'sleep' || action === 'wake') {
     const addr = process.argv[4];
     const port = getPort();
     let sessionId;
@@ -238,14 +238,11 @@ export async function cmdAgent() {
       if (!sid) { console.error(`usage: ttym agent ${action} <ws:name|:name|#id>  (or run inside a pane)`); process.exit(EXIT.USAGE); }
       sessionId = parseInt(sid, 10); label = `#${sid}`;
     }
-    const verb = action === 'unpin' ? 'pin' : action;
-    const body = action === 'pin' ? { pin: true } : action === 'unpin' ? { pin: false } : {};
-    const data = await fetchPost(port, `/api/sessions/${sessionId}/${verb}`, body);
+    const data = await fetchPost(port, `/api/sessions/${sessionId}/${action}`, {});
     if (hasFlag('--json')) return printOutput({ session: label, sessionId, ...data }, true);
     if (!data || data.error) { console.error(`${action} ${label}: ${data?.error ?? 'no response'}`); process.exit(EXIT.FAIL); }
     if (action === 'sleep') console.log(`${label} asleep — ${Math.round((data.sleep?.rssBefore ?? 0) / 1048576)}MB given back; any input wakes it`);
-    else if (action === 'wake') console.log(`${label} awake`);
-    else console.log(`${label} ${action === 'pin' ? 'pinned awake' : 'unpinned'}`);
+    else console.log(`${label} awake`);
     return;
   }
 
@@ -384,8 +381,8 @@ export async function cmdAgent() {
   console.log('  info [session-id]     Show linked agent sessions');
   console.log('  sleep|wake <addr>     Put a pane\'s agent to sleep (process gone, screen kept,');
   console.log('                        any input resumes it) / wake it now. <addr> = ws:name|:name|#id');
-  console.log('  pin|unpin <addr>      Keep a pane\'s agent awake through auto sleep');
-  console.log('                        (auto sleep: config agent-sleep-after = 30m; 0 = off)');
+  console.log('                        auto sleep: config agent-sleep-after = 30m (0 = off). never while the');
+  console.log('                        agent reports a background task, a scheduled wakeup, or a prompt waiting');
   console.log('');
   console.log('agents:');
   for (const [key, cfg] of Object.entries(AGENTS)) {

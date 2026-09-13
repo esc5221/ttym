@@ -118,7 +118,7 @@ export interface AgentSleep {
   error?: string;
   queued?: number;
 }
-export interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean; sleep?: AgentSleep | null; pin?: boolean }
+export interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean; sleep?: AgentSleep | null }
 
 export function readLocalEchoEnabled(): boolean {
   try {

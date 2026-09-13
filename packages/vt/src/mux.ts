@@ -58,7 +58,6 @@ export interface AgentStateEvent {
   active: boolean;
   /** Present once the server knows about sleep; null = awake. */
   sleep?: AgentSleepState | null;
-  pin?: boolean;
 }
 
 export interface ConfigChangeEvent {

@@ -66,7 +66,6 @@ body {
 .agent-sleep-mark.sleeping { color: #8aa2ff; }
 .agent-sleep-mark.waking { color: var(--warn); display: inline-block; animation: agent-spin 1s linear infinite; }
 .agent-sleep-mark.failed { color: var(--err); }
-.agent-pin-mark { font-size: 10px; line-height: 1; color: var(--warn); flex-shrink: 0; }
 .agent-sleep-pill {
   position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5;
   display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px;

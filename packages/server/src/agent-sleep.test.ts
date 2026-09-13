@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentSleeper, busyChildOf, findAgentProcess, isPassiveInput, parseSleepAfter, resumeArgsFrom, type ProcInfo, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, busyChildOf, findAgentProcess, isPassiveInput, parseSleepAfter, resumeArgsFrom, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
 import type { Session } from './session.js';
 
 /**
@@ -41,11 +41,11 @@ class FakeSession {
   output() { this.lastOutputAt = Date.now(); }
 }
 
-function harness(opts: { procs?: () => ProcInfo[]; meta?: Record<string, unknown>; pending?: boolean; config?: Record<string, string> } = {}) {
+function harness(opts: { procs?: () => ProcInfo[]; meta?: Record<string, unknown>; pending?: boolean; config?: Record<string, string>; status?: AgentStatusFile | null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ttym-sleep-'));
   const session = new FakeSession(1);
   const metas = new Map<number, Record<string, unknown>>([[1, { claudeLastSessionId: 'abc-123', ...(opts.meta ?? {}) }]]);
-  const events: Array<{ id: number; sleep: SleepState | null; pin: boolean }> = [];
+  const events: Array<{ id: number; sleep: SleepState | null }> = [];
   const killed: Array<{ pid: number; signal: string }> = [];
   let procs = opts.procs ?? (() => [claudeProc()]);
   const logs: string[] = [];
@@ -58,8 +58,9 @@ function harness(opts: { procs?: () => ProcInfo[]; meta?: Record<string, unknown
     },
     hasPendingInteraction: () => opts.pending === true,
     listProcesses: async () => procs(),
+    agentStatus: async () => opts.status ?? null,
     kill: (pid, signal) => killed.push({ pid, signal }),
-    onState: (id, sleep, pin) => events.push({ id, sleep, pin }),
+    onState: (id, sleep) => events.push({ id, sleep }),
     resnapshot: () => session.resyncAll(),
     port: 7692,
     runtimeDir: dir,
@@ -147,7 +148,7 @@ describe('sleep', () => {
     expect(h.session.frozen!.snapshot).toBe('claude screen');
     expect(existsSync(join(h.dir, 'sleep-1.ansi'))).toBe(true);
     expect(h.meta().agentSleep).toMatchObject({ state: 'sleeping', agentSessionId: 'abc-123', rssBefore: 256 * 1048576, reason: 'manual' });
-    expect(h.events.at(-1)).toMatchObject({ sleep: { state: 'sleeping' }, pin: false });
+    expect(h.events.at(-1)).toMatchObject({ sleep: { state: 'sleeping' } });
     expect(h.killed).toEqual([]);
   });
 
@@ -163,15 +164,12 @@ describe('sleep', () => {
     expect(h.events.at(-1)!.sleep).toBeNull();
   });
 
-  it('refuses mid-turn, with a pending interaction, when pinned, without a process, without a session id', async () => {
+  it('refuses mid-turn, with a pending interaction, without a process, without a session id', async () => {
     h = harness({ meta: { claudeTurnOpen: true } });
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'agent is mid-turn' });
     h.cleanup();
     h = harness({ pending: true });
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'an interaction is pending' });
-    h.cleanup();
-    h = harness({ meta: { agentPin: true } });
-    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'pinned awake' });
     h.cleanup();
     h = harness({ procs: () => [] });
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'no agent process under this pane' });
@@ -200,6 +198,36 @@ describe('sleep', () => {
     h = harness({ procs: () => [claudeProc(), shell] });
     expect(await h.sleeper.sleep(1, 'manual')).toMatchObject({ ok: false, error: expect.stringContaining('a command is still running') });
     expect(h.session.isFrozen).toBe(false);
+  });
+
+  it("what Claude reports at Stop wins: a background task or a scheduled wakeup refuses; an empty report lets the tree go unchecked", async () => {
+    const shell: ProcInfo = { pid: 301, ppid: AGENT, rss: 1, command: '/bin/zsh -c source /x/.claude/shell-snapshots/s.sh' };
+    h = harness({ meta: { claudeInFlight: { tasks: [{ type: 'local_bash', status: 'running', description: 'sleep 150' }], crons: [], at: 1 } } });
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: '1 background task running (local_bash: sleep 150)' });
+    h.cleanup();
+    h = harness({ meta: { claudeInFlight: { tasks: [], crons: [{ schedule: '*/10 * * * *', recurring: true, prompt: '<<autonomous-loop-dynamic>>' }], at: 1 } } });
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'a wakeup is scheduled (*/10 * * * *) — sleeping would lose it' });
+    h.cleanup();
+    // This Claude reports its tasks and reports none: a stray shell under it (say, an MCP helper) is not a reason.
+    let alive = true;
+    h = harness({ meta: { claudeInFlight: { tasks: [], crons: [], at: 1 } }, procs: () => (alive ? [claudeProc(), shell] : []) });
+    let presses = 0;
+    h.session.writeRaw = (d) => { h.session.raw.push(d.toString('latin1')); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
+  });
+
+  it("Claude's own status file: waiting (a permission prompt) and busy refuse; idle does not", async () => {
+    h = harness({ status: { status: 'waiting', waitingFor: 'approve Bash' } });
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'agent is waiting for you (approve Bash)' });
+    h.cleanup();
+    h = harness({ status: { status: 'busy' } });
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'agent is busy' });
+    h.cleanup();
+    let alive = true;
+    h = harness({ status: { status: 'idle' }, procs: () => (alive ? [claudeProc()] : []) });
+    let presses = 0;
+    h.session.writeRaw = (d) => { h.session.raw.push(d.toString('latin1')); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
   });
 
   it('codex sleeps the same way, resumes with the update check off, and counts recent output as a turn', async () => {
@@ -355,7 +383,7 @@ describe('restart', () => {
     const metas = new Map([[1, { claudeLastSessionId: 'abc-123', agentSleep: saved }]]);
     const sleeper2 = new AgentSleeper({
       sessions: { get: () => session2 as unknown as Session, ids: () => [1], getMeta: async () => metas.get(1)!, setMeta: async (_id, p) => { metas.set(1, { ...metas.get(1)!, ...p }); } },
-      hasPendingInteraction: () => false, listProcesses: async () => [], kill: () => {}, onState: () => {}, resnapshot: () => {},
+      hasPendingInteraction: () => false, listProcesses: async () => [], agentStatus: async () => null, kill: () => {}, onState: () => {}, resnapshot: () => {},
       port: 7692, runtimeDir: h.dir, log: () => {}, timeScale: 0.01,
     });
     await sleeper2.restore();

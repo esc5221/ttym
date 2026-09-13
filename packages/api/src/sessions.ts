@@ -66,7 +66,7 @@ export interface AgentSleepInfo {
   queued?: number;
 }
 
-export function getAgentStates(base: BaseUrl): Promise<Record<number, { kind: string | null; active: boolean; sleep?: AgentSleepInfo | null; pin?: boolean }>> {
+export function getAgentStates(base: BaseUrl): Promise<Record<number, { kind: string | null; active: boolean; sleep?: AgentSleepInfo | null }>> {
   return request(base, '/api/agent-states');
 }
 
@@ -76,9 +76,6 @@ export function sleepAgent(base: BaseUrl, id: number): Promise<{ ok?: true; erro
 }
 export function wakeAgent(base: BaseUrl, id: number): Promise<{ ok?: true; error?: string; sleep: AgentSleepInfo | null }> {
   return request(base, `/api/sessions/${id}/wake`, { method: 'POST', body: {} });
-}
-export function pinAgent(base: BaseUrl, id: number, pin: boolean): Promise<{ ok: true; pin: boolean }> {
-  return request(base, `/api/sessions/${id}/pin`, { method: 'POST', body: { pin } });
 }
 export function getAgentSleepStatus(base: BaseUrl): Promise<{ sleeping: Array<{ sessionId: number } & AgentSleepInfo>; reclaimedBytes: number; afterMs: number }> {
   return request(base, '/api/agent-sleep');

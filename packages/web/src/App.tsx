@@ -788,18 +788,20 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
   // pane이 사라졌는데 zen에 남아 있으면 빈 화면에 갇힌다. 주소도 같이 되돌린다.
   // Agent sleep. The server does the work; these only ask and let the push update the state.
   const sleepAgent = useCallback(async (sid: number) => {
-    try { await api.sleepAgent(API_BASE, sid); } catch (e) { setSleepNote({ sid, text: String((e as { body?: string }).body ? JSON.parse((e as { body: string }).body).error : (e as Error).message) }); }
+    try { await api.sleepAgent(API_BASE, sid); } catch (e) {
+      // A refusal (409) names its reason: "1 background task running (…)", "a wakeup is scheduled (…)".
+      let text = (e as Error).message;
+      try { text = JSON.parse((e as { body: string }).body).error ?? text; } catch {}
+      setSleepNote({ sid, text: `won't sleep: ${text}` });
+    }
   }, []);
   const wakeAgent = useCallback(async (sid: number) => {
     try { await api.wakeAgent(API_BASE, sid); } catch {}
   }, []);
-  const pinAgent = useCallback(async (sid: number, pin: boolean) => {
-    try { await api.pinAgent(API_BASE, sid, pin); } catch {}
-  }, []);
   const [sleepNote, setSleepNote] = useState<{ sid: number; text: string } | null>(null);
   useEffect(() => {
     if (!sleepNote) return;
-    const t = setTimeout(() => setSleepNote(null), 2500);
+    const t = setTimeout(() => setSleepNote(null), 4000);
     return () => clearTimeout(t);
   }, [sleepNote]);
 
@@ -1180,7 +1182,7 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
                 title={agent?.active ? `${agent.kind} · running` : `${agent?.kind} · idle`}
               />
             ) : null}
-            {agent?.pin ? <span className="agent-pin-mark" title="kept awake — will not auto-sleep">☀</span> : null}
+
             <span style={{ color: agentColor ?? (isFocused ? 'var(--text)' : 'var(--text-soft)'), fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
               {name || `#${sid}`}
             </span>
@@ -1225,9 +1227,6 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
 
             {agent?.kind && !asleep && !dead ? (
               <button className="reveal" onClick={(e) => { e.stopPropagation(); void sleepAgent(sid); }} style={miniLinkBtnStyle} title="sleep now: the process exits, the screen stays, any input resumes it">☾</button>
-            ) : null}
-            {agent?.kind && !dead ? (
-              <button className={agent.pin ? undefined : 'reveal'} onClick={(e) => { e.stopPropagation(); void pinAgent(sid, !agent.pin); }} style={{ ...miniLinkBtnStyle, ...(agent.pin ? { color: 'var(--warn)' } : null) }} title={agent.pin ? 'kept awake — click to allow auto sleep' : 'keep awake through auto sleep'}>{agent.pin ? '☀' : 'pin'}</button>
             ) : null}
             {canRestore ? (
               <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="resume last agent session">restore</button>
@@ -1326,7 +1325,7 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
         </div>
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane, viewer, open, viewerReload, openFull, selOpen, offerSelection, sleepAgent, wakeAgent, pinAgent, sleepNote]);
+  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane, viewer, open, viewerReload, openFull, selOpen, offerSelection, sleepAgent, wakeAgent, sleepNote]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
@@ -1826,7 +1825,7 @@ function App() {
         if (cancelled) return;
         const entries = memberIds.map((id) => {
           const state = all[id];
-          return [id, state ? { kind: state.kind as AgentState['kind'], active: state.active, sleep: state.sleep ?? null, pin: state.pin === true } : { kind: null, active: false }] as const;
+          return [id, state ? { kind: state.kind as AgentState['kind'], active: state.active, sleep: state.sleep ?? null } : { kind: null, active: false }] as const;
         });
         setAgentStates(Object.fromEntries(entries));
       } catch {}
@@ -1835,7 +1834,7 @@ function App() {
     const fallback = window.setInterval(() => { void sweep(); }, 60_000);
     const mux = muxRef.current;
     const unsubscribe = mux ? mux.onAgent((event) => {
-      setAgentStates((prev) => ({ ...prev, [event.sessionId]: { kind: event.kind, active: event.active, sleep: event.sleep ?? null, pin: event.pin === true } }));
+      setAgentStates((prev) => ({ ...prev, [event.sessionId]: { kind: event.kind, active: event.active, sleep: event.sleep ?? null } }));
     }) : undefined;
     return () => { cancelled = true; window.clearInterval(fallback); unsubscribe?.(); };
   }, [connected, workspaces.map((w) => w.id + ':' + layoutToSessionIds(w.layout).join('.')).join('|')]);

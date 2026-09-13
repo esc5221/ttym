@@ -1094,7 +1094,7 @@ describe('meta ownership over HTTP', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/agent-states`);
     expect(res.status).toBe(200);
     const states = await res.json();
-    expect(states[String(sid)]).toEqual({ kind: null, active: false, sleep: null, pin: false });
+    expect(states[String(sid)]).toEqual({ kind: null, active: false, sleep: null });
     await fetch(`http://127.0.0.1:${port}/api/sessions/${sid}`, { method: 'DELETE' }).catch(() => {});
   });
 

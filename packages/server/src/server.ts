@@ -16,7 +16,7 @@ import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { ViewerStore } from './viewer/store.js';
 import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
-import { AgentSleeper, psProcesses, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, psProcesses, readAgentStatus, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
 
 let mapRefreshInFlight = false;
@@ -561,16 +561,13 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
-  // Agent sleep: POST /api/sessions/:id/sleep · /wake · /pin {pin}, GET /api/agent-sleep
-  const sleepMatch = path.match(/^\/api\/sessions\/(\d+)\/(sleep|wake|pin)$/);
+  // Agent sleep: POST /api/sessions/:id/sleep · /wake, GET /api/agent-sleep
+  const sleepMatch = path.match(/^\/api\/sessions\/(\d+)\/(sleep|wake)$/);
   if (sleepMatch && req.method === 'POST') {
     const id = parseInt(sleepMatch[1], 10);
     const verb = sleepMatch[2];
     if (!sleeper) { json(503, { error: 'sleep not available' }); return true; }
-    readBody().then(async (body) => {
-      let parsed: Record<string, unknown> = {};
-      try { parsed = body ? JSON.parse(body) : {}; } catch { json(400, { error: 'invalid body' }); return; }
-      if (verb === 'pin') { await sleeper.pin(id, parsed.pin === true); json(200, { ok: true, pin: parsed.pin === true }); return; }
+    readBody().then(async () => {
       const r = verb === 'sleep' ? await sleeper.sleep(id, 'manual') : await sleeper.wake(id, 'manual');
       if (r.ok) json(200, { ok: true, sleep: sleeper.stateOf(id) });
       else json(409, { error: r.error, sleep: sleeper.stateOf(id) });
@@ -827,7 +824,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     const sessions = manager.list();
     Promise.all(sessions.map(async (info) => {
       const meta = await manager.getMeta(info.id);
-      return [info.id, { kind: agentKindOf(meta), active: agentIsActive(meta), sleep: sleeper?.stateOf(info.id) ?? null, pin: meta.agentPin === true }] as const;
+      return [info.id, { kind: agentKindOf(meta), active: agentIsActive(meta), sleep: sleeper?.stateOf(info.id) ?? null }] as const;
     })).then((entries) => {
       json(200, Object.fromEntries(entries));
     }).catch(() => json(500, { error: 'assembly failed' }));
@@ -1360,7 +1357,6 @@ export async function createServer(port: number): Promise<TtymServer> {
       kind,
       active: agentIsActive(meta),
       sleep: sleeper?.stateOf(sessionId) ?? null,
-      pin: meta.agentPin === true,
     };
     lastAnnouncedActive.set(sessionId, event.active);
     const frame = encode(0, CMD.AGENT, jsonPayload(event));
@@ -1986,8 +1982,9 @@ export async function createServer(port: number): Promise<TtymServer> {
     },
     hasPendingInteraction: (id) => interactions.hasPending(id),
     listProcesses: psProcesses,
+    agentStatus: readAgentStatus,
     kill: (pid, signal) => { try { process.kill(pid, signal); } catch {} },
-    onState: (id, _sleep: SleepState | null, _pin) => { void manager.getMeta(id).then((meta) => broadcastAgentState(id, meta)); },
+    onState: (id, _sleep: SleepState | null) => { void manager.getMeta(id).then((meta) => broadcastAgentState(id, meta)); },
     resnapshot: (id) => manager.get(id)?.resyncAll(),
     port: boundPort,
     runtimeDir: manager.runtimeDir,
