@@ -88,7 +88,9 @@ export const EXIT = { OK: 0, FAIL: 1, USAGE: 2, NOT_FOUND: 3, NO_SERVER: 4, VERS
 
 export function getPort() {
   if (GLOBAL.port !== null) return GLOBAL.port;
-  return parseInt(process.env.PORT || '7690', 10);
+  // TTYM_PORT is what the holder stamps into every pane: a CLI run inside a
+  // pane talks to the server that owns that pane, not to whatever 7690 is.
+  return parseInt(process.env.PORT || process.env.TTYM_PORT || '7690', 10);
 }
 
 export const apiBase = (port) => `http://127.0.0.1:${port}`;

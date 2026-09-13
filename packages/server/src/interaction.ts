@@ -182,6 +182,10 @@ export class InteractionStore {
   }
 
   /** A dead session answers nothing further. */
+  hasPending(sessionId: number): boolean {
+    return this.pendingBySession.get(sessionId)?.status === 'pending';
+  }
+
   abandonSession(sessionId: number): void {
     const rec = this.pendingBySession.get(sessionId);
     if (rec) this.settle(rec, 'failed');

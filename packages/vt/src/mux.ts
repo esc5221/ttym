@@ -41,10 +41,23 @@ export interface WorkspaceChangeEvent {
   order?: string[];
 }
 
+export interface AgentSleepState {
+  state: 'sleeping' | 'waking' | 'failed';
+  since: number;
+  agent: 'claude' | 'codex';
+  agentSessionId: string;
+  rssBefore: number;
+  reason: 'idle' | 'manual';
+  error?: string;
+  queued?: number;
+}
+
 export interface AgentStateEvent {
   sessionId: number;
   kind: 'claude-code' | 'codex' | null;
   active: boolean;
+  /** Present once the server knows about sleep; null = awake. */
+  sleep?: AgentSleepState | null;
 }
 
 export interface ConfigChangeEvent {

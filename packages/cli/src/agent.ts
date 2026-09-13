@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
-import { resolveCurrentWorkspace, findWorkspaceBySessionId, listWorkspaces } from './addresses.js';
+import { resolveCurrentWorkspace, findWorkspaceBySessionId, listWorkspaces, resolveAddress } from './addresses.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 // ───── Agent Integration ─────
 
@@ -209,6 +209,40 @@ export async function cmdAgent() {
       const installed = isHookInstalled(cfg);
       console.log(`  ${key}: ${installed ? 'installed' : 'not installed'} (${cfg.settingsPath})`);
     }
+    // Sleeping panes and what they gave back, if a server is up.
+    try {
+      const st = await fetchJson(getPort(), '/api/agent-sleep');
+      if (st) {
+        const mb = (n) => `${Math.round(n / 1048576)}MB`;
+        console.log(`  sleep: ${st.afterMs > 0 ? `auto after ${Math.round(st.afterMs / 60000)}m` : 'auto off'}, ${st.sleeping.length} pane(s), ${mb(st.reclaimedBytes)} reclaimed`);
+        for (const s of st.sleeping) {
+          const age = Math.round((Date.now() - s.since) / 60000);
+          console.log(`    #${s.sessionId}  ${s.state.padEnd(8)}  ${mb(s.rssBefore)}  ${age}m  ${s.reason}${s.error ? `  ${s.error}` : ''}`);
+        }
+      }
+    } catch {}
+    return;
+  }
+
+  // ── sleep / wake <addr> ──
+  if (action === 'sleep' || action === 'wake') {
+    const addr = process.argv[4];
+    const port = getPort();
+    let sessionId;
+    let label;
+    if (addr && !addr.startsWith('-')) {
+      const target = await resolveAddress(port, addr);
+      sessionId = target.sessionId; label = target.label;
+    } else {
+      const sid = process.env.TTYM_SESSION_ID;
+      if (!sid) { console.error(`usage: ttym agent ${action} <ws:name|:name|#id>  (or run inside a pane)`); process.exit(EXIT.USAGE); }
+      sessionId = parseInt(sid, 10); label = `#${sid}`;
+    }
+    const data = await fetchPost(port, `/api/sessions/${sessionId}/${action}`, {});
+    if (hasFlag('--json')) return printOutput({ session: label, sessionId, ...data }, true);
+    if (!data || data.error) { console.error(`${action} ${label}: ${data?.error ?? 'no response'}`); process.exit(EXIT.FAIL); }
+    if (action === 'sleep') console.log(`${label} asleep — ${Math.round((data.sleep?.rssBefore ?? 0) / 1048576)}MB given back; any input wakes it`);
+    else console.log(`${label} awake`);
     return;
   }
 
@@ -345,6 +379,10 @@ export async function cmdAgent() {
   console.log('                        config keys. TTYM_CLAUDE_RESUME_FLAGS /');
   console.log('                        TTYM_CODEX_RESUME_FLAGS override them for one shell.');
   console.log('  info [session-id]     Show linked agent sessions');
+  console.log('  sleep|wake <addr>     Put a pane\'s agent to sleep (process gone, screen kept,');
+  console.log('                        any input resumes it) / wake it now. <addr> = ws:name|:name|#id');
+  console.log('                        auto sleep is on (30m) unless config agent-sleep-after = off. never while the');
+  console.log('                        agent reports a background task, a scheduled wakeup, or a prompt waiting');
   console.log('');
   console.log('agents:');
   for (const [key, cfg] of Object.entries(AGENTS)) {

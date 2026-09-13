@@ -121,6 +121,36 @@ ttym view close (<target> | --id <vid> | --all)
   push는 CMD.VIEW(0x11), 전체 스냅샷. active 탭·pane/full·스크롤은 클라이언트(localStorage).
 - 콘텐츠는 `/view/<cap>/…` (cap = 128bit 토큰, GET/HEAD, 읽기 전용 CORS). 제어는 `/api/sessions/:id/views`.
 
+## 에이전트 절전 (agent sleep)
+
+안 쓰는 pane의 Claude Code를 내리고(200~600MB/개), 입력이 오면 그 화면 그대로 되살린다. server/src/agent-sleep.ts.
+
+```sh
+ttym agent sleep <addr>        # 지금 재우기. Ctrl-C ×3 (transcript에 안 남음). 셸·PTY·세션은 그대로
+ttym agent wake <addr>         # 지금 깨우기 (입력·send·await가 오면 자동으로 깨어난다)
+ttym agent status              # 자는 pane 목록 + 돌려받은 RAM
+```
+
+- 자동: **기본 켜짐, 30분**. 설정(agents 탭)에서 on/off와 10m·30m·1h·2h. config 키 `agent-sleep-after` —
+  키가 없으면 기본값(30m), `off`/`never`/`0`이면 끔. 입력·출력이 그 시간 동안 없고 아래 "바쁨" 신호가 없을 때만.
+  한 번에 3개, 3초 간격. pin 같은 수동 예외는 없다 — 에이전트가 스스로 말하는 것으로 판단한다.
+- "바쁨" 판정(권위 순, server/src/agent-sleep.ts `whyBusy`):
+  1. `~/.claude/sessions/<pid>.json`의 status — `waiting`(permission·대화상자, `waitingFor`에 이름)·`busy`
+  2. `claudeTurnOpen` — 프롬프트로 열린 턴이 Stop 전
+  3. `claudeInFlight` — Stop 훅 페이로드(2.1.269+)의 `background_tasks`·`session_crons`를 stop-hook이 그대로 전달.
+     백그라운드 bash/agent/monitor, CronCreate·ScheduleWakeup·/loop 예약이 여기 있으면 안 재운다. 다음 Stop이 갱신.
+  4. 프로세스 트리(구버전 폴백) — 에이전트 아래 `shell-snapshots` 셸·`caffeinate`
+  durable cron(`.claude/scheduled_tasks.json`)은 resume 후 다시 로드되므로 막지 않는다.
+- 자는 동안 뷰어는 마지막 화면에 **frozen** — ATTACH/SNAPSHOT/`ttym screen`이 그 화면을 준다. 셸 프롬프트는 안 보인다.
+  화면은 `run/sleep-<id>.ansi`에 저장돼 서버 재시작 후에도 그대로.
+- 깨우기: 입력은 큐(64KB·20초)에 담고 `ttym agent resume claude <원래 플래그>`를 셸에 친다. SessionStart 훅 +
+  출력 500ms 정지 = 준비. 그때 스냅샷 한 장으로 갱신하고 큐를 순서대로 쓴다. 실측 1.7s. `ttym await`는 그대로 동작.
+- 상태는 meta.agentSleep(runtime key, PATCH 불가). CMD.AGENT push에 `sleep`·`pin`. 웹: 헤더 ☾/◌/✕, 하단 알약.
+- Codex도 같은 방식(실측 RSS 280~320MB). 차이: 프롬프트 훅이 없어 "턴 열림"은 최근 10초 출력으로 판단하고,
+  SessionStart가 첫 턴에야 와서 깨우기는 프로세스 감지(1.5s + 출력 2s 정지)로 끝난다(실측 4초). resume에
+  `-c check_for_update_on_startup=false`를 붙인다 — 업데이트 대화상자가 큐의 첫 키를 먹는다.
+- `--cmd claude`로 셸 없이 띄운 pane은 아직(PTY가 끝난다).
+
 ## 작업 지도 (map)
 
 메인 화면의 두 번째 모드(settings → main view → map). 세션별 AI 요약 + workspace 줄기 배치.
