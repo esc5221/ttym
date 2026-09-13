@@ -7,6 +7,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * 남아 pane이 영구 빈 화면, 미부착 상태에서 PAUSE/RESUME이 와이어로 발사.
  */
 
+/**
+ * xterm's hidden textarea, enough of it for the IME anchor rules: a value, a
+ * caret, and capture-phase listeners.
+ */
+function fakeTextarea() {
+  const listeners: Array<{ type: string; fn: (e: unknown) => void; capture: boolean }> = [];
+  return {
+    value: '',
+    selectionStart: 0,
+    addEventListener(type: string, fn: (e: unknown) => void, capture?: boolean) { listeners.push({ type, fn, capture: capture === true }); },
+    removeEventListener(type: string, fn: (e: unknown) => void, capture?: boolean) {
+      const i = listeners.findIndex((l) => l.type === type && l.fn === fn && l.capture === (capture === true));
+      if (i >= 0) listeners.splice(i, 1);
+    },
+    /** Capture listeners first, as the DOM orders them. */
+    fire(type: string) { for (const l of [...listeners].sort((a, b) => Number(b.capture) - Number(a.capture))) if (l.type === type) l.fn({}); },
+    get listenerCount() { return listeners.length; },
+  };
+}
+
 vi.mock('@xterm/xterm', () => {
   class Terminal {
     cols = 80;
@@ -15,7 +35,9 @@ vi.mock('@xterm/xterm', () => {
     writes: unknown[] = [];
     open() {}
     loadAddon() {}
-    attachCustomKeyEventHandler() {}
+    keyHandler: ((ev: KeyboardEvent) => boolean) | null = null;
+    attachCustomKeyEventHandler(h: (ev: KeyboardEvent) => boolean) { this.keyHandler = h; }
+    textarea = fakeTextarea();
     parser = { registerOscHandler() { return { dispose() {} }; } };
     buffer = { active: { viewportY: 0 } };
     registerMarker() { return { line: 0, isDisposed: false, dispose() {} }; }
@@ -66,6 +88,7 @@ function fakeMux(): TerminalMux & FakeMux {
     paused: [] as number[],
     resumed: [] as number[],
     forgotten: [] as number[],
+    sent: [] as unknown[],
     attachSession(this: FakeMux, _id: number, _cbs: unknown, opts: { cols?: number; rows?: number }) {
       const result = this.attachResults[this.attachCalls] ?? 'ok';
       this.attachCalls += 1;
@@ -79,7 +102,7 @@ function fakeMux(): TerminalMux & FakeMux {
     resumeView(this: FakeMux, id: number) { this.resumed.push(id); },
     forgetSeq(this: FakeMux, id: number) { this.forgotten.push(id); },
     ack() {},
-    send() {},
+    send(this: FakeMux, _id: number, data: unknown) { this.sent.push(data); },
     resize() {},
     requestSnapshot() {},
   };
@@ -231,6 +254,62 @@ describe('TerminalHost stream state machine', () => {
     // ② 서버 기하(143x68)를 입는다
     const term = host.term as unknown as { resized: Array<[number, number]> };
     expect(term.resized).toContainEqual([143, 68]);
+  });
+
+  /**
+   * Korean input broke after Option+← because swallowing a key without
+   * preventDefault lets the browser move the caret inside xterm's hidden
+   * textarea, and xterm anchors each composition at the end of that value.
+   */
+  describe('mac word jump and the IME anchor', () => {
+    /** Input is wired on a successful attach, so the host has to get there first. */
+    async function macHost() {
+      vi.stubGlobal('navigator', { platform: 'MacIntel' });
+      const mux = fakeMux();
+      const host = acquireHost(mux, 11, { mode: 'readwrite', fontSize: 14, enableWebgl: false, localEcho: false });
+      host.mount(fakeElement(), () => {});
+      host.activate();
+      await vi.advanceTimersByTimeAsync(50);
+      await flushMicrotasks();
+      const term = (host as unknown as { term: { keyHandler: ((ev: unknown) => boolean) | null; textarea: ReturnType<typeof fakeTextarea> } }).term;
+      return { mux, host, term };
+    }
+
+    it('Option+← sends the word-jump byte and prevents the default that would move the IME caret', async () => {
+      const { mux, term } = await macHost();
+      let prevented = 0;
+      const ev = { type: 'keydown', key: 'ArrowLeft', altKey: true, preventDefault: () => { prevented++; } };
+      expect(term.keyHandler!(ev)).toBe(false);
+      expect(prevented).toBe(1);
+      expect(mux.sent.map(String)).toEqual(['\x1bb']);
+      const right = { type: 'keydown', key: 'ArrowRight', altKey: true, preventDefault: () => { prevented++; } };
+      expect(term.keyHandler!(right)).toBe(false);
+      expect(mux.sent.map(String)).toEqual(['\x1bb', '\x1bf']);
+      // Everything else is xterm's to handle, untouched.
+      expect(term.keyHandler!({ type: 'keydown', key: 'ArrowLeft', altKey: true, shiftKey: true, preventDefault: () => { prevented++; } })).toBe(true);
+      expect(term.keyHandler!({ type: 'keydown', key: 'a', altKey: true, preventDefault: () => { prevented++; } })).toBe(true);
+      expect(prevented).toBe(2);
+    });
+
+    it('a composition starting with the caret away from the end clears the stale value instead of reporting its tail', async () => {
+      const { term } = await macHost();
+      // The caret is at the end: xterm's anchor is right, leave the text alone.
+      term.textarea.value = '안녕하세요';
+      term.textarea.selectionStart = 5;
+      term.textarea.fire('compositionstart');
+      expect(term.textarea.value).toBe('안녕하세요');
+      // The caret moved (a click, or a key whose default slipped through): reset to the one consistent state.
+      term.textarea.selectionStart = 0;
+      term.textarea.fire('compositionstart');
+      expect(term.textarea.value).toBe('');
+    });
+
+    it('the guard is removed with the rest of the input wiring', async () => {
+      const { term } = await macHost();
+      expect(term.textarea.listenerCount).toBe(1);
+      destroyAllHosts();
+      expect(term.textarea.listenerCount).toBe(0);
+    });
   });
 
   it('fit geometry (default) still announces its size at attach', async () => {

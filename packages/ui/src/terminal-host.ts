@@ -168,7 +168,11 @@ function evictIdleHosts() {
   }
 }
 
-const IS_MAC = typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+/** Read at call time, not at import: a test (and a late-initialised host) can stub navigator. */
+function isMac(): boolean {
+  return typeof navigator !== 'undefined' && /Mac/.test(navigator.platform);
+}
+const IS_MAC = isMac();
 
 /**
  * 우리가 same-origin으로 서빙하는 webfont들 (packages/web/public/fonts, 모두 OFL).
@@ -935,6 +939,30 @@ export class TerminalHost {
     this.pendingAckSeq = null;
   }
 
+  /**
+   * Keep xterm's IME anchor honest.
+   *
+   * compositionstart anchors at `textarea.value.length` and compositionend
+   * sends `value.substring(anchor)`; the two agree only while the caret sits
+   * at the end. Anything that moves it — a key whose default was not
+   * prevented, a click landing inside the one-character textarea — makes
+   * every later composition report the old tail instead of what was typed.
+   * Clearing the value when the caret is elsewhere puts both at zero, which
+   * is the one state that is always consistent. Capture phase: xterm's own
+   * compositionstart listener must see the repaired value, not the broken one.
+   */
+  private guardImeAnchor() {
+    const textarea = this.term.textarea;
+    if (!textarea) return;
+    const onCompositionStart = () => {
+      if (textarea.value.length > 0 && textarea.selectionStart !== textarea.value.length) {
+        textarea.value = '';
+      }
+    };
+    textarea.addEventListener('compositionstart', onCompositionStart, true);
+    this.inputDisposables.push({ dispose: () => textarea.removeEventListener('compositionstart', onCompositionStart, true) });
+  }
+
   private wireInput() {
     if (this.opts.mode === 'readonly') return;
     // xterm 6.0은 mac의 Option+←/→ 특례(ESC b / ESC f — Terminal.app·5.5와 동일)를
@@ -942,11 +970,21 @@ export class TerminalHost {
     // 그대로 찍히므로, 순수 Option+좌우에 한해 5.5의 단어점프 바이트를 복원한다.
     this.term.attachCustomKeyEventHandler((ev) => {
       if (ev.type !== 'keydown' || this.opts.mode === 'readonly') return true;
-      if (!IS_MAC || !ev.altKey || ev.metaKey || ev.ctrlKey || ev.shiftKey) return true;
+      if (!isMac() || !ev.altKey || ev.metaKey || ev.ctrlKey || ev.shiftKey) return true;
       if (ev.key !== 'ArrowLeft' && ev.key !== 'ArrowRight') return true;
+      // Returning false means xterm stops — including the preventDefault it
+      // would have called. The browser then applies the key to the focused
+      // element, which is xterm's hidden textarea, and Option+← moves the
+      // caret inside it. That textarea holds every IME composition since the
+      // last blur, and xterm anchors the next one at value.length, so an
+      // insert before that point comes back as the tail: typing 모두들 in
+      // front of 안녕하세요 sent 요요요 (measured). Prevent the default and
+      // the caret stays put.
+      ev.preventDefault();
       this.mux.send(this.sessionId, ev.key === 'ArrowLeft' ? '\x1bb' : '\x1bf');
       return false;
     });
+    this.guardImeAnchor();
     this.inputDisposables.push(this.term.onData((data) => {
       // Ctrl 래치: 키바의 Ctrl 다음 첫 글자를 제어문자로 (a→^A). 대상이 아니면 해제만.
       if (this.ctrlArmed !== null && data.length === 1) {
