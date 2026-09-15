@@ -246,10 +246,14 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
     return () => { window.clearTimeout(timer); unsub(); };
   }, [mux, load]);
 
-  const runRefresh = useCallback(async () => {
+  const runRefresh = useCallback(async (organize = false) => {
+    if (organize && !window.confirm('AI가 stream을 다시 묶습니다 — 지금 보드에 손으로 짜둔 배치가 바뀔 수 있습니다. 진행할까요?')) return;
     setRefreshing(true);
     try {
-      await fetch(`${API_BASE}/api/map/refresh`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      await fetch(`${API_BASE}/api/map/refresh`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(organize ? { organize: true } : {}),
+      });
     } catch {}
     await load();
     setRefreshing(false);
@@ -521,7 +525,10 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
           {view.newestSummary > 0 ? <span className="w stamp">{' '}· summarized {ago(view.newestSummary, now)}</span> : null}
         </span>
         {!view.summarized ? <span className="empty-hint">no summaries yet — <code>ttym map refresh</code> or</span> : null}
-        <button className={`refresh${refreshing ? ' busy' : ''}`} onClick={() => void runRefresh()} disabled={refreshing} aria-label="refresh summaries" title="refresh summaries">
+        <button className="refresh" onClick={() => void runRefresh(true)} disabled={refreshing} aria-label="auto-organize into streams" title="AI로 stream 자동 정리 (보드 배치가 바뀜)" style={{ fontSize: 'calc(var(--wu)*0.82)', fontFamily: 'var(--mono)' }}>
+          정리
+        </button>
+        <button className={`refresh${refreshing ? ' busy' : ''}`} onClick={() => void runRefresh(false)} disabled={refreshing} aria-label="refresh summaries" title="세션 요약만 새로고침 (stream은 안 건드림)">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
           </svg>

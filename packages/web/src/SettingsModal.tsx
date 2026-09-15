@@ -356,6 +356,7 @@ function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }
   const [model, setModel] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [interval, setIntervalValue] = useState('');
+  const [organize, setOrganize] = useState(false);
   const [keySet, setKeySet] = useState<boolean | null>(null);
   const [keyDraft, setKeyDraft] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -369,6 +370,7 @@ function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }
       setModel(values['map-model'] ?? '');
       setBaseUrl(values['map-base-url'] ?? '');
       setIntervalValue(values['map-interval'] ?? '');
+      setOrganize(['1', 'true', 'on', 'yes'].includes((values['map-organize'] ?? '').toLowerCase()));
     }).catch(() => {});
     void fetch(`${API_BASE}/api/map/api-key`).then((r) => r.json()).then((r) => setKeySet(!!r.set)).catch(() => {});
     void fetch(`${API_BASE}/api/map/prompt`).then((r) => r.json()).then((r) => {
@@ -387,6 +389,7 @@ function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }
       'map-model': model.trim() || null,
       'map-base-url': baseUrl.trim() || null,
       'map-interval': interval.trim() || null,
+      'map-organize': organize ? 'on' : null,
     });
     flash('saved');
   };
@@ -441,6 +444,9 @@ function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }
       </Field>
       <Field label="auto refresh" hint="server-side cadence, e.g. 10m · empty = off (summaries leave your machine — opt in deliberately)">
         <input value={interval} onChange={(e) => setIntervalValue(e.target.value)} placeholder="off" style={{ ...inputStyle, width: 80 }} />
+      </Field>
+      <Field label="auto-organize streams" hint="off = 요약만 (보드 배치는 손 안 댐) · on = 새로고침이 AI로 stream까지 다시 묶음">
+        <Segmented options={['off', 'on'] as const} value={organize ? 'on' : 'off'} onChange={(v) => setOrganize(v === 'on')} />
       </Field>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
         <span style={flashStyle}>{savedFlash}</span>

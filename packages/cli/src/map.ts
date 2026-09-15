@@ -56,7 +56,7 @@ export function resolveStream(existing: string | undefined, proposed: unknown, f
 export async function cmdMap() {
   const sub = process.argv[3];
   if (sub !== 'refresh') {
-    console.error('usage: ttym map refresh [--model M] [--base-url URL] [--api-key K] [--note TEXT] [--force] [--dry-run] [--json]');
+    console.error('usage: ttym map refresh [--organize|--summarize-only] [--model M] [--base-url URL] [--api-key K] [--note TEXT] [--force] [--dry-run] [--json]');
     process.exit(EXIT.USAGE);
   }
   const args = process.argv.slice(4);
@@ -75,9 +75,16 @@ export async function cmdMap() {
     process.exit(EXIT.USAGE);
   }
 
+  // 두 가지 일을 나눈다: 세션 요약(항상)과 stream 자동 정리(opt-in).
+  // 정리는 사용자가 보드에서 손으로 짠 배치를 덮으므로 기본은 요약만.
+  // --organize 또는 config map-organize=on(1/true/yes)일 때만 stream/column/order를 쓴다.
+  // --force는 전체 재요약 + 정리를 함께 뜻한다. --summarize-only는 config를 눌러 끈다.
+  const cfgOrganize = ['1', 'true', 'on', 'yes'].includes((config['map-organize'] || '').trim().toLowerCase());
+  const organize = hasFlag('--organize') ? true : hasFlag('--summarize-only') ? false : (force || cfgOrganize);
+
   const map = await fetchJson(port, '/api/map') as { workspaces: MapWorkspace[]; sessions: MapSession[] };
   const stale = map.sessions.filter((s) => force || s.stale);
-  const unplaced = map.workspaces.filter((w) => !w.map?.stream);
+  const unplaced = organize ? map.workspaces.filter((w) => !w.map?.stream) : [];
   if (stale.length === 0 && unplaced.length === 0) {
     if (hasFlag('--json')) return printOutput({ refreshed: 0, fresh: map.sessions.length }, true);
     console.log(`map: ${map.sessions.length}개 세션 요약 전부 신선 — 할 일 없음`);
@@ -97,7 +104,7 @@ export async function cmdMap() {
   // 편집본이든 저쪽이 유효본을 안다. 데이터 블록만 여기서 조립한다.
   const { prompt: instructions } = await fetchJson(port, '/api/map/prompt') as { prompt: string };
   const note = readOption(args, '--note') || '';
-  const prompt = buildPrompt(instructions, note, map, stale, screens);
+  const prompt = buildPrompt(instructions, note, map, stale, screens, organize);
   if (hasFlag('--dry-run')) { console.log(prompt); return; }
 
   const raw = baseUrl ? await runOpenAi(prompt, model, baseUrl) : await runClaude(prompt, model);
@@ -157,7 +164,7 @@ export async function cmdMap() {
   let workspacesApplied = 0;
   const wsOut = (parsed as Record<string, unknown>).workspaces;
   const placedNow = new Set<string>();
-  if (wsOut && typeof wsOut === 'object') {
+  if (organize && wsOut && typeof wsOut === 'object') {
     for (const [wsId, value] of Object.entries(wsOut as Record<string, unknown>)) {
       const row = map.workspaces.find((w) => w.id === wsId);
       if (!row) continue;
@@ -180,7 +187,7 @@ export async function cmdMap() {
   // 요약기가 통째로 빼먹은 미배치 workspace는 '미분류'로 못박는다. 안 그러면
   // unplaced가 영영 비지 않아 위의 조기 종료가 안 걸리고, 10분마다 전체 요약이
   // 다시 돈다 (이게 stream이 계속 바뀌던 실제 경로다).
-  for (const w of unplaced) {
+  if (organize) for (const w of unplaced) {
     if (placedNow.has(w.id)) continue;
     await fetchPatch(port, `/api/workspaces/${w.id}`, {
       map: { stream: UNSORTED, column: w.map?.column ?? 1, order: w.map?.order ?? 0 },
@@ -188,28 +195,38 @@ export async function cmdMap() {
     workspacesApplied++;
   }
 
+  const mode = organize ? 'summarize+organize' : 'summarize';
   const backend = baseUrl ? `${model} @ ${new URL(baseUrl).host}` : `${model} @ claude`;
-  if (hasFlag('--json')) return printOutput({ refreshed: sessionsApplied, workspaces: workspacesApplied, staleWere: stale.length, model, baseUrl: baseUrl || null }, true);
-  console.log(`map: 세션 ${sessionsApplied}/${stale.length} 요약, workspace ${workspacesApplied} 배치 (${backend})`);
+  if (hasFlag('--json')) return printOutput({ refreshed: sessionsApplied, workspaces: workspacesApplied, staleWere: stale.length, model, mode, baseUrl: baseUrl || null }, true);
+  console.log(organize
+    ? `map: 세션 ${sessionsApplied}/${stale.length} 요약, workspace ${workspacesApplied} 배치 (${backend})`
+    : `map: 세션 ${sessionsApplied}/${stale.length} 요약 — stream은 안 건드림 (${backend})`);
 }
 
-function buildPrompt(instructions: string, note: string, map: { workspaces: MapWorkspace[]; sessions: MapSession[] }, stale: MapSession[], screens: Map<number, string>): string {
+function buildPrompt(instructions: string, note: string, map: { workspaces: MapWorkspace[]; sessions: MapSession[] }, stale: MapSession[], screens: Map<number, string>, organize: boolean): string {
   const membership = new Map<number, { ws: MapWorkspace; name: string }>();
   for (const w of map.workspaces) {
     for (const m of w.members) membership.set(m.sessionId, { ws: w, name: m.name });
   }
   const lines: string[] = [instructions, ''];
+  if (!organize) {
+    // 요약만: workspaces는 손대지 않는다. 모델이 stream을 제안해도 버려지니
+    // 아예 내지 말라고 못박고, workspace 배치 데이터도 프롬프트에서 뺀다.
+    lines.push('=== 이번 호출은 요약만 ===', '"workspaces" 키는 출력하지 마라. "sessions"만 채워라. stream 배치는 사용자가 직접 한다.', '');
+  }
   if (note.trim()) {
     // 일회성 지시는 지시문 바로 뒤 — 저장되지 않고 이번 호출에만 산다.
     lines.push('=== 사용자 일회성 지시 (이번 정리에만 최우선 적용) ===', note.trim(), '');
   }
-  lines.push('=== workspace 목록 ===');
-  for (const w of map.workspaces) {
-    const cur = w.map?.stream ? ` [기존 배치: stream="${w.map.stream}" column=${w.map.column} order=${w.map.order}]` : '';
-    const members = w.members.map((m) => `${m.name}(#${m.sessionId})`).join(', ');
-    lines.push(`- ${w.id}: "${w.name}" 멤버: ${members}${cur}`);
+  if (organize) {
+    lines.push('=== workspace 목록 ===');
+    for (const w of map.workspaces) {
+      const cur = w.map?.stream ? ` [기존 배치: stream="${w.map.stream}" column=${w.map.column} order=${w.map.order}]` : '';
+      const members = w.members.map((m) => `${m.name}(#${m.sessionId})`).join(', ');
+      lines.push(`- ${w.id}: "${w.name}" 멤버: ${members}${cur}`);
+    }
+    lines.push('');
   }
-  lines.push('');
   lines.push('=== 요약 대상 세션 (이 세션들만 sessions에 넣어라) ===');
   for (const s of stale) {
     const mem = membership.get(s.id);
@@ -219,12 +236,14 @@ function buildPrompt(instructions: string, note: string, map: { workspaces: MapW
     lines.push(`── 세션 #${s.id} · ${where} · 에이전트: ${s.agentKind ?? 'shell'} · cmd: ${s.cmd.slice(0, 3).join(' ')}${prev}`);
     lines.push(screens.get(s.id) || '(화면 비어 있음)');
   }
-  lines.push('');
-  lines.push('=== 참고: 요약 대상이 아닌 세션의 현재 title (stream 묶음 판단용) ===');
-  for (const s of map.sessions) {
-    if (stale.includes(s)) continue;
-    const t = s.summary && typeof s.summary.title === 'string' ? s.summary.title : '';
-    if (t) lines.push(`- #${s.id}: ${t}`);
+  if (organize) {
+    lines.push('');
+    lines.push('=== 참고: 요약 대상이 아닌 세션의 현재 title (stream 묶음 판단용) ===');
+    for (const s of map.sessions) {
+      if (stale.includes(s)) continue;
+      const t = s.summary && typeof s.summary.title === 'string' ? s.summary.title : '';
+      if (t) lines.push(`- #${s.id}: ${t}`);
+    }
   }
   return lines.join('\n');
 }
