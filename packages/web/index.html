@@ -63,6 +63,10 @@
     .stream-pills { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 2px; }
     /* 줄기가 바뀌는 자리에만 가는 선 — 지도 뷰의 제목 밑줄이 여기선 행 구분선이 된다. */
     .stream-rule { grid-column: 1 / -1; height: 1px; background: var(--line, #2d2d2d); margin: 4px 0; opacity: .6; }
+    /* 드래그 중 놓을 줄. 두 칸(라벨·알약)이 같은 data-stream-row라 둘 다 밝아져 한 줄로 읽힌다. */
+    .stream-row { border-radius: 5px; }
+    .stream-row-lit, .stream-new.stream-row-lit { background: var(--bg2, rgba(255,255,255,.06)); outline: 1px dashed var(--line-strong, #555); outline-offset: -1px; }
+    body.stream-dragging { cursor: grabbing; user-select: none; }
     /* zen 바: 평소엔 없다. 상단 44px에 마우스가 들어올 때만 뜬다 — 본문 위에서
        움직여도 안 뜨게 존을 좁게 잡았다. 들어온 직후 한 번은 스스로 보인다
        (.zen-bar-show). 전역 * { transition: none !important } 를 뚫으려면

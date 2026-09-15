@@ -733,4 +733,115 @@ describe('WorkspaceStore', () => {
     await reloaded.load();
     expect(reloaded.get('only')?.name).toBe('Only');
   });
+
+  describe('streams', () => {
+    const pane = { type: 'pane', sessionId: 0 } as const;
+
+    it('adopts names that appear on workspaces, in first-seen order, never the unsorted name', () => {
+      const dir = runtimeDir();
+      dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      const events: unknown[] = [];
+      store.onChange((e) => events.push(e));
+      store.create('a', 'a', pane, [], { stream: 'gpai' });
+      store.create('b', 'b', pane, []);
+      store.update('b', { map: { stream: 'mainpy' } });
+      store.update('a', { map: { stream: 'gpai' } });           // 이미 있음 → 이벤트 없음
+      store.create('c', 'c', pane, [], { stream: '미분류' });    // 목록에 안 들어간다
+      store.create('d', 'd', pane, [], { stream: '  ' });
+      expect(store.listStreams()).toEqual(['gpai', 'mainpy']);
+      const streamEvents = events.filter((e) => (e as { streams?: unknown }).streams);
+      expect(streamEvents.map((e) => (e as { streams: string[] }).streams)).toEqual([['gpai'], ['gpai', 'mainpy']]);
+    });
+
+    it('creates empty streams, keeps them across reload, and rejects duplicates', async () => {
+      const dir = runtimeDir();
+      dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      expect(store.addStream('docx')).toBe(true);
+      expect(store.addStream('docx')).toBe(false);
+      expect(store.addStream(' ')).toBe(false);
+      expect(store.addStream('미분류')).toBe(false);
+      await new Promise((r) => setTimeout(r, 50));
+      const reloaded = track(new WorkspaceStore(dir));
+      await reloaded.load();
+      expect(reloaded.listStreams()).toEqual(['docx']);
+      expect(JSON.parse(readFileSync(join(dir, 'workspaces.json'), 'utf8')).streams).toEqual(['docx']);
+    });
+
+    it('an old file without a stream list rebuilds it from the workspaces', async () => {
+      const dir = runtimeDir();
+      dirs.push(dir);
+      writeFileSync(join(dir, 'workspaces.json'), JSON.stringify({
+        version: 3,
+        workspaces: [
+          { id: 'a', name: 'a', layout: pane, members: [], map: { stream: 'gpai' }, createdAt: 1, updatedAt: 1 },
+          { id: 'b', name: 'b', layout: pane, members: [], createdAt: 1, updatedAt: 1 },
+          { id: 'c', name: 'c', layout: pane, members: [], map: { stream: 'mainpy' }, createdAt: 1, updatedAt: 1 },
+          { id: 'd', name: 'd', layout: pane, members: [], map: { stream: 'gpai' }, createdAt: 1, updatedAt: 1 },
+        ],
+      }));
+      const store = track(new WorkspaceStore(dir));
+      await store.load();
+      expect(store.listStreams()).toEqual(['gpai', 'mainpy']);
+    });
+
+    it('reorders the whole list only, and rejects a stale set', () => {
+      const dir = runtimeDir();
+      dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      for (const s of ['a', 'b', 'c']) store.addStream(s);
+      expect(store.reorderStreams(['c', 'a', 'b'])).toBe(true);
+      expect(store.listStreams()).toEqual(['c', 'a', 'b']);
+      expect(store.reorderStreams(['a', 'b'])).toBe(false);
+      expect(store.reorderStreams(['a', 'b', 'c', 'd'])).toBe(false);
+      expect(store.listStreams()).toEqual(['c', 'a', 'b']);
+    });
+
+    it('rename rewrites every workspace in the stream and keeps its place', () => {
+      const dir = runtimeDir();
+      dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      store.create('a', 'a', pane, [], { stream: 'gpai', column: 2, order: 5 });
+      store.create('b', 'b', pane, [], { stream: 'mainpy' });
+      store.create('c', 'c', pane, [], { stream: 'gpai' });
+      const events: unknown[] = [];
+      store.onChange((e) => events.push(e));
+      expect(store.renameStream('gpai', 'gpai-forest')).toEqual({ ok: true, moved: 2, merged: false });
+      expect(store.listStreams()).toEqual(['gpai-forest', 'mainpy']);
+      expect(store.get('a')!.map).toMatchObject({ stream: 'gpai-forest', column: 2, order: 5 });
+      expect(store.get('c')!.map!.stream).toBe('gpai-forest');
+      expect(store.get('b')!.map!.stream).toBe('mainpy');
+      // workspace 둘 + 목록 하나
+      expect(events.filter((e) => (e as { workspace?: unknown }).workspace)).toHaveLength(2);
+      expect((events.at(-1) as { streams?: string[] }).streams).toEqual(['gpai-forest', 'mainpy']);
+      expect(store.renameStream('nope', 'x')).toEqual({ ok: false, error: 'unknown stream: nope' });
+      expect(store.renameStream('mainpy', '미분류').ok).toBe(false);
+    });
+
+    it('rename onto an existing name merges into it', () => {
+      const dir = runtimeDir();
+      dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      store.create('a', 'a', pane, [], { stream: 'gpai' });
+      store.create('b', 'b', pane, [], { stream: 'drive' });
+      store.addStream('z');
+      expect(store.renameStream('drive', 'gpai')).toEqual({ ok: true, moved: 1, merged: true });
+      expect(store.listStreams()).toEqual(['gpai', 'z']);
+      expect(store.get('b')!.map!.stream).toBe('gpai');
+    });
+
+    it('remove sends the workspaces to unsorted and drops the name', () => {
+      const dir = runtimeDir();
+      dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      store.create('a', 'a', pane, [], { stream: 'gpai', column: 1 });
+      store.create('b', 'b', pane, [], { stream: 'mainpy' });
+      expect(store.removeStream('gpai')).toEqual({ ok: true, moved: 1 });
+      expect(store.listStreams()).toEqual(['mainpy']);
+      expect(store.get('a')!.map!.stream).toBeUndefined();
+      expect(store.get('a')!.map!.column).toBe(1);
+      expect(store.removeStream('gpai').ok).toBe(false);
+    });
+  });
 });

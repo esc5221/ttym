@@ -39,6 +39,8 @@ export interface WorkspaceChangeEvent {
   deletedId?: string;
   /** 탭 재배치: 전체 id 순열 (diff 아님 — 순서 전체를 다시 말한다). */
   order?: string[];
+  /** stream 목록 전체 (만들기·순서·이름·제거 — 항상 전체). */
+  streams?: string[];
 }
 
 export interface AgentSleepState {

@@ -56,7 +56,13 @@ export interface WorkspaceMemberInfo {
 interface StoreFile {
   version: 3;
   workspaces: WorkspaceInfo[];
+  /** stream 이름의 순서. 없으면 workspace 등장 순으로 만든다 (구 파일). */
+  streams?: string[];
 }
+
+/** stream 없는 workspace의 이름. 웹·CLI와 같은 문자열이어야 한다 — 이 이름은 목록에 넣지 않는다. */
+export const UNSORTED_STREAM = '미분류';
+
 
 /** v2 시절 파일: project 필드가 있었다 — 로드 시 폐기된다. */
 interface V2WorkspaceInfo extends WorkspaceInfo {
@@ -77,10 +83,19 @@ export interface WorkspaceChangeEvent {
   deletedId?: string;
   /** 탭 재배치: 전체 id 순열. 부분 diff가 아니라 순서 전체를 다시 말한다. */
   order?: string[];
+  /** stream 목록이 바뀜: 전체 순서. 만들기·순서·이름·제거 모두 이것으로 말한다. */
+  streams?: string[];
 }
 
 export class WorkspaceStore {
   private workspaces = new Map<string, WorkspaceInfo>();
+  /**
+   * stream 이름과 순서. 진실은 여전히 각 workspace의 map.stream이고, 이 목록은
+   * (1) workspace가 하나도 없는 stream을 살려두고 (2) 순서를 등장 순이 아니라
+   * 정한 순서로 만든다. workspace에 목록에 없는 이름이 붙으면 뒤에 붙여
+   * 항상 합집합을 유지한다 — 요약기와 --stream이 이 경로로 들어온다.
+   */
+  private streams: string[] = [];
   /** Runtime only: never written to workspaces.json, so the format is unchanged. */
   private lastDiagnostics = new Map<string, string[]>();
   private readonly filePath: string;
@@ -103,6 +118,8 @@ export class WorkspaceStore {
         entries = (data as V2StoreFile).workspaces; // project 필드는 아래에서 폐기
         this.dirty = true; // 첫 save가 v3로 승격
       }
+      const saved = (data as StoreFile).streams;
+      this.streams = Array.isArray(saved) ? saved.filter((s) => typeof s === 'string' && s.trim() && s !== UNSORTED_STREAM) : [];
       for (const entry of entries) {
         const { project: _dropped, ...ws } = entry;
         // 이름이 곧 주소다(project 소멸의 대가) — 파일에 중복이 있으면 뒤의 것이
@@ -114,6 +131,7 @@ export class WorkspaceStore {
           this.dirty = true;
         }
         this.workspaces.set(ws.id, this.normalizeWorkspace({ ...ws, name }));
+        this.adoptStream(ws.map?.stream);
       }
       // 구버전 파일은 다음 변경을 기다리지 않고 부팅 즉시 승격한다.
       if (this.dirty) void this.save();
@@ -140,6 +158,7 @@ export class WorkspaceStore {
         const data: StoreFile = {
           version: 3,
           workspaces: Array.from(this.workspaces.values()),
+          streams: this.streams,
         };
         const tmpPath = this.filePath + '.tmp';
         await writeFile(tmpPath, JSON.stringify(data, null, 2));
@@ -166,7 +185,7 @@ export class WorkspaceStore {
     return () => this.changeListeners.delete(listener);
   }
 
-  private emitChange(change: { workspace?: WorkspaceInfo; deletedId?: string; order?: string[] }): void {
+  private emitChange(change: { workspace?: WorkspaceInfo; deletedId?: string; order?: string[]; streams?: string[] }): void {
     const event: WorkspaceChangeEvent = { generation: ++this.changeGeneration, ...change };
     for (const listener of this.changeListeners) {
       try { listener(event); } catch {}
@@ -242,6 +261,7 @@ export class WorkspaceStore {
     name: string,
     layout: LayoutNode,
     members: WorkspaceMemberInfo[] = [],
+    map?: WorkspaceMapAnnotation,
   ): WorkspaceInfo {
     if (this.hasName(name)) throw new Error(`workspace name already exists: ${name}`);
     const now = Date.now();
@@ -250,12 +270,14 @@ export class WorkspaceStore {
       name,
       layout,
       members,
+      ...(map ? { map: { ...map, updatedAt: now } } : {}),
       createdAt: now,
       updatedAt: now,
     });
     this.workspaces.set(id, ws);
     this.scheduleSave();
     this.emitChange({ workspace: ws });
+    if (this.adoptStream(ws.map?.stream)) this.emitChange({ streams: this.streams.slice() });
     return ws;
   }
 
@@ -281,7 +303,94 @@ export class WorkspaceStore {
     ws.updatedAt = Date.now();
     this.scheduleSave();
     this.emitChange({ workspace: ws });
+    if (this.adoptStream(ws.map?.stream)) this.emitChange({ streams: this.streams.slice() });
     return ws;
+  }
+
+  // ───── streams ─────
+
+  /** 목록에 없는 이름이면 뒤에 붙인다. 붙였으면 true. 빈 이름·미분류는 목록에 안 넣는다. */
+  private adoptStream(name: string | undefined): boolean {
+    const s = name?.trim();
+    if (!s || s === UNSORTED_STREAM || this.streams.includes(s)) return false;
+    this.streams.push(s);
+    this.scheduleSave();
+    return true;
+  }
+
+  listStreams(): string[] {
+    return this.streams.slice();
+  }
+
+  /** 빈 stream 만들기. 이미 있으면 false. */
+  addStream(name: string): boolean {
+    const s = name.trim();
+    if (!s || s === UNSORTED_STREAM || this.streams.includes(s)) return false;
+    this.streams.push(s);
+    this.scheduleSave();
+    this.emitChange({ streams: this.streams.slice() });
+    return true;
+  }
+
+  /**
+   * 순서 바꾸기. 현재 목록과 같은 집합이어야 한다 — 탭 reorder와 같은 이유로
+   * (동시 생성과 교차한 낡은 순열이 stream을 증발시키지 않게) 다르면 거부.
+   */
+  reorderStreams(names: string[]): boolean {
+    const current = new Set(this.streams);
+    if (names.length !== current.size || !names.every((n) => current.has(n))) return false;
+    this.streams = names.slice();
+    this.scheduleSave();
+    this.emitChange({ streams: this.streams.slice() });
+    return true;
+  }
+
+  /**
+   * 이름 바꾸기 = 그 이름을 가진 workspace 전부의 map.stream을 고쳐 쓰는 것.
+   * `to`가 이미 있으면 합쳐진다 — from은 목록에서 사라지고 to는 제자리.
+   * 없으면 from의 자리에 to가 들어간다. 돌아오는 것은 바뀐 workspace 수.
+   */
+  renameStream(from: string, to: string): { ok: true; moved: number; merged: boolean } | { ok: false; error: string } {
+    const src = from.trim();
+    const dst = to.trim();
+    if (!src || !dst) return { ok: false, error: 'from and to required' };
+    if (src === UNSORTED_STREAM || dst === UNSORTED_STREAM) return { ok: false, error: `"${UNSORTED_STREAM}" is not a stream name` };
+    const at = this.streams.indexOf(src);
+    if (at === -1) return { ok: false, error: `unknown stream: ${src}` };
+    if (src === dst) return { ok: true, moved: 0, merged: false };
+    const merged = this.streams.includes(dst);
+    if (merged) this.streams.splice(at, 1);
+    else this.streams[at] = dst;
+    const moved = this.retagWorkspaces(src, dst);
+    this.scheduleSave();
+    this.emitChange({ streams: this.streams.slice() });
+    return { ok: true, moved, merged };
+  }
+
+  /** stream을 없앤다. 그 안의 workspace는 지우지 않고 미분류로 보낸다. */
+  removeStream(name: string): { ok: true; moved: number } | { ok: false; error: string } {
+    const s = name.trim();
+    const at = this.streams.indexOf(s);
+    if (at === -1) return { ok: false, error: `unknown stream: ${s}` };
+    this.streams.splice(at, 1);
+    const moved = this.retagWorkspaces(s, undefined);
+    this.scheduleSave();
+    this.emitChange({ streams: this.streams.slice() });
+    return { ok: true, moved };
+  }
+
+  /** map.stream이 `from`인 workspace 전부를 `to`로. 각각 변경 이벤트를 낸다. */
+  private retagWorkspaces(from: string, to: string | undefined): number {
+    let n = 0;
+    const now = Date.now();
+    for (const ws of this.workspaces.values()) {
+      if (ws.map?.stream?.trim() !== from) continue;
+      ws.map = { ...ws.map, stream: to, updatedAt: now };
+      ws.updatedAt = now;
+      n++;
+      this.emitChange({ workspace: ws });
+    }
+    return n;
   }
 
   addMember(id: string, member: Omit<WorkspaceMemberInfo, 'createdAt' | 'updatedAt'>): WorkspaceInfo | null {

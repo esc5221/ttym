@@ -852,7 +852,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         stale: atSeq === null || info.lastSeq > atSeq,
       };
     })).then((rows) => {
-      json(200, { generatedAt: Date.now(), workspaces: workspaceStore.list(), sessions: rows });
+      json(200, { generatedAt: Date.now(), workspaces: workspaceStore.list(), streams: workspaceStore.listStreams(), sessions: rows });
     }).catch(() => json(500, { error: 'map assembly failed' }));
     return true;
   }
@@ -1011,13 +1011,78 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
+  // ───── Streams: 이름 목록. 진실은 workspace.map.stream, 여기는 순서와 빈 stream ─────
+
+  // GET /api/streams
+  if (path === '/api/streams' && req.method === 'GET') {
+    json(200, { streams: workspaceStore.listStreams() });
+    return true;
+  }
+
+  // POST /api/streams {name} — 빈 stream 만들기
+  if (path === '/api/streams' && req.method === 'POST') {
+    readBody().then((body) => {
+      try {
+        const { name } = JSON.parse(body);
+        if (typeof name !== 'string' || !name.trim()) { json(400, { error: 'body must be {name: string}' }); return; }
+        if (!workspaceStore.addStream(name)) { json(409, { error: `stream already exists: ${name.trim()}` }); return; }
+        log(`STREAM ADD name=${name.trim()}`);
+        json(201, { streams: workspaceStore.listStreams() });
+      } catch { json(400, { error: 'invalid body' }); }
+    });
+    return true;
+  }
+
+  // PATCH /api/streams/order {streams: string[]} — 전체 순열, 집합 불일치는 409
+  if (path === '/api/streams/order' && req.method === 'PATCH') {
+    readBody().then((body) => {
+      try {
+        const { streams } = JSON.parse(body);
+        if (!Array.isArray(streams) || !streams.every((x) => typeof x === 'string')) { json(400, { error: 'body must be {streams: string[]}' }); return; }
+        if (!workspaceStore.reorderStreams(streams)) { json(409, { error: 'streams do not match the current set' }); return; }
+        json(200, { streams: workspaceStore.listStreams() });
+      } catch { json(400, { error: 'invalid body' }); }
+    });
+    return true;
+  }
+
+  // POST /api/streams/rename {from, to} — to가 있으면 합치기
+  if (path === '/api/streams/rename' && req.method === 'POST') {
+    readBody().then((body) => {
+      try {
+        const { from, to } = JSON.parse(body);
+        if (typeof from !== 'string' || typeof to !== 'string') { json(400, { error: 'body must be {from, to}' }); return; }
+        const r = workspaceStore.renameStream(from, to);
+        if (!r.ok) { json(r.error.startsWith('unknown') ? 404 : 400, { error: r.error }); return; }
+        log(`STREAM RENAME ${from} -> ${to} moved=${r.moved} merged=${r.merged}`);
+        json(200, { ...r, streams: workspaceStore.listStreams() });
+      } catch { json(400, { error: 'invalid body' }); }
+    });
+    return true;
+  }
+
+  // POST /api/streams/remove {name} — workspace는 미분류로
+  if (path === '/api/streams/remove' && req.method === 'POST') {
+    readBody().then((body) => {
+      try {
+        const { name } = JSON.parse(body);
+        if (typeof name !== 'string') { json(400, { error: 'body must be {name}' }); return; }
+        const r = workspaceStore.removeStream(name);
+        if (!r.ok) { json(404, { error: r.error }); return; }
+        log(`STREAM REMOVE name=${name} moved=${r.moved}`);
+        json(200, { ...r, streams: workspaceStore.listStreams() });
+      } catch { json(400, { error: 'invalid body' }); }
+    });
+    return true;
+  }
+
   // POST /api/workspaces
   if (path === '/api/workspaces' && req.method === 'POST') {
     readBody().then((body) => {
       try {
-        const { id, name, layout, members } = JSON.parse(body);
+        const { id, name, layout, members, map } = JSON.parse(body);
         if (!id || !name || !layout) { json(400, { error: 'id, name, layout required' }); return; }
-        const ws = workspaceStore.create(id, name, layout, members || []);
+        const ws = workspaceStore.create(id, name, layout, members || [], map && typeof map === 'object' ? map : undefined);
         log(`WORKSPACE CREATE id=${id} name=${name}`);
         json(201, ws);
       } catch (error) {
