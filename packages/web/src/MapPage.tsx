@@ -140,7 +140,7 @@ const MAP_CSS = `
 .wmap .s.last::before { height:0.9em; }
 .wmap .s::after { content:''; position:absolute; left:calc(var(--wu)*0.3); top:0.9em; width:calc(var(--wu)*0.5); height:1px; background:var(--wm-faint); }
 .wmap .s:hover { background:color-mix(in srgb, var(--wm-tx) 5%, transparent); }
-.wmap .s .id { color:var(--wm-soft); width:calc(var(--wu)*2.6); flex-shrink:0; }
+.wmap .s .id { color:var(--wm-soft); min-width:calc(var(--wu)*2.4); padding-right:calc(var(--wu)*0.5); flex-shrink:0; }
 .wmap .s .id::before { content:'●'; font-size:calc(var(--wu)*0.62); margin-right:calc(var(--wu)*0.35); vertical-align:calc(var(--wu)*0.08); }
 .wmap .s.claude .id::before { color:var(--wm-claude); }
 .wmap .s.zsh .id::before { color:var(--wm-zsh); }
