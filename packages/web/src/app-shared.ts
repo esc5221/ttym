@@ -419,6 +419,10 @@ export async function apiDeleteWorkspace(id: string): Promise<void> {
   } catch {}
 }
 
+export async function apiMoveMember(fromWs: string, sessionId: number, toWs: string): Promise<void> {
+  try { await api.moveWorkspaceMember(API_BASE, fromWs, sessionId, toWs); } catch {}
+}
+
 export async function apiRemoveMember(wsId: string, sessionId: number): Promise<void> {
   try {
     await api.removeWorkspaceMember(API_BASE, wsId, sessionId);

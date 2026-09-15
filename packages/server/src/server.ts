@@ -1129,6 +1129,24 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     }
   }
 
+  // POST /api/workspaces/:id/members/:sessionId/move { to } — 세션을 다른 워크스페이스로
+  // (빈 to는 detach → standalone). PTY는 안 죽는다.
+  const memberMoveMatch = path.match(/^\/api\/workspaces\/([^/]+)\/members\/(\d+)\/move$/);
+  if (memberMoveMatch && req.method === 'POST') {
+    const fromId = decodeURIComponent(memberMoveMatch[1]);
+    const sessionId = parseInt(memberMoveMatch[2], 10);
+    readBody().then((body) => {
+      try {
+        const { to } = JSON.parse(body || '{}');
+        const r = workspaceStore.moveMember(fromId, sessionId, typeof to === 'string' ? to : undefined);
+        if ('error' in r) { json(r.error.includes('not found') ? 404 : 400, { error: r.error }); return; }
+        log(`WORKSPACE MEMBER MOVE session=${sessionId} from=${fromId} to=${to || 'standalone'}`);
+        json(200, r);
+      } catch { json(400, { error: 'invalid body' }); }
+    });
+    return true;
+  }
+
   const memberMatch = path.match(/^\/api\/workspaces\/([^/]+)\/members\/(\d+)$/);
   if (memberMatch) {
     const wsId = decodeURIComponent(memberMatch[1]);

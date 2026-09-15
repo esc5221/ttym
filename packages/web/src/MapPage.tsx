@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   API_BASE, navigate, streamOf, UNSORTED_STREAM,
-  apiUpdateWorkspace, apiAddStream, apiRenameStream, apiRemoveStream, apiReorderStreams,
+  apiUpdateWorkspace, apiAddStream, apiRenameStream, apiRemoveStream, apiReorderStreams, apiMoveMember,
   type Workspace,
 } from './app-shared.js';
 
@@ -121,6 +121,8 @@ const MAP_CSS = `
 }
 .wmb-card:last-child { margin-bottom:0; }
 .wmb-card.drag { opacity:.5; cursor:grabbing; }
+.wmb-card.droplit { border-color:var(--wm-soft); background:color-mix(in srgb, var(--wm-tx) 7%, transparent); }
+.wmap .s.sdrag { opacity:.4; }
 .wmb-card .wsh { color:var(--wm-soft); font-size:calc(var(--wu)*0.85); margin-bottom:calc(var(--wu)*0.3); }
 .wmb-card .wsh b { color:var(--wm-tx); font-weight:700; cursor:pointer; }
 .wmb-card .wsh .d { color:var(--wm-faint); margin-left:calc(var(--wu)*0.5); }
@@ -190,6 +192,13 @@ function ago(ts: number | undefined, now: number): string {
 }
 
 interface Column { name: string; workspaces: MapWorkspace[] }
+
+/** 세션 행을 끌 때의 착지점: 다른 workspace 카드(그 id). 없으면 null. */
+function sessionDropAt(x: number, y: number): string | null {
+  const el = document.elementFromPoint(x, y);
+  const card = el?.closest('[data-wmb-card]') as HTMLElement | null;
+  return card?.dataset.wmbCard ?? null;
+}
 
 /** 포인터 아래의 칸 이름. "+ new stream"이면 NEW_COL. 없으면 null. */
 const NEW_COL = ' new';
@@ -283,6 +292,24 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
     void apiReorderStreams(names).then(load);
   }, [load]);
 
+  // 세션 하나를 다른 workspace로 옮기거나(카드에 드롭) 빼낸다(standalone에 드롭).
+  // PTY는 그대로. 낙관적으로 카드 멤버를 옮기고 서버에 반영한 뒤 다시 읽는다.
+  const moveSession = useCallback((sid: number, fromWs: string, toWs: string | null) => {
+    if (!toWs || toWs === fromWs) return;
+    patchLocal((d) => {
+      const member = d.workspaces.find((w) => w.id === fromWs)?.members.find((m) => m.sessionId === sid);
+      return {
+        ...d,
+        workspaces: d.workspaces.map((w) => {
+          if (w.id === fromWs) return { ...w, members: w.members.filter((m) => m.sessionId !== sid) };
+          if (w.id === toWs && member) return { ...w, members: [...w.members, member] };
+          return w;
+        }),
+      };
+    });
+    void apiMoveMember(fromWs, sid, toWs).then(load);
+  }, [load]);
+
   const view = useMemo(() => {
     if (!data) return null;
     const sessionById = new Map(data.sessions.map((s) => [s.id, s]));
@@ -322,7 +349,37 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
   const [dragCard, setDragCard] = useState<string | null>(null);
   const [dragHead, setDragHead] = useState<string | null>(null);
   const [lit, setLit] = useState<string | null>(null);
+  const [dragSession, setDragSession] = useState<number | null>(null);
   const suppressClick = useRef(false);
+  const suppressSessionClick = useRef(false);
+
+  const beginSessionDrag = (sid: number, fromWs: string, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const sx = e.clientX, sy = e.clientY;
+    let moved = false;
+    let last: string | null = null;
+    const paint = (id: string | null) => {
+      document.querySelectorAll('.droplit').forEach((el) => el.classList.remove('droplit'));
+      if (id && id !== fromWs) document.querySelector(`[data-wmb-card="${id}"]`)?.classList.add('droplit');
+    };
+    const onMove = (ev: MouseEvent) => {
+      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+      if (!moved) { moved = true; suppressSessionClick.current = true; setDragSession(sid); document.body.classList.add('wmb-dragging'); }
+      last = sessionDropAt(ev.clientX, ev.clientY);
+      paint(last);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('wmb-dragging');
+      document.querySelectorAll('.droplit').forEach((el) => el.classList.remove('droplit'));
+      setDragSession(null);
+      if (moved) moveSession(sid, fromWs, last);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
   const streamOrder = useMemo(() => (view ? view.columns.map((c) => c.name).filter((n) => n !== UNSORTED_STREAM) : []), [view]);
 
   const beginCardDrag = (wsId: string, e: React.MouseEvent) => {
@@ -424,9 +481,18 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
     const sum = s.summary;
     const title = sum?.title || name || `#${sid}`;
     const off = !s.agentKind && !sum?.note;
-    const open = () => { if (wsId) navigate({ page: 'workspace', id: wsId }); else navigate({ page: 'session', id: sid }); };
+    const open = () => {
+      if (suppressSessionClick.current) { suppressSessionClick.current = false; return; }
+      if (wsId) navigate({ page: 'workspace', id: wsId }); else navigate({ page: 'session', id: sid });
+    };
     return (
-      <div key={sid} className={`s ${dotClass(s.agentKind)}${off ? ' off' : ''}${isLast ? ' last' : ''}`} onClick={open}>
+      <div
+        key={sid}
+        className={`s ${dotClass(s.agentKind)}${off ? ' off' : ''}${isLast ? ' last' : ''}${dragSession === sid ? ' sdrag' : ''}`}
+        onClick={open}
+        onMouseDown={wsId ? (e) => beginSessionDrag(sid, wsId, e) : undefined}
+        title={wsId ? '드래그: 다른 workspace 카드로 세션 옮기기' : undefined}
+      >
         <span className="id">{sid}</span>
         <div className="what">
           <b>{title}</b>

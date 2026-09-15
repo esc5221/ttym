@@ -77,6 +77,11 @@ export function removeWorkspaceMember(base: BaseUrl, id: string, sessionId: numb
   return request(base, `/api/workspaces/${encodeURIComponent(id)}/members/${sessionId}`, { method: 'DELETE' });
 }
 
+/** Move a session's membership to another workspace (empty `to` detaches it). The PTY survives. */
+export function moveWorkspaceMember(base: BaseUrl, fromId: string, sessionId: number, to: string): Promise<{ from: WorkspaceInfo; to?: WorkspaceInfo }> {
+  return request(base, `/api/workspaces/${encodeURIComponent(fromId)}/members/${sessionId}/move`, { method: 'POST', body: { to } });
+}
+
 /** Create a session and place it beside `targetSessionId` in one request. */
 export function splitWorkspace(
   base: BaseUrl,

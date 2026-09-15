@@ -844,4 +844,53 @@ describe('WorkspaceStore', () => {
       expect(store.removeStream('gpai').ok).toBe(false);
     });
   });
+
+  describe('moveMember', () => {
+    function wsWith(store: WorkspaceStore, id: string, sids: number[]) {
+      store.create(id, id, { type: 'pane', sessionId: 0 }, []);
+      for (const sid of sids) store.addMember(id, { sessionId: sid, name: `term-${sid}` });
+      return store.get(id)!;
+    }
+
+    it('moves a session between workspaces, keeping it a member of exactly one', () => {
+      const dir = runtimeDir(); dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      wsWith(store, 'a', [10, 11]);
+      wsWith(store, 'b', [20]);
+      const r = store.moveMember('a', 10, 'b');
+      expect('error' in r).toBe(false);
+      expect(store.get('a')!.members.map((m) => m.sessionId)).toEqual([11]);
+      expect(store.get('b')!.members.map((m) => m.sessionId).sort()).toEqual([10, 20]);
+      expect(layoutIds(store.get('b')!.layout).sort()).toEqual([10, 20]);
+    });
+
+    it('detaches to standalone when the target is empty, leaving an empty workspace', () => {
+      const dir = runtimeDir(); dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      wsWith(store, 'a', [10]);
+      const r = store.moveMember('a', 10, '');
+      expect('error' in r).toBe(false);
+      expect(store.get('a')!.members).toEqual([]);
+    });
+
+    it('renames on collision in the target', () => {
+      const dir = runtimeDir(); dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      store.create('a', 'a', { type: 'pane', sessionId: 0 }, []);
+      store.addMember('a', { sessionId: 10, name: 'runner' });
+      store.create('b', 'b', { type: 'pane', sessionId: 0 }, []);
+      store.addMember('b', { sessionId: 20, name: 'runner' });
+      store.moveMember('a', 10, 'b');
+      const names = store.get('b')!.members.map((m) => m.name).sort();
+      expect(names).toEqual(['runner', 'runner-2']);
+    });
+
+    it('rejects an unknown session or target', () => {
+      const dir = runtimeDir(); dirs.push(dir);
+      const store = track(new WorkspaceStore(dir));
+      wsWith(store, 'a', [10]);
+      expect(store.moveMember('a', 99, 'a')).toEqual({ error: 'session is not a member of the source workspace' });
+      expect(store.moveMember('a', 10, 'nope')).toEqual({ error: 'target workspace not found' });
+    });
+  });
 });

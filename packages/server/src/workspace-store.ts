@@ -476,6 +476,33 @@ export class WorkspaceStore {
     return ws;
   }
 
+  /**
+   * 세션 하나를 워크스페이스 사이로 옮긴다 — PTY는 그대로, 멤버십·레이아웃만.
+   * `toId`가 비면 그냥 빼서 standalone으로 둔다(detach). 목적지에서 이름이 겹치면
+   * `-2`,`-3`…을 붙인다. 마지막 세션을 빼도 빈 워크스페이스는 남긴다(자동 삭제 안 함
+   * — 되돌리기 안전). removeMember·addMember를 그대로 쓰므로 각각 변경 이벤트가 난다.
+   */
+  moveMember(fromId: string, sessionId: number, toId: string | undefined):
+    | { from: WorkspaceInfo; to?: WorkspaceInfo }
+    | { error: string } {
+    const from = this.workspaces.get(fromId);
+    if (!from) return { error: 'source workspace not found' };
+    const member = from.members.find((m) => m.sessionId === sessionId);
+    if (!member) return { error: 'session is not a member of the source workspace' };
+    const dst = toId?.trim() || undefined;
+    if (dst && !this.workspaces.has(dst)) return { error: 'target workspace not found' };
+    if (dst === fromId) return { from };
+    const detached = { name: member.name, role: member.role, tags: member.tags ? [...member.tags] : [] };
+    this.removeMember(fromId, sessionId);
+    if (!dst) return { from: this.workspaces.get(fromId)! };
+    const target = this.workspaces.get(dst)!;
+    const used = new Set(target.members.map((m) => m.name));
+    let name = detached.name;
+    for (let n = 2; used.has(name); n++) name = `${detached.name}-${n}`;
+    this.addMember(dst, { sessionId, name, role: detached.role, tags: detached.tags });
+    return { from: this.workspaces.get(fromId)!, to: this.workspaces.get(dst)! };
+  }
+
   renameMember(id: string, sessionId: number, name: string): WorkspaceInfo | null {
     const ws = this.workspaces.get(id);
     if (!ws) return null;

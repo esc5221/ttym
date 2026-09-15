@@ -51,6 +51,7 @@ export function createApi(base: BaseUrl) {
       addMember: (id: string, m: Parameters<typeof workspaces.addWorkspaceMember>[2]) =>
         workspaces.addWorkspaceMember(base, id, m),
       removeMember: (id: string, sessionId: number) => workspaces.removeWorkspaceMember(base, id, sessionId),
+      moveMember: (fromId: string, sessionId: number, to: string) => workspaces.moveWorkspaceMember(base, fromId, sessionId, to),
       split: (id: string, o?: Parameters<typeof workspaces.splitWorkspace>[2]) =>
         workspaces.splitWorkspace(base, id, o),
     },
