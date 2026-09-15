@@ -16,7 +16,7 @@ import {
   workspaceLabel,
   type LayoutNode,
 } from '@ttym/shared';
-import { actionBtnStyle, apiDeleteWorkspace, groupByStream, isNameConflict, readZenFontDelta, writeZenFontDelta, ZEN_DEFAULT_COLS, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
+import { actionBtnStyle, apiAddStream, apiDeleteWorkspace, apiRemoveStream, apiRenameStream, apiReorderStreams, fetchStreams, groupByStream, isNameConflict, readZenFontDelta, writeZenFontDelta, ZEN_DEFAULT_COLS, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, AgentState, IS_NATIVE, Route, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, UiStyle, Workspace, apiAddMember, apiCreateWorkspace, apiReorderWorkspaces, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, quotePathForShell, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, stripBtnStyle, uploadDroppedFiles, workspaceDisplayLabel, writeLocalEchoEnabled } from './app-shared.js';
 import { DashboardPage } from './DashboardPage.js';
 import { KeyBar } from './KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
@@ -93,7 +93,7 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
  *  승격되므로, 안쪽에 absolute로 띄운 패널은 스트립 높이(42px) 밖에서 잘려
  *  보이지 않는다. z-index로는 뚫리지 않는다. 그래서 패널은 body 포털 + fixed로
  *  클리핑 박스 밖에 살고(SettingsModal과 같은 문법), 위치는 버튼 rect가 정한다. */
-function StripMenu({ label, open, onToggle, children, align = 'right', anchorStyle, panelStyle }: {
+function StripMenu({ label, open, onToggle, children, align = 'right', anchorStyle, anchorProps, panelStyle }: {
   label: React.ReactNode;
   open: boolean;
   onToggle: () => void;
@@ -101,6 +101,7 @@ function StripMenu({ label, open, onToggle, children, align = 'right', anchorSty
   /** 패널이 버튼의 어느 모서리에 맞춰 서는가. 스트립 왼쪽 끝의 메뉴는 'left'. */
   align?: 'left' | 'right';
   anchorStyle?: React.CSSProperties;
+  anchorProps?: Record<string, unknown>;
   panelStyle?: React.CSSProperties;
 }) {
   const anchorRef = useRef<HTMLButtonElement | null>(null);
@@ -121,7 +122,7 @@ function StripMenu({ label, open, onToggle, children, align = 'right', anchorSty
 
   return (
     <>
-      <button ref={anchorRef} onClick={onToggle} style={anchorStyle ?? stripBtnStyle}>{label}</button>
+      <button ref={anchorRef} onClick={onToggle} style={anchorStyle ?? stripBtnStyle} {...anchorProps}>{label}</button>
       {open && rect ? createPortal(
         <div style={{
           ...attachDropdownStyle,
@@ -191,54 +192,238 @@ function streamAgent(items: Workspace[], agentStates: Record<number, AgentState>
   return { kind: idle, running: false };
 }
 
-/** 탭 줄 맨 앞의 stream 메뉴.
+/** 탭 줄 맨 앞의 stream 메뉴 — 보는 곳이자 만들고 옮기는 곳.
  *
  *  탭 줄은 workspace 18개에 2161px가 필요한데 1512 화면의 실제 폭은 1422다(실측).
  *  그래서 줄에는 현재 stream의 workspace만 남기고 나머지는 이 메뉴 안으로 넣는다.
  *  대신 메뉴는 열자마자 전부 보여준다 — 접힌 쪽에서 도는 것이 실측 5개 중 3개라,
  *  호버로 한 줄기씩 갈아 끼우면 그 셋을 찾느라 마우스를 열 번 옮겨야 한다.
  *  트리거의 점이 모든 stream을 통틀어 가장 급한 것을 띄우는 이유도 같다 —
- *  접는 대가를 갚는 유일한 자리다. */
-function StreamMenu({ groups, current, agentStates, activeId, uiStyle, onPick }: {
-  groups: Array<{ stream: string; items: Workspace[] }>;
+ *  접는 대가를 갚는 유일한 자리다.
+ *
+ *  관리도 여기서 한다. stream 줄을 하나 더 두는 안은 14개가 1264px(실측 이름
+ *  길이)라 1280 화면에서 넘치고, 절반이 workspace 하나짜리라 같은 이름이 위아래
+ *  두 번 나온다. 이 메뉴는 이미 전부를 보여주므로 그 위에 동작만 얹는다:
+ *    · 마지막 줄 "+ new stream" — 클릭하면 이름 입력. 알약을 놓아도 만든다
+ *    · 줄 끝 "+" — 그 stream에 새 workspace (Paseo #4487의 compact 제안과 같은 자리)
+ *    · 라벨 더블클릭 — 이름 바꾸기. 이미 있는 이름이면 Enter 한 번 더 = 합치기
+ *    · 라벨 우클릭 — rename · new workspace · up/down · remove(미분류로)
+ *    · 알약 드래그 — 다른 줄에 놓으면 옮긴다. 라벨 드래그 — 줄 순서
+ *  탭 줄의 탭도 트리거(▾)로 끌면 이 메뉴가 열려 같은 줄에 놓을 수 있다. */
+type StreamGroup = { stream: string; items: Workspace[] };
+
+/** 드롭이 끝난 직후의 click은 '바깥 클릭'이 아니다 — 탭을 끌어다 놓으면 mouseup
+ *  뒤에 click이 공통 조상(body)에서 나고, 그게 메뉴를 닫아버린다. 한 번 삼킨다. */
+let swallowNextStreamMenuClose = false;
+function swallowStreamMenuClose(): void { swallowNextStreamMenuClose = true; }
+
+/** 포인터 아래의 stream 줄 이름. "+ new stream" 줄이면 NEW_STREAM_DROP. 없으면 null. */
+const NEW_STREAM_DROP = '\u0000new';
+function streamDropAt(x: number, y: number): string | null {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return null;
+  if (el.closest('[data-stream-new]')) return NEW_STREAM_DROP;
+  const row = el.closest('[data-stream-row]') as HTMLElement | null;
+  return row?.dataset.streamRow ?? null;
+}
+
+function StreamMenu({ groups, current, agentStates, activeId, uiStyle, open, onToggle, onPick, pendingNew, onCreateStream, onRenameStream, onRemoveStream, onReorderStreams, onMoveWorkspace, onNewWorkspaceIn, highlight }: {
+  groups: StreamGroup[];
   current: string;
   agentStates: Record<number, AgentState>;
   activeId: string | null;
   uiStyle: UiStyle;
+  open: boolean;
+  onToggle: (open: boolean) => void;
   onPick: (ws: Workspace) => void;
+  /** 탭 줄에서 "+ new stream"에 놓인 workspace — 입력창을 그 workspace를 물고 연다. */
+  pendingNew: { wsId: string; nonce: number } | null;
+  onCreateStream: (name: string, wsId?: string) => void;
+  onRenameStream: (from: string, to: string) => void;
+  onRemoveStream: (name: string) => void;
+  onReorderStreams: (names: string[]) => void;
+  onMoveWorkspace: (ws: Workspace, stream: string) => void;
+  onNewWorkspaceIn: (stream: string) => void;
+  /** 탭 줄에서 끌어온 탭이 지금 어느 줄 위에 있는가 — 그 줄을 밝힌다. */
+  highlight: string | null;
 }) {
-  const [open, setOpen] = useState(false);
   const all = groups.flatMap((g) => g.items);
   const overall = streamAgent(all, agentStates);
   const count = groups.find((g) => g.stream === current)?.items.length ?? 0;
+  const named = groups.filter((g) => g.stream !== UNSORTED_STREAM).map((g) => g.stream);
 
+  // 열려 있는 동안 바깥 클릭으로 닫는다. 패널 안의 클릭은 stopPropagation으로
+  // 여기까지 안 온다 — 입력창·드래그·우클릭 메뉴가 메뉴를 닫지 않게.
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
+    const close = () => {
+      if (swallowNextStreamMenuClose) { swallowNextStreamMenuClose = false; return; }
+      onToggle(false);
+    };
     // 한 프레임 미뤄서 단다. React는 click 같은 discrete 이벤트에서 effect를
     // 동기로 비우므로, 즉시 달면 '메뉴를 여는 그 클릭'이 계속 버블해 방금 단
     // 이 리스너에 잡힌다 — 열리자마자 닫혀 아예 안 눌리는 것처럼 보인다.
     // (합성 click으로는 재현되지 않아 진짜 마우스로 눌러야 드러난다)
     const raf = requestAnimationFrame(() => window.addEventListener('click', close));
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') onToggle(false); };
+    window.addEventListener('keydown', esc);
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener('click', close);
+      window.removeEventListener('keydown', esc);
     };
-  }, [open]);
+  }, [open, onToggle]);
 
-  const pill = (ws: Workspace, label: string) => {
+  // ── 새 stream 입력 ──
+  const [creating, setCreating] = useState<{ wsId?: string } | null>(null);
+  const [createDraft, setCreateDraft] = useState('');
+  const [createTaken, setCreateTaken] = useState(false);
+  useEffect(() => {
+    if (!pendingNew) return;
+    setCreating({ wsId: pendingNew.wsId });
+    setCreateDraft('');
+    setCreateTaken(false);
+  }, [pendingNew?.nonce]);
+  useEffect(() => { if (!open) { setCreating(null); setRenaming(null); setLabelMenu(null); } }, [open]);
+  const commitCreate = () => {
+    const name = createDraft.trim();
+    if (!name || name === UNSORTED_STREAM) { setCreating(null); return; }
+    if (named.includes(name) && !creating?.wsId) { setCreateTaken(true); return; }
+    onCreateStream(name, creating?.wsId);
+    setCreating(null);
+  };
+
+  // ── 라벨 인라인 rename ──
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [mergeArmed, setMergeArmed] = useState(false);
+  const startRename = (name: string) => { setRenaming(name); setRenameDraft(name); setMergeArmed(false); };
+  const commitRename = () => {
+    if (renaming === null) return;
+    const to = renameDraft.trim();
+    if (!to || to === renaming || to === UNSORTED_STREAM) { setRenaming(null); return; }
+    // 있는 이름으로 바꾸는 것은 합치기다 — 되돌릴 수 없으니 한 번 더 누르게 한다.
+    if (named.includes(to) && !mergeArmed) { setMergeArmed(true); return; }
+    onRenameStream(renaming, to);
+    setRenaming(null);
+  };
+
+  // ── 라벨 우클릭 메뉴 ──
+  const [labelMenu, setLabelMenu] = useState<{ name: string; x: number; y: number; armed: boolean } | null>(null);
+  useEffect(() => {
+    if (!labelMenu) return;
+    const close = () => setLabelMenu(null);
+    const raf = requestAnimationFrame(() => {
+      window.addEventListener('click', close);
+      window.addEventListener('contextmenu', close);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('click', close);
+      window.removeEventListener('contextmenu', close);
+    };
+  }, [labelMenu?.name]);
+
+  // ── 드래그: 알약은 줄 사이로, 라벨은 위아래로 ──
+  const [dragWs, setDragWs] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const lit = highlight ?? dropTarget;
+  const [dragLabel, setDragLabel] = useState<string | null>(null);
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const suppressClick = useRef(false);
+
+  const beginPillDrag = (ws: Workspace, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const sx = e.clientX, sy = e.clientY;
+    let moved = false;
+    const onMove = (ev: MouseEvent) => {
+      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+      if (!moved) { moved = true; suppressClick.current = true; setDragWs(ws.id); document.body.classList.add('stream-dragging'); }
+      setDropTarget(streamDropAt(ev.clientX, ev.clientY));
+    };
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('stream-dragging');
+      setDragWs(null);
+      setDropTarget(null);
+      if (!moved) return;
+      const at = streamDropAt(ev.clientX, ev.clientY);
+      if (at === NEW_STREAM_DROP) { setCreating({ wsId: ws.id }); setCreateDraft(''); setCreateTaken(false); }
+      else if (at && at !== streamOf(ws)) onMoveWorkspace(ws, at);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const beginLabelDrag = (name: string, e: React.MouseEvent) => {
+    if (e.button !== 0 || renaming !== null) return;
+    const sy = e.clientY;
+    let moved = false;
+    let order = named.slice();
+    const onMove = (ev: MouseEvent) => {
+      if (!moved && Math.abs(ev.clientY - sy) < 4) return;
+      if (!moved) { moved = true; suppressClick.current = true; setDragLabel(name); }
+      // 탭 재배치와 같은 문법 — 이웃 줄의 중점을 넘었는가. 세로일 뿐이다.
+      const rows = [...document.querySelectorAll('[data-stream-label]')] as HTMLElement[];
+      const names = rows.map((r) => r.dataset.streamRow!).filter((n) => n !== UNSORTED_STREAM);
+      const from = names.indexOf(name);
+      if (from === -1) return;
+      let to = from;
+      rows.forEach((el) => {
+        const n = el.dataset.streamRow!;
+        const i = names.indexOf(n);
+        if (i === -1) return;
+        const r = el.getBoundingClientRect();
+        const mid = r.top + r.height / 2;
+        if (i < from && ev.clientY < mid) to = Math.min(to, i);
+        else if (i > from && ev.clientY > mid) to = Math.max(to, i);
+      });
+      if (to !== from) {
+        order = names.slice();
+        order.splice(from, 1);
+        order.splice(to, 0, name);
+        setDragOrder(order);
+      }
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setDragLabel(null);
+      setDragOrder(null);
+      if (moved && order.join('\n') !== named.join('\n')) onReorderStreams(order);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  // 라벨은 클릭(이동)과 더블클릭(이름 바꾸기)을 같이 받는다. 첫 클릭에 바로 가면
+  // 두 번째 클릭이 닿을 자리가 없다 — 더블클릭 간격만큼 미뤘다가 간다.
+  const pickTimer = useRef<number | null>(null);
+  const pickLater = (ws: Workspace) => {
+    if (pickTimer.current) window.clearTimeout(pickTimer.current);
+    pickTimer.current = window.setTimeout(() => { pickTimer.current = null; onToggle(false); onPick(ws); }, 230);
+  };
+  const cancelPick = () => { if (pickTimer.current) { window.clearTimeout(pickTimer.current); pickTimer.current = null; } };
+
+  const pill = (ws: Workspace, label: string, delayed = false) => {
     const agent = workspaceAgent(ws, agentStates);
     const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
     return (
       <button
         key={ws.id}
-        onClick={() => { setOpen(false); onPick(ws); }}
+        onMouseDown={(e) => beginPillDrag(ws, e)}
+        onClick={() => {
+          if (suppressClick.current) { suppressClick.current = false; return; }
+          if (delayed) pickLater(ws); else { onToggle(false); onPick(ws); }
+        }}
         style={{
           ...tabStyle,
-          cursor: 'pointer',
+          cursor: dragWs === ws.id ? 'grabbing' : 'pointer',
           ...(ws.id === activeId ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null),
+          ...(dragWs === ws.id ? { opacity: 0.55 } : null),
         }}
-        title={workspaceDisplayLabel(ws)}
+        title={`${workspaceDisplayLabel(ws)} · 드래그: 다른 stream으로`}
       >
         <AgentDot kind={agent.kind} running={agent.running} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{label}</span>
@@ -247,12 +432,26 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, onPick }:
     );
   };
 
+  const addBtn = (stream: string) => (
+    <button
+      onClick={() => { onToggle(false); onNewWorkspaceIn(stream); }}
+      style={{ ...tabAddStyle, color: 'var(--text-dim)', height: 26 }}
+      title={`new workspace in ${stream}`}
+    >+</button>
+  );
+
+  // 드래그 중에는 임시 순서로 그린다 — 놓으면 서버 순서가 다시 온다.
+  const shown = dragOrder
+    ? [...dragOrder.map((n) => groups.find((g) => g.stream === n)!).filter(Boolean), ...groups.filter((g) => g.stream === UNSORTED_STREAM)]
+    : groups;
+
   return (
     <StripMenu
       align="left"
       open={open}
-      onToggle={() => setOpen((v) => !v)}
+      onToggle={() => onToggle(!open)}
       anchorStyle={streamTriggerStyle}
+      anchorProps={{ 'data-stream-trigger': true }}
       panelStyle={streamPanelStyle}
       label={
         <>
@@ -263,39 +462,158 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, onPick }:
         </>
       }
     >
-      <div className="stream-grid">
-        {groups.map(({ stream, items }, i) => {
+      <div className="stream-grid" onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+        {shown.map(({ stream, items }, i) => {
+          const unsorted = stream === UNSORTED_STREAM;
           // stream과 workspace의 이름이 같으면 두 번 쓰지 않는다 — 알약 하나가 둘 다다.
-          const merged = items.length === 1 && items[0].name === stream;
+          const merged = items.length === 1 && items[0].name === stream && renaming !== stream;
           const agent = streamAgent(items, agentStates);
+          const isRenaming = renaming === stream;
+          const rowProps = { 'data-stream-row': stream, className: `stream-row${lit === stream ? ' stream-row-lit' : ''}` };
           return (
             <Fragment key={stream}>
               {i ? <div className="stream-rule" /> : null}
               {merged ? (
                 <>
-                  <div className="stream-pills" style={{ paddingLeft: 5 }}>{pill(items[0], stream)}</div>
-                  <div />
+                  <div {...rowProps} data-stream-label className={`${rowProps.className} stream-pills`} style={{ paddingLeft: 5 }}
+                    onDoubleClick={() => { cancelPick(); startRename(stream); }}
+                    onContextMenu={(e) => { e.preventDefault(); setLabelMenu({ name: stream, x: e.clientX, y: e.clientY, armed: false }); }}
+                  >{pill(items[0], stream, true)}</div>
+                  <div {...rowProps} className={`${rowProps.className} stream-pills`} style={{ justifyContent: 'flex-end' }}>{addBtn(stream)}</div>
                 </>
               ) : (
                 <>
-                  <button
-                    onClick={() => { setOpen(false); onPick(items[0]); }}
-                    style={{ ...streamLabelStyle, color: stream === current ? 'var(--text)' : 'var(--text-soft)' }}
-                    title={stream}
-                  >
-                    <AgentDot kind={agent.kind} running={agent.running} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{stream}</span>
-                  </button>
-                  <div className="stream-pills">{items.map((ws) => pill(ws, ws.name))}</div>
+                  {isRenaming ? (
+                    <div {...rowProps} data-stream-label style={{ display: 'flex', alignItems: 'center', height: 29, paddingLeft: 7 }}>
+                      <input
+                        autoFocus
+                        value={renameDraft}
+                        onChange={(e) => { setRenameDraft(e.target.value); setMergeArmed(false); }}
+                        onBlur={() => setRenaming(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); commitRename(); }
+                          else if (e.key === 'Escape') { e.preventDefault(); setRenaming(null); }
+                        }}
+                        style={{ ...streamInputStyle, borderColor: mergeArmed ? 'var(--warn, #d9a441)' : 'var(--line-strong)' }}
+                        title={mergeArmed ? `Enter again: merge into ${renameDraft.trim()}` : 'Enter: rename · Esc: cancel'}
+                      />
+                      {mergeArmed ? <span style={{ color: 'var(--text-dim)', fontSize: 10, marginLeft: 6, whiteSpace: 'nowrap' }}>Enter again = merge</span> : null}
+                    </div>
+                  ) : (
+                    <button
+                      {...rowProps}
+                      data-stream-label
+                      onMouseDown={(e) => { if (!unsorted) beginLabelDrag(stream, e); }}
+                      onClick={() => {
+                        if (suppressClick.current) { suppressClick.current = false; return; }
+                        if (items[0]) pickLater(items[0]);
+                      }}
+                      onDoubleClick={() => { cancelPick(); if (!unsorted) startRename(stream); }}
+                      onContextMenu={(e) => { e.preventDefault(); if (!unsorted) setLabelMenu({ name: stream, x: e.clientX, y: e.clientY, armed: false }); }}
+                      style={{
+                        ...streamLabelStyle,
+                        color: stream === current ? 'var(--text)' : 'var(--text-soft)',
+                        cursor: unsorted ? 'default' : dragLabel === stream ? 'grabbing' : 'pointer',
+                        ...(dragLabel === stream ? { opacity: 0.55 } : null),
+                      }}
+                      title={unsorted ? '아직 stream이 없는 workspace' : `${stream} · 더블클릭: 이름 변경 · 드래그: 순서 · 우클릭: 메뉴`}
+                    >
+                      <AgentDot kind={agent.kind} running={agent.running} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{stream}</span>
+                    </button>
+                  )}
+                  <div {...rowProps} className={`${rowProps.className} stream-pills`}>
+                    {items.map((ws) => pill(ws, ws.name))}
+                    {items.length === 0 ? <span style={{ color: 'var(--text-dim)', fontSize: 11, alignSelf: 'center', padding: '0 4px' }}>empty</span> : null}
+                    <span style={{ flex: 1 }} />
+                    {addBtn(stream)}
+                  </div>
                 </>
               )}
             </Fragment>
           );
         })}
+        <div className="stream-rule" />
+        {creating ? (
+          <div data-stream-new className={`stream-new${lit === NEW_STREAM_DROP ? ' stream-row-lit' : ''}`} style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8, height: 29, paddingLeft: 7 }}>
+            <span style={{ color: 'var(--text-dim)', fontSize: 12 }}>+</span>
+            <input
+              autoFocus
+              value={createDraft}
+              placeholder={creating.wsId ? `new stream for ${groups.flatMap((g) => g.items).find((w) => w.id === creating.wsId)?.name ?? ''}` : 'new stream name'}
+              onChange={(e) => { setCreateDraft(e.target.value); setCreateTaken(false); }}
+              onBlur={() => setCreating(null)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); commitCreate(); }
+                else if (e.key === 'Escape') { e.preventDefault(); setCreating(null); }
+              }}
+              style={{ ...streamInputStyle, borderColor: createTaken ? 'var(--err)' : 'var(--line-strong)' }}
+              title="Enter: create · Esc: cancel"
+            />
+            {createTaken ? <span style={{ color: 'var(--err)', fontSize: 10 }}>already exists</span> : null}
+          </div>
+        ) : (
+          <button
+            data-stream-new
+            className={`stream-new${lit === NEW_STREAM_DROP ? ' stream-row-lit' : ''}`}
+            onClick={() => { setCreating({}); setCreateDraft(''); setCreateTaken(false); }}
+            style={{ ...streamLabelStyle, gridColumn: '1 / -1', fontWeight: 400, color: 'var(--text-dim)' }}
+            title="새 stream · 알약을 여기 놓아도 만든다"
+          >+ new stream</button>
+        )}
       </div>
+      {labelMenu ? createPortal(
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{ ...attachDropdownStyle, minWidth: 160, left: Math.min(labelMenu.x, window.innerWidth - 170), top: Math.min(labelMenu.y, window.innerHeight - 200), zIndex: 60 }}
+        >
+          <div style={{ ...attachDropdownTitleStyle, textTransform: 'none', fontSize: 11 }}>{labelMenu.name}</div>
+          <button style={attachDropdownItemStyle} onClick={() => { setLabelMenu(null); startRename(labelMenu.name); }}>rename</button>
+          <button style={attachDropdownItemStyle} onClick={() => { setLabelMenu(null); onToggle(false); onNewWorkspaceIn(labelMenu.name); }}>new workspace</button>
+          {(() => {
+            const i = named.indexOf(labelMenu.name);
+            const swap = (j: number) => { const o = named.slice(); [o[i], o[j]] = [o[j], o[i]]; setLabelMenu(null); onReorderStreams(o); };
+            return (
+              <>
+                <button style={attachDropdownItemStyle} disabled={i <= 0} onClick={() => swap(i - 1)}>move up</button>
+                <button style={attachDropdownItemStyle} disabled={i < 0 || i >= named.length - 1} onClick={() => swap(i + 1)}>move down</button>
+              </>
+            );
+          })()}
+          <div style={{ height: 1, background: 'var(--line)', margin: '5px 6px 1px' }} />
+          {(() => {
+            const n = groups.find((g) => g.stream === labelMenu.name)?.items.length ?? 0;
+            return (
+              <button
+                style={{ ...attachDropdownItemStyle, color: labelMenu.armed ? 'var(--err)' : 'var(--text-soft)' }}
+                onClick={() => {
+                  if (n > 0 && !labelMenu.armed) { setLabelMenu({ ...labelMenu, armed: true }); return; }
+                  setLabelMenu(null); onRemoveStream(labelMenu.name);
+                }}
+              >
+                {labelMenu.armed ? 'confirm remove' : 'remove'}
+                {n > 0 ? <span style={{ color: 'var(--text-dim)', marginLeft: 6, fontSize: 11 }}>· {n} → {UNSORTED_STREAM}</span> : null}
+              </button>
+            );
+          })()}
+        </div>,
+        document.body,
+      ) : null}
     </StripMenu>
   );
 }
+
+const streamInputStyle: React.CSSProperties = {
+  background: 'var(--bg0)',
+  color: 'var(--text)',
+  border: '1px solid var(--line-strong)',
+  borderRadius: 4,
+  padding: '1px 5px',
+  fontFamily: 'var(--mono)',
+  fontSize: 12,
+  width: 150,
+  outline: 'none',
+};
 
 const streamTriggerStyle: React.CSSProperties = {
   ...tabStyle,
@@ -350,10 +668,12 @@ function TabContextMenu({ target, streams, onClose, onRename, onDelete, onMove }
   onClose: () => void;
   onRename: (ws: Workspace) => void;
   onDelete: (ws: Workspace) => void;
+  /** 목록에 없는 이름이면 새 stream이 되어 거기로 간다. */
   onMove: (ws: Workspace, stream: string) => void;
 }) {
   const [armed, setArmed] = useState(false);
-  useEffect(() => { setArmed(false); }, [target?.ws.id]);
+  const [newName, setNewName] = useState('');
+  useEffect(() => { setArmed(false); setNewName(''); }, [target?.ws.id]);
   useEffect(() => {
     if (!target) return;
     const close = () => onClose();
@@ -415,6 +735,21 @@ function TabContextMenu({ target, streams, onClose, onRename, onDelete, onMove }
       {/* 위는 이 workspace에 하는 일, 아래는 갈 곳. 두 구획이라 선으로 가른다 */}
       <div style={{ height: 1, background: 'var(--line)', margin: '5px 6px 1px' }} />
       <div style={attachDropdownTitleStyle}>move to stream</div>
+      {/* 새 이름을 칠 자리. 이게 없으면 목록에 있는 곳으로만 갈 수 있어서,
+          첫 번째 stream은 아무 데서도 만들 수 없다. */}
+      <input
+        value={newName}
+        placeholder="new stream…"
+        onChange={(e) => setNewName(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            const name = newName.trim();
+            if (!name || name === UNSORTED_STREAM) return;
+            e.preventDefault(); onClose(); onMove(target.ws, name);
+          } else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+        }}
+        style={{ ...streamInputStyle, width: 'calc(100% - 16px)', margin: '2px 8px 4px' }}
+      />
       {streams.map((name) => {
         const here = name === streamOf(target.ws);
         return (
@@ -1674,6 +2009,13 @@ function App() {
   // 빈 문자열 = 플랫폼 기본에 맡긴다 (맥=Menlo, 그 외=Monoplex KR Nerd).
   const [fontFamily, setFontFamily] = useState('');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  /** stream 이름의 순서 — 서버 목록. 빈 stream은 여기에만 있다. */
+  const [streams, setStreams] = useState<string[]>([]);
+  const [streamMenuOpen, setStreamMenuOpen] = useState(false);
+  /** 탭 줄에서 '+ new stream'에 놓인 탭 — 메뉴의 입력창이 그 workspace를 물고 열린다. */
+  const [pendingNewStream, setPendingNewStream] = useState<{ wsId: string; nonce: number } | null>(null);
+  /** 탭을 끌고 있을 때 메뉴의 어느 줄 위인가. */
+  const [streamDropLit, setStreamDropLit] = useState<string | null>(null);
   const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
   const [stripSlot, setStripSlot] = useState<HTMLSpanElement | null>(null);
   const appSurface = useSurface();
@@ -1685,16 +2027,21 @@ function App() {
   // 목적지 목록. 지금 비어 있어도 미분류는 항상 갈 수 있어야 한다 — 여기서
   // 빼내는 게 이 메뉴의 주된 쓸모다.
   const streamTargets = useMemo(() => {
-    const names = groupByStream(workspaces).map((g) => g.stream);
+    const names = groupByStream(workspaces, streams).map((g) => g.stream);
     return names.includes(UNSORTED_STREAM) ? names : [...names, UNSORTED_STREAM];
-  }, [workspaces]);
+  }, [workspaces, streams]);
 
   const moveWorkspaceToStream = useCallback(async (ws: Workspace, stream: string) => {
     // column/order는 지도의 배치라 여기서 건드릴 게 아니다. 서버의 update가
     // map을 통째로 갈아끼우므로 남은 필드를 직접 실어 보낸다.
-    await apiUpdateWorkspace(ws.id, { map: { stream, column: ws.map?.column, order: ws.map?.order } });
-    setWorkspaces(await fetchWorkspaces());
-  }, []);
+    // 먼저 그리고 나중에 보낸다 — 드롭한 알약이 그 자리에서 바로 옮겨가야
+    // 놓은 게 맞았는지 보인다. 서버 push가 같은 값을 다시 준다.
+    const next = stream === UNSORTED_STREAM ? undefined : stream;
+    setWorkspaces((prev) => prev.map((w) => (w.id === ws.id ? { ...w, map: { ...w.map, stream: next } } : w)));
+    if (next && !streams.includes(next)) setStreams((prev) => (prev.includes(next) ? prev : [...prev, next]));
+    await apiUpdateWorkspace(ws.id, { map: { stream: next, column: ws.map?.column, order: ws.map?.order } });
+  }, [streams]);
+
 
   const deleteWorkspace = useCallback(async (ws: Workspace) => {
     const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
@@ -1789,9 +2136,11 @@ function App() {
   useEffect(() => {
     if (!connected) return;
     void fetchWorkspaces().then(setWorkspaces);
+    void fetchStreams().then(setStreams);
     const mux = muxRef.current;
     if (!mux) return;
     return mux.onWorkspace((event) => {
+      if (event.streams) { setStreams(event.streams); return; }
       setWorkspaces((prev) => {
         if (event.order) {
           // 서버가 부른 순서 전체 — 모르는 id(경합 생성분)는 꼬리에 보존
@@ -1873,7 +2222,7 @@ function App() {
   // 탭 줄에 남길 것: 현재 stream의 workspace만. 현재 stream은 열려 있는 탭이
   // 정한다 — 따로 저장하지 않는다. 홈·지도처럼 workspace가 없는 화면에서는
   // 마지막으로 있던 줄기를 기억한다 (없으면 첫 줄기).
-  const streamGroups = useMemo(() => groupByStream(workspaces), [workspaces]);
+  const streamGroups = useMemo(() => groupByStream(workspaces, streams), [workspaces, streams]);
   const activeWs = route.page === 'workspace' ? workspaces.find((w) => w.id === route.id) ?? null : null;
   const [lastStream, setLastStream] = useState<string | null>(null);
   useEffect(() => {
@@ -1887,13 +2236,47 @@ function App() {
     [streamGroups, currentStream],
   );
 
+  // ── stream 관리. 전부 낙관적 — 서버 push(streams 전체)가 곧 따라온다 ──
+  const createStream = useCallback((name: string, wsId?: string) => {
+    if (!streams.includes(name)) {
+      setStreams((prev) => (prev.includes(name) ? prev : [...prev, name]));
+      void apiAddStream(name);
+    }
+    const ws = wsId ? workspaces.find((w) => w.id === wsId) : null;
+    if (ws) void moveWorkspaceToStream(ws, name);
+  }, [streams, workspaces, moveWorkspaceToStream]);
+  const renameStream = useCallback((from: string, to: string) => {
+    setStreams((prev) => (prev.includes(to) ? prev.filter((s) => s !== from) : prev.map((s) => (s === from ? to : s))));
+    setWorkspaces((prev) => prev.map((w) => (streamOf(w) === from ? { ...w, map: { ...w.map, stream: to } } : w)));
+    if (lastStream === from) setLastStream(to);
+    void apiRenameStream(from, to);
+  }, [lastStream]);
+  const removeStream = useCallback((name: string) => {
+    setStreams((prev) => prev.filter((s) => s !== name));
+    setWorkspaces((prev) => prev.map((w) => (streamOf(w) === name ? { ...w, map: { ...w.map, stream: undefined } } : w)));
+    void apiRemoveStream(name);
+  }, []);
+  const reorderStreams = useCallback((names: string[]) => {
+    setStreams(names);
+    void apiReorderStreams(names);
+  }, []);
+
   const beginTabDrag = useCallback((id: string, e: React.MouseEvent) => {
     if (e.button !== 0) return;
     const startX = e.clientX;
+    const startY = e.clientY;
     let moved = false;
+    // 스트립 밖(아래)으로 나간 드래그는 stream 메뉴로 가는 길이다: 트리거(▾)에
+    // 닿으면 메뉴가 열리고, 그 줄에 놓으면 옮겨진다. 그동안 탭 재배치는 멈춘다 —
+    // 안 그러면 메뉴로 내려가는 사이에 X가 흔들려 탭이 제멋대로 밀린다.
+    let inMenu = false;
     const onMove = (ev: MouseEvent) => {
-      if (!moved && Math.abs(ev.clientX - startX) < 4) return;
-      if (!moved) { moved = true; suppressTabClick.current = true; setDragTabId(id); }
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
+      if (!moved) { moved = true; suppressTabClick.current = true; setDragTabId(id); document.body.classList.add('stream-dragging'); }
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      if (under?.closest('[data-stream-trigger]')) { inMenu = true; setStreamMenuOpen(true); }
+      if (inMenu) { setStreamDropLit(streamDropAt(ev.clientX, ev.clientY)); return; }
+      if (Math.abs(ev.clientY - startY) > 30) return;
       // 삽입 위치: 형제 탭들의 중점을 넘었는가. 상태 재배열 → 리렌더 → 다음
       // move가 새 DOM을 재측정 — 반복 수렴이라 좌우 어느 방향도 자연스럽다.
       const tabs = [...document.querySelectorAll('[data-ws-tab]')] as HTMLElement[];
@@ -1923,22 +2306,34 @@ function App() {
         });
       }
     };
-    const onUp = () => {
+    const onUp = (ev: MouseEvent) => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('stream-dragging');
       setDragTabId(null);
-      if (moved) {
-        setWorkspaces((prev) => {
-          void apiReorderWorkspaces(prev.map((w) => w.id));
-          return prev;
-        });
+      setStreamDropLit(null);
+      if (!moved) return;
+      if (inMenu) {
+        const at = streamDropAt(ev.clientX, ev.clientY);
+        const ws = workspacesRef.current.find((w) => w.id === id);
+        // 놓은 뒤의 click이 메뉴를 닫지 않게 — 새 stream 입력창이 열려 있어야 한다.
+        swallowStreamMenuClose();
+        if (ws && at === NEW_STREAM_DROP) setPendingNewStream({ wsId: id, nonce: Date.now() });
+        else if (ws && at && at !== streamOf(ws)) { void moveWorkspaceToStream(ws, at); setStreamMenuOpen(false); }
+        return;
       }
+      setWorkspaces((prev) => {
+        void apiReorderWorkspaces(prev.map((w) => w.id));
+        return prev;
+      });
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
-  }, []);
+  }, [moveWorkspaceToStream]);
+  const workspacesRef = useRef<Workspace[]>([]);
+  workspacesRef.current = workspaces;
 
-  const createWorkspaceTab = useCallback(async () => {
+  const createWorkspaceTab = useCallback(async (stream: string = currentStream) => {
     // 이름의 유일성은 서버가 판정한다. 다른 창이 같은 번호를 동시에 집을 수
     // 있으니, 충돌한 이름은 빼고 다음 번호로 몇 번 더 시도한다. 충돌이 아닌
     // 실패(터널 끊김 등)는 재시도해봐야 같은 결과라 바로 그만둔다.
@@ -1947,7 +2342,7 @@ function App() {
     for (let attempt = 0; attempt < 5 && !ws; attempt++) {
       const name = nextWorkspaceName(taken);
       try {
-        ws = await apiCreateWorkspace({ id: uuid().slice(0, 8), name, layout: { type: 'pane', sessionId: 0 } });
+        ws = await apiCreateWorkspace({ id: uuid().slice(0, 8), name, layout: { type: 'pane', sessionId: 0 }, stream: stream === UNSORTED_STREAM ? undefined : stream });
       } catch (error) {
         if (!isNameConflict(error)) {
           // 화면에 띄울 자리가 아직 없다. 적어도 콘솔에는 남긴다 —
@@ -1959,24 +2354,14 @@ function App() {
       }
     }
     if (!ws) return;
-    // 보고 있던 줄기에 넣는다. gpai를 열어놓고 +를 누르는 건 gpai에서 일을
-    // 하나 더 벌인다는 뜻이지, 분류를 미루겠다는 뜻이 아니다. 안 붙이면 탭 줄이
-    // 미분류로 통째로 갈아엎이면서 보던 형제 탭들이 사라진다.
+    // 보고 있던 줄기(또는 메뉴에서 고른 줄기)에 넣는다. gpai를 열어놓고 +를
+    // 누르는 건 gpai에서 일을 하나 더 벌인다는 뜻이지, 분류를 미루겠다는 뜻이
+    // 아니다. 안 붙이면 탭 줄이 미분류로 통째로 갈아엎이면서 보던 형제 탭들이
+    // 사라진다. 만들 때 같이 보내므로(POST의 map) 탭 줄이 미분류로 튀었다
+    // 돌아오는 일이 없다.
     //
     // 미분류에서 만든 것에는 아무것도 안 붙인다. stream이 비어 있어야 요약기가
     // 이름을 지어주므로, 그 자리는 "아직 분류 안 함"의 뜻을 유지한다.
-    //
-    // 이동 뒤에 붙이면 탭 줄이 미분류로 한 번 튀었다가 돌아온다. 붙이고, 목록을
-    // 다시 읽고, 그 다음에 옮긴다.
-    if (currentStream !== UNSORTED_STREAM) {
-      try {
-        await apiUpdateWorkspace(ws.id, { map: { stream: currentStream } });
-        setWorkspaces(await fetchWorkspaces());
-      } catch (error) {
-        // 줄기에 못 넣었을 뿐 workspace는 생겼다. 미분류에 있을 뿐이니 계속 간다.
-        console.error('새 workspace를 stream에 못 넣었다', error);
-      }
-    }
     navigate({ page: 'workspace', id: ws.id });
   }, [workspaces.length, currentStream]);
 
@@ -2176,19 +2561,26 @@ function App() {
           style={{ ...tabStyle, ...(homeActive ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}
           title="home · ⌘1"
         >⌂</button>
-        {streamGroups.length > 1 ? (
-          <>
-            <StreamMenu
-              groups={streamGroups}
-              current={currentStream}
-              agentStates={agentStates}
-              activeId={route.page === 'workspace' ? route.id : null}
-              uiStyle={uiStyle}
-              onPick={(ws) => navigate({ page: 'workspace', id: ws.id })}
-            />
-            <span style={{ width: 1, height: 16, background: 'var(--line)', flexShrink: 0, margin: '0 5px' }} />
-          </>
-        ) : null}
+        {/* stream이 하나뿐이어도 보인다 — 둘째 stream을 만드는 자리가 여기뿐이다 */}
+        <StreamMenu
+          groups={streamGroups}
+          current={currentStream}
+          agentStates={agentStates}
+          activeId={route.page === 'workspace' ? route.id : null}
+          uiStyle={uiStyle}
+          open={streamMenuOpen}
+          onToggle={setStreamMenuOpen}
+          onPick={(ws) => navigate({ page: 'workspace', id: ws.id })}
+          pendingNew={pendingNewStream}
+          highlight={streamDropLit}
+          onCreateStream={createStream}
+          onRenameStream={renameStream}
+          onRemoveStream={removeStream}
+          onReorderStreams={reorderStreams}
+          onMoveWorkspace={(ws, stream) => { void moveWorkspaceToStream(ws, stream); }}
+          onNewWorkspaceIn={(stream) => { void createWorkspaceTab(stream); }}
+        />
+        <span style={{ width: 1, height: 16, background: 'var(--line)', flexShrink: 0, margin: '0 5px' }} />
         <div style={{ position: 'relative', flex: 1, minWidth: 0, alignSelf: 'stretch', display: 'flex' }}>
           <div
             ref={tabScrollerRef}

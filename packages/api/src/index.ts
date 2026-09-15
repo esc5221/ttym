@@ -54,6 +54,13 @@ export function createApi(base: BaseUrl) {
       split: (id: string, o?: Parameters<typeof workspaces.splitWorkspace>[2]) =>
         workspaces.splitWorkspace(base, id, o),
     },
+    streams: {
+      list: () => workspaces.listStreams(base),
+      add: (name: string) => workspaces.addStream(base, name),
+      reorder: (names: string[]) => workspaces.reorderStreams(base, names),
+      rename: (from: string, to: string) => workspaces.renameStream(base, from, to),
+      remove: (name: string) => workspaces.removeStream(base, name),
+    },
     interactions: {
       submit: (sessionId: number, o: Parameters<typeof interactions.submitInteraction>[2]) =>
         interactions.submitInteraction(base, sessionId, o),

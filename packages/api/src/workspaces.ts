@@ -12,9 +12,9 @@ export function getWorkspace(base: BaseUrl, id: string): Promise<WorkspaceInfo> 
 
 export function createWorkspace(
   base: BaseUrl,
-  options: { name: string; id?: string; sessionIds?: number[]; layout?: LayoutNode },
+  options: { name: string; id?: string; sessionIds?: number[]; layout?: LayoutNode; stream?: string },
 ): Promise<WorkspaceInfo> {
-  const { name, sessionIds = [], layout } = options;
+  const { name, sessionIds = [], layout, stream } = options;
   return request(base, '/api/workspaces', {
     method: 'POST',
     body: {
@@ -22,8 +22,35 @@ export function createWorkspace(
       name,
       // Only used when there is no prior tree to preserve.
       layout: layout ?? layoutFromSessionIds(sessionIds),
+      ...(stream ? { map: { stream } } : {}),
     },
   });
+}
+
+// ───── Streams — the names workspaces are grouped under, and their order ─────
+
+export function listStreams(base: BaseUrl): Promise<{ streams: string[] }> {
+  return request(base, '/api/streams');
+}
+
+/** An empty stream; 409 when the name exists. */
+export function addStream(base: BaseUrl, name: string): Promise<{ streams: string[] }> {
+  return request(base, '/api/streams', { method: 'POST', body: { name } });
+}
+
+/** Whole order; 409 when the set differs from the server's. */
+export function reorderStreams(base: BaseUrl, streams: string[]): Promise<{ streams: string[] }> {
+  return request(base, '/api/streams/order', { method: 'PATCH', body: { streams } });
+}
+
+/** Rewrites every workspace in `from`; renaming onto an existing name merges. */
+export function renameStream(base: BaseUrl, from: string, to: string): Promise<{ moved: number; merged: boolean; streams: string[] }> {
+  return request(base, '/api/streams/rename', { method: 'POST', body: { from, to } });
+}
+
+/** Drops the name; its workspaces become unsorted, none are deleted. */
+export function removeStream(base: BaseUrl, name: string): Promise<{ moved: number; streams: string[] }> {
+  return request(base, '/api/streams/remove', { method: 'POST', body: { name } });
 }
 
 export function updateWorkspace(

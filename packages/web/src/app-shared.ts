@@ -49,10 +49,16 @@ export function streamOf(workspace: Workspace): string {
   return name || UNSORTED_STREAM;
 }
 
-/** workspace를 stream 단위로 묶는다. 순서는 배열 등장 순 — 탭 순서가 곧 줄기 순서다.
- *  미분류만 맨 뒤로 민다 (이름이 아니라 '아직 이름이 없다'는 뜻이라). */
-export function groupByStream(workspaces: Workspace[]): Array<{ stream: string; items: Workspace[] }> {
+/** workspace를 stream 단위로 묶는다.
+ *
+ *  순서는 서버의 stream 목록(`streams`)이 먼저다 — 사용자가 정한 순서. 목록에
+ *  없는 이름(서버가 아직 안 붙였거나 낡은 클라이언트)은 등장 순으로 뒤에 붙는다.
+ *  목록에만 있고 workspace가 없는 stream도 빈 채로 나온다 — 방금 만든 stream이
+ *  거기 있어야 그 안에 첫 workspace를 만들 수 있다.
+ *  미분류만 맨 뒤로 민다 (이름이 아니라 '아직 이름이 없다'는 뜻이라). 비어 있으면 안 나온다. */
+export function groupByStream(workspaces: Workspace[], streams: string[] = []): Array<{ stream: string; items: Workspace[] }> {
   const groups = new Map<string, Workspace[]>();
+  for (const stream of streams) if (!groups.has(stream)) groups.set(stream, []);
   for (const workspace of workspaces) {
     const key = streamOf(workspace);
     const bucket = groups.get(key);
@@ -62,7 +68,25 @@ export function groupByStream(workspaces: Workspace[]): Array<{ stream: string; 
   const entries = [...groups].map(([stream, items]) => ({ stream, items }));
   return entries
     .filter((entry) => entry.stream !== UNSORTED_STREAM)
-    .concat(entries.filter((entry) => entry.stream === UNSORTED_STREAM));
+    .concat(entries.filter((entry) => entry.stream === UNSORTED_STREAM && entry.items.length > 0));
+}
+
+export async function fetchStreams(): Promise<string[]> {
+  try { return (await api.listStreams(API_BASE)).streams; } catch { return []; }
+}
+
+/** 실패는 조용히 — 다음 push가 서버 상태로 되돌린다 (낙관적 UI의 안전망). */
+export async function apiAddStream(name: string): Promise<boolean> {
+  try { await api.addStream(API_BASE, name); return true; } catch { return false; }
+}
+export async function apiReorderStreams(names: string[]): Promise<void> {
+  try { await api.reorderStreams(API_BASE, names); } catch {}
+}
+export async function apiRenameStream(from: string, to: string): Promise<void> {
+  try { await api.renameStream(API_BASE, from, to); } catch {}
+}
+export async function apiRemoveStream(name: string): Promise<void> {
+  try { await api.removeStream(API_BASE, name); } catch {}
 }
 
 export const LOCAL_ECHO_STORAGE_KEY = 'ttym-demo-local-echo';
@@ -331,8 +355,8 @@ export async function apiReorderWorkspaces(ids: string[]): Promise<void> {
 /** 여기서는 실패를 삼키지 않는다. 삼키던 시절에는 이름 충돌(409)과 터널
  *  끊김이 똑같이 null로 돌아왔고, 호출부가 조용히 돌아서서 + 버튼이 아무
  *  반응도 없는 것처럼 보였다. 무엇이 실패했는지는 호출부가 알아야 한다. */
-export async function apiCreateWorkspace(ws: { id: string; name: string; layout: LayoutNode }): Promise<Workspace> {
-  return await api.createWorkspace(API_BASE, { id: ws.id, name: ws.name, layout: ws.layout }) as Workspace;
+export async function apiCreateWorkspace(ws: { id: string; name: string; layout: LayoutNode; stream?: string }): Promise<Workspace> {
+  return await api.createWorkspace(API_BASE, { id: ws.id, name: ws.name, layout: ws.layout, stream: ws.stream }) as Workspace;
 }
 
 /** 이름이 이미 있다는 서버의 거절인가. instanceof를 쓰지 않는 것은 번들이

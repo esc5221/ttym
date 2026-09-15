@@ -205,11 +205,13 @@ export async function cmdWorkspace() {
       process.exit(EXIT.USAGE);
     }
     const id = randomUUID().slice(0, 8);
+    const stream = readOption(args, '--stream');
     const workspace = await fetchPost(port, '/api/workspaces', {
       id,
       name,
       layout: { type: 'pane', sessionId: 0 },
       members: [],
+      ...(stream ? { map: { stream } } : {}),
     });
     if (asJson) return printOutput(workspace, true);
     console.log(`${workspace.name} (${workspace.id})`);
@@ -322,12 +324,55 @@ export async function cmdWorkspace() {
     return;
   }
 
+  if (action === 'stream') {
+    const sub = args[0];
+    if (sub === 'list' || sub === undefined) {
+      const { streams } = await fetchJson(port, '/api/streams');
+      if (asJson) return printOutput({ streams }, true);
+      for (const s of streams) console.log(s);
+      return;
+    }
+    if (sub === 'add') {
+      const name = args[1];
+      if (!name) { console.error('usage: ttym workspace stream add <name>'); process.exit(EXIT.USAGE); }
+      const r = await fetchPost(port, '/api/streams', { name });
+      if (asJson) return printOutput(r, true);
+      console.log(`streams: ${r.streams.join(', ')}`);
+      return;
+    }
+    if (sub === 'rename') {
+      const from = args[1], to = args[2];
+      if (!from || !to) { console.error('usage: ttym workspace stream rename <from> <to>'); process.exit(EXIT.USAGE); }
+      const r = await fetchPost(port, '/api/streams/rename', { from, to });
+      if (asJson) return printOutput(r, true);
+      console.log(`${from} -> ${to} (${r.moved} moved${r.merged ? ', merged' : ''})`);
+      return;
+    }
+    if (sub === 'rm' || sub === 'remove') {
+      const name = args[1];
+      if (!name) { console.error('usage: ttym workspace stream rm <name>'); process.exit(EXIT.USAGE); }
+      const r = await fetchPost(port, '/api/streams/remove', { name });
+      if (asJson) return printOutput(r, true);
+      console.log(`removed ${name} (${r.moved} → unsorted)`);
+      return;
+    }
+    if (sub === 'order') {
+      const names = args.slice(1).filter((a) => !a.startsWith('--'));
+      const r = await fetchPatch(port, '/api/streams/order', { streams: names });
+      if (asJson) return printOutput(r, true);
+      console.log(`streams: ${r.streams.join(', ')}`);
+      return;
+    }
+    console.error('usage: ttym workspace stream <list|add|rename|rm|order>');
+    process.exit(EXIT.USAGE);
+  }
+
   console.log('usage: ttym workspace <command>');
   console.log('');
   console.log('commands:');
   console.log('  list [--json]');
   console.log('  info <workspace|--current> [--json]');
-  console.log('  create <name> [--json]');
+  console.log('  create <name> [--stream <name>] [--json]');
   console.log('  rename <workspace|--current> --name <name>');
   console.log('  delete <workspace|--current> [--json]');
   console.log('  add <workspace|--current> [--name <name>] [--role <role>] [--cwd <dir>] [--size <cols>x<rows>] [--cmd ...] [--json]');
@@ -337,5 +382,6 @@ export async function cmdWorkspace() {
   console.log('  await <workspace|--current> <member> [-- \"prompt\"] [--timeout ms] [--json]');
   console.log('  screen <workspace|--current> <member> [--json]');
   console.log('  member rename <workspace|--current> <member> --name <name>');
+  console.log('  stream list|add <name>|rename <from> <to>|rm <name>|order <name...> [--json]');
   process.exit(EXIT.USAGE);
 }
