@@ -81,6 +81,8 @@ export async function cmdMap() {
   // --force는 전체 재요약 + 정리를 함께 뜻한다. --summarize-only는 config를 눌러 끈다.
   const cfgOrganize = ['1', 'true', 'on', 'yes'].includes((config['map-organize'] || '').trim().toLowerCase());
   const organize = hasFlag('--organize') ? true : hasFlag('--summarize-only') ? false : (force || cfgOrganize);
+  // --plan: 정리 제안만 계산해서 돌려주고 workspace에는 안 쓴다(웹이 미리보기 후 적용).
+  const planMode = organize && hasFlag('--plan');
 
   const map = await fetchJson(port, '/api/map') as { workspaces: MapWorkspace[]; sessions: MapSession[] };
   const stale = map.sessions.filter((s) => force || s.stale);
@@ -162,6 +164,7 @@ export async function cmdMap() {
   // 아직 이름이 없는 workspace를 이름 붙이는 일만 맡긴다.
   // 다시 묶고 싶으면 --force. column/order는 배치일 뿐이라 매번 갱신해도 된다.
   let workspacesApplied = 0;
+  const plan: Record<string, { stream: string; column: number; order: number }> = {};
   const wsOut = (parsed as Record<string, unknown>).workspaces;
   const placedNow = new Set<string>();
   if (organize && wsOut && typeof wsOut === 'object') {
@@ -172,15 +175,10 @@ export async function cmdMap() {
       const v = value as Record<string, unknown>;
       const column = typeof v.column === 'number' && v.column >= 1 && v.column <= 3 ? Math.floor(v.column) : 1;
       const stream = resolveStream(row.map?.stream, v.stream, force);
-      await fetchPatch(port, `/api/workspaces/${wsId}`, {
-        map: {
-          stream,
-          column,
-          order: typeof v.order === 'number' ? Math.floor(v.order) : 0,
-        },
-      });
+      const order = typeof v.order === 'number' ? Math.floor(v.order) : 0;
+      plan[wsId] = { stream, column, order };
+      if (!planMode) { await fetchPatch(port, `/api/workspaces/${wsId}`, { map: { stream, column, order } }); workspacesApplied++; }
       placedNow.add(wsId);
-      workspacesApplied++;
     }
   }
 
@@ -189,18 +187,19 @@ export async function cmdMap() {
   // 다시 돈다 (이게 stream이 계속 바뀌던 실제 경로다).
   if (organize) for (const w of unplaced) {
     if (placedNow.has(w.id)) continue;
-    await fetchPatch(port, `/api/workspaces/${w.id}`, {
-      map: { stream: UNSORTED, column: w.map?.column ?? 1, order: w.map?.order ?? 0 },
-    });
-    workspacesApplied++;
+    const p = { stream: UNSORTED, column: w.map?.column ?? 1, order: w.map?.order ?? 0 };
+    plan[w.id] = p;
+    if (!planMode) { await fetchPatch(port, `/api/workspaces/${w.id}`, { map: p }); workspacesApplied++; }
   }
 
   const mode = organize ? 'summarize+organize' : 'summarize';
   const backend = baseUrl ? `${model} @ ${new URL(baseUrl).host}` : `${model} @ claude`;
-  if (hasFlag('--json')) return printOutput({ refreshed: sessionsApplied, workspaces: workspacesApplied, staleWere: stale.length, model, mode, baseUrl: baseUrl || null }, true);
-  console.log(organize
-    ? `map: 세션 ${sessionsApplied}/${stale.length} 요약, workspace ${workspacesApplied} 배치 (${backend})`
-    : `map: 세션 ${sessionsApplied}/${stale.length} 요약 — stream은 안 건드림 (${backend})`);
+  if (hasFlag('--json')) return printOutput({ refreshed: sessionsApplied, workspaces: workspacesApplied, staleWere: stale.length, model, mode, plan: planMode ? plan : undefined, baseUrl: baseUrl || null }, true);
+  console.log(planMode
+    ? `map: 세션 ${sessionsApplied}/${stale.length} 요약 · 정리 제안 ${Object.keys(plan).length}개 (미적용) (${backend})`
+    : organize
+      ? `map: 세션 ${sessionsApplied}/${stale.length} 요약, workspace ${workspacesApplied} 배치 (${backend})`
+      : `map: 세션 ${sessionsApplied}/${stale.length} 요약 — stream은 안 건드림 (${backend})`);
 }
 
 function buildPrompt(instructions: string, note: string, map: { workspaces: MapWorkspace[]; sessions: MapSession[] }, stale: MapSession[], screens: Map<number, string>, organize: boolean): string {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   API_BASE, navigate, streamOf, UNSORTED_STREAM,
   apiUpdateWorkspace, apiAddStream, apiRenameStream, apiRemoveStream, apiReorderStreams, apiMoveMember,
@@ -246,18 +247,47 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
     return () => { window.clearTimeout(timer); unsub(); };
   }, [mux, load]);
 
-  const runRefresh = useCallback(async (organize = false) => {
-    if (organize && !window.confirm('AI가 stream을 다시 묶습니다 — 지금 보드에 손으로 짜둔 배치가 바뀔 수 있습니다. 진행할까요?')) return;
+  const runRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await fetch(`${API_BASE}/api/map/refresh`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(organize ? { organize: true } : {}),
-      });
+      await fetch(`${API_BASE}/api/map/refresh`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     } catch {}
     await load();
     setRefreshing(false);
   }, [load]);
+
+  // 정리: 바로 적용하지 않는다. 모델을 돌려 배치 "제안"만 받고(요약은 적용됨,
+  // stream은 안 씀) 미리보기를 띄운 뒤, 적용을 눌러야 workspace에 쓴다.
+  const [proposal, setProposal] = useState<Record<string, { stream: string; column: number; order: number }> | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [proposalNote, setProposalNote] = useState('');
+  const runOrganizePlan = useCallback(async () => {
+    setPlanning(true);
+    setProposalNote('');
+    try {
+      const res = await fetch(`${API_BASE}/api/map/refresh`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ organize: true, plan: true }),
+      });
+      const body = await res.json().catch(() => ({}));
+      await load(); // 요약은 이미 적용됨 — 갱신
+      if (res.ok && body.plan && Object.keys(body.plan).length > 0) setProposal(body.plan);
+      else setProposalNote(res.ok ? '정리할 게 없습니다.' : `실패: ${String(body.error ?? res.status).slice(0, 60)}`);
+    } catch {
+      setProposalNote('실패: 서버에 못 붙었습니다.');
+    }
+    setPlanning(false);
+  }, [load]);
+  const applyProposal = useCallback(async () => {
+    if (!proposal) return;
+    setRefreshing(true);
+    for (const [id, m] of Object.entries(proposal)) {
+      await apiUpdateWorkspace(id, { map: m });
+    }
+    setProposal(null);
+    await load();
+    setRefreshing(false);
+  }, [proposal, load]);
 
   // ── 편집: 낙관적으로 로컬을 먼저 고치고, 엔드포인트를 친 뒤 다시 읽는다.
   //    지도는 실시간이 아니라, 200ms 안착 정도의 깜빡임은 감수한다. ──
@@ -525,10 +555,11 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
           {view.newestSummary > 0 ? <span className="w stamp">{' '}· summarized {ago(view.newestSummary, now)}</span> : null}
         </span>
         {!view.summarized ? <span className="empty-hint">no summaries yet — <code>ttym map refresh</code> or</span> : null}
-        <button className="refresh" onClick={() => void runRefresh(true)} disabled={refreshing} aria-label="auto-organize into streams" title="AI로 stream 자동 정리 (보드 배치가 바뀜)" style={{ fontSize: 'calc(var(--wu)*0.82)', fontFamily: 'var(--mono)' }}>
-          정리
+        <button className={`refresh${planning ? ' busy' : ''}`} onClick={() => void runOrganizePlan()} disabled={refreshing || planning} aria-label="auto-organize into streams" title="AI로 stream 정리 제안 — 미리보고 적용할지 고른다" style={{ fontSize: 'calc(var(--wu)*0.82)', fontFamily: 'var(--mono)' }}>
+          {planning ? '제안 중…' : '정리'}
         </button>
-        <button className={`refresh${refreshing ? ' busy' : ''}`} onClick={() => void runRefresh(false)} disabled={refreshing} aria-label="refresh summaries" title="세션 요약만 새로고침 (stream은 안 건드림)">
+        {proposalNote ? <span className="empty-hint">{proposalNote}</span> : null}
+        <button className={`refresh${refreshing ? ' busy' : ''}`} onClick={() => void runRefresh()} disabled={refreshing || planning} aria-label="refresh summaries" title="세션 요약만 새로고침 (stream은 안 건드림)">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
           </svg>
@@ -622,6 +653,45 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
         ) : null}
       </div>
 
+      {proposal ? (() => {
+        const rows = Object.entries(proposal).map(([id, m]) => {
+          const w = data.workspaces.find((x) => x.id === id);
+          const cur = w ? streamOf(w) : '?';
+          const next = (m.stream || '').trim() || UNSORTED_STREAM;
+          return { id, name: w?.name ?? id, cur, next, moved: cur !== next };
+        });
+        const moves = rows.filter((r) => r.moved);
+        const reorders = rows.length - moves.length;
+        return createPortal(
+          <div style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.45)' }} onClick={() => setProposal(null)}>
+            <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(560px, calc(100vw - 40px))', maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column', background: 'var(--bg1, #1e1e1e)', border: '1px solid var(--line-strong, #555)', borderRadius: 10, boxShadow: '0 20px 50px rgba(0,0,0,.5)', fontFamily: 'var(--mono)', color: 'var(--wm-tx)' }}>
+              <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid var(--wm-line)', fontWeight: 700 }}>
+                정리 제안
+                <span style={{ color: 'var(--wm-faint)', fontWeight: 400, marginLeft: 8, fontSize: 12 }}>
+                  {moves.length}개 이동{reorders > 0 ? ` · ${reorders}개 순서만 조정` : ''}
+                </span>
+              </div>
+              <div style={{ overflowY: 'auto', padding: '10px 16px', fontSize: 13, lineHeight: 1.9 }}>
+                {moves.length === 0 ? (
+                  <div style={{ color: 'var(--wm-dim)' }}>stream 이동은 없고 칸 안 순서만 바뀝니다.</div>
+                ) : moves.map((r) => (
+                  <div key={r.id} style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                    <b style={{ color: 'var(--wm-tx)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</b>
+                    <span style={{ color: 'var(--wm-faint)', flexShrink: 0 }}>{r.cur}</span>
+                    <span style={{ color: 'var(--wm-dim)', flexShrink: 0 }}>→</span>
+                    <span style={{ color: 'var(--wm-run)', flexShrink: 0 }}>{r.next}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '10px 16px 14px', borderTop: '1px solid var(--wm-line)' }}>
+                <button onClick={() => setProposal(null)} style={{ ...menuItem, width: 'auto', padding: '7px 14px', border: '1px solid var(--wm-line)', borderRadius: 6 }}>취소</button>
+                <button onClick={() => void applyProposal()} disabled={refreshing} style={{ ...menuItem, width: 'auto', padding: '7px 14px', border: '1px solid var(--wm-soft)', borderRadius: 6, color: 'var(--wm-tx)', fontWeight: 700 }}>{refreshing ? '적용 중…' : '적용'}</button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        );
+      })() : null}
       {menu ? (
         <div
           onClick={(e) => e.stopPropagation()}

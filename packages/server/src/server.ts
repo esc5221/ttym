@@ -890,15 +890,17 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     readBody().then((body) => {
       let note = '';
       let organize = false;
+      let plan = false;
       try {
         const parsed = body ? JSON.parse(body) : {};
         if (parsed && typeof parsed === 'object' && typeof parsed.note === 'string') note = parsed.note;
         else if (parsed && typeof parsed === 'object' && parsed.note !== undefined) { json(400, { error: 'note must be string' }); return; }
         if (parsed && typeof parsed === 'object' && parsed.organize === true) organize = true;
+        if (parsed && typeof parsed === 'object' && parsed.plan === true) plan = true;
       } catch { json(400, { error: 'invalid body' }); return; }
       const cliPath = resolve(SERVER_DIR, 'ttym');
       const port = req.socket.localPort ?? 7690;
-      const cliArgs = [cliPath, 'map', 'refresh', '--json', '--port', String(port), ...(organize ? ['--organize'] : []), ...(note.trim() ? ['--note', note.trim()] : [])];
+      const cliArgs = [cliPath, 'map', 'refresh', '--json', '--port', String(port), ...(organize ? ['--organize'] : []), ...(plan ? ['--plan'] : []), ...(note.trim() ? ['--note', note.trim()] : [])];
       execFile(process.execPath, cliArgs, { timeout: 200_000 }, (error, stdout, stderr) => {
         mapRefreshInFlight = false;
         if (error) { json(502, { error: (stderr || error.message).trim().slice(0, 300) }); return; }
