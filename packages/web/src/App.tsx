@@ -2270,12 +2270,20 @@ function App() {
     // 닿으면 메뉴가 열리고, 그 줄에 놓으면 옮겨진다. 그동안 탭 재배치는 멈춘다 —
     // 안 그러면 메뉴로 내려가는 사이에 X가 흔들려 탭이 제멋대로 밀린다.
     let inMenu = false;
+    let boardCol: string | null = null;
     const onMove = (ev: MouseEvent) => {
       if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < 4) return;
       if (!moved) { moved = true; suppressTabClick.current = true; setDragTabId(id); document.body.classList.add('stream-dragging'); }
       const under = document.elementFromPoint(ev.clientX, ev.clientY);
       if (under?.closest('[data-stream-trigger]')) { inMenu = true; setStreamMenuOpen(true); }
       if (inMenu) { setStreamDropLit(streamDropAt(ev.clientX, ev.clientY)); return; }
+      // map 홈에서는 보드 칸이 바로 아래 있다 — 그 칸에 놓으면 그 stream으로 옮긴다.
+      // 탭을 어디로 끌지(순서냐 다른 stream이냐)를 한 제스처로 자연스럽게 가른다.
+      const col = (under?.closest('[data-wmb-col]') as HTMLElement | null)?.dataset.wmbCol ?? null;
+      boardCol = col;
+      const boardCols = document.querySelectorAll('[data-wmb-col]');
+      boardCols.forEach((c) => c.classList.toggle('lit', (c as HTMLElement).dataset.wmbCol === col));
+      if (col) return;
       if (Math.abs(ev.clientY - startY) > 30) return;
       // 삽입 위치: 형제 탭들의 중점을 넘었는가. 상태 재배열 → 리렌더 → 다음
       // move가 새 DOM을 재측정 — 반복 수렴이라 좌우 어느 방향도 자연스럽다.
@@ -2312,7 +2320,13 @@ function App() {
       document.body.classList.remove('stream-dragging');
       setDragTabId(null);
       setStreamDropLit(null);
+      document.querySelectorAll('[data-wmb-col]').forEach((c) => c.classList.remove('lit'));
       if (!moved) return;
+      if (boardCol) {
+        const ws = workspacesRef.current.find((w) => w.id === id);
+        if (ws && boardCol !== streamOf(ws)) void moveWorkspaceToStream(ws, boardCol);
+        return;
+      }
       if (inMenu) {
         const at = streamDropAt(ev.clientX, ev.clientY);
         const ws = workspacesRef.current.find((w) => w.id === id);
@@ -2520,7 +2534,7 @@ function App() {
       break;
     default:
       page = mainView === 'map'
-        ? <MapPage />
+        ? <MapPage mux={mux} />
         : <DashboardPage mux={mux} agentStates={agentStates} localEchoEnabled={localEchoEnabled} actionsSlot={stripSlot} />;
       break;
   }

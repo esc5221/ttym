@@ -201,7 +201,7 @@ function columnAt(x: number, y: number): string | null {
   return col?.dataset.wmbCol ?? null;
 }
 
-export function MapPage() {
+export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void): () => void } }) {
   const [data, setData] = useState<MapData | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
@@ -224,6 +224,18 @@ export function MapPage() {
     document.addEventListener('visibilitychange', onVisible);
     return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); };
   }, [load]);
+
+  // 서버가 workspace 변경을 push하면 보드도 곧바로 갱신한다 — 위쪽 탭을 보드 칸에
+  // 떨어뜨려 옮겼을 때(App이 처리)나, 다른 클라이언트가 바꿨을 때 30초를 안 기다린다.
+  useEffect(() => {
+    if (!mux) return;
+    let timer: number | undefined;
+    const unsub = mux.onWorkspace(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void load(), 120);
+    });
+    return () => { window.clearTimeout(timer); unsub(); };
+  }, [mux, load]);
 
   const runRefresh = useCallback(async () => {
     setRefreshing(true);
