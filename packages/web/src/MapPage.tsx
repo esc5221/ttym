@@ -81,8 +81,20 @@ const MAP_CSS = `
 }
 .wmap header .refresh:hover { color:var(--wm-tx); }
 .wmap header .refresh.busy { color:var(--wm-run); cursor:default; }
-.wmap header .refresh.busy svg { animation:wmap-spin 1s linear infinite !important; }
+/* 스핀은 ↻(refresh)에만 — columns 아이콘이 빙글빙글 돌면 이상하니 organize는 은은한 깜박임. */
+.wmap header .refresh.busy:not(.organize) svg { animation:wmap-spin 1s linear infinite !important; }
+.wmap header .refresh.organize.busy svg { animation:wmap-pulse 1.1s ease-in-out infinite !important; }
 @keyframes wmap-spin { to { transform:rotate(360deg); } }
+@keyframes wmap-pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+/* 즉시 뜨는 호버 라벨 (native title 지연 대신). data-label을 쓴다. */
+.wmap header .refresh { position:relative; }
+.wmap header .refresh::after {
+  content:attr(data-label); position:absolute; top:calc(100% + 5px); right:0;
+  white-space:nowrap; background:var(--bg1, #1e1e1e); border:1px solid var(--wm-line);
+  border-radius:5px; padding:3px 7px; font-size:calc(var(--wu)*0.72); color:var(--wm-soft);
+  opacity:0; pointer-events:none; z-index:80;
+}
+.wmap header .refresh:hover::after { opacity:1; }
 
 /* 보드: stream 칸이 가로로 늘어서되, 화면 폭을 넘으면 아래로 접힌다(wrap) —
    오른쪽으로 튀어나가는 가로 스크롤 대신 세로 스크롤. 칸 하나가 stream, 그 안에
@@ -93,11 +105,30 @@ const MAP_CSS = `
   align-content:flex-start; align-items:flex-start; overflow-x:hidden; overflow-y:auto;
   padding-bottom:calc(var(--wu)*1.2);
 }
+/* 브라우저 기본 스크롤바 대신 터미널 뷰(.thin-scroll)와 같은 룩:
+   트랙은 투명, thumb는 스크롤 영역에 호버할 때만 보인다. map 팔레트(--wm-*)로.
+   Chrome 121+는 scrollbar-width가 설정되면 ::-webkit-scrollbar를 무시하므로
+   Firefox 표준 속성은 @supports로 웹킷 미지원일 때만 켠다(viewer.css와 동일 패턴). */
+.wmb-board::-webkit-scrollbar { width:8px; height:8px; }
+.wmb-board::-webkit-scrollbar-track { background:transparent; }
+.wmb-board::-webkit-scrollbar-thumb { background:transparent; border-radius:4px; }
+.wmb-board:hover::-webkit-scrollbar-thumb { background:var(--wm-dim); }
+.wmb-board::-webkit-scrollbar-thumb:hover { background:var(--wm-soft); }
+@supports not selector(::-webkit-scrollbar) {
+  .wmb-board { scrollbar-width:thin; scrollbar-color:transparent transparent; }
+  .wmb-board:hover { scrollbar-color:var(--wm-dim) transparent; }
+}
 .wmb-col {
   flex:0 0 auto; width:calc(var(--wu)*24);
   display:flex; flex-direction:column; border-radius:8px;
   border:1px solid transparent;
 }
+/* 카드가 많은 stream은 옆으로 넓혀 세로로 안 길어지게 — 안에서 2~3열로 흐른다.
+   좁은 화면에선 아래 미디어쿼리로 다시 1열 폭. */
+.wmb-col[data-span="2"] { width:calc(var(--wu)*49.6); }
+.wmb-col[data-span="3"] { width:calc(var(--wu)*75.2); }
+@media (max-width:1180px) { .wmb-col[data-span="3"] { width:calc(var(--wu)*49.6); } }
+@media (max-width:820px)  { .wmb-col[data-span="2"], .wmb-col[data-span="3"] { width:calc(var(--wu)*24); } }
 .wmb-col.lit { border-color:var(--wm-line); background:color-mix(in srgb, var(--wm-tx) 4%, transparent); }
 .wmb-head {
   display:flex; align-items:baseline; gap:calc(var(--wu)*0.5);
@@ -114,11 +145,12 @@ const MAP_CSS = `
   border-radius:4px; padding:1px 5px; font-family:var(--mono);
   font-size:calc(var(--wu)*0.9); width:calc(var(--wu)*14); outline:none;
 }
-.wmb-cards { padding:0 calc(var(--wu)*0.5) calc(var(--wu)*0.5); }
+.wmb-cards { padding:0 calc(var(--wu)*0.5) calc(var(--wu)*0.5); column-width:calc(var(--wu)*22.5); column-gap:calc(var(--wu)*1.6); }
 .wmb-card {
   border:1px solid var(--wm-line); border-radius:7px;
   padding:calc(var(--wu)*0.6) calc(var(--wu)*0.8) calc(var(--wu)*0.65);
   margin-bottom:calc(var(--wu)*0.7); cursor:grab; background:color-mix(in srgb, var(--wm-tx) 2.5%, transparent);
+  break-inside:avoid; -webkit-column-break-inside:avoid;
 }
 .wmb-card:last-child { margin-bottom:0; }
 .wmb-card.drag { opacity:.5; cursor:grabbing; }
@@ -272,9 +304,9 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
       const body = await res.json().catch(() => ({}));
       await load(); // 요약은 이미 적용됨 — 갱신
       if (res.ok && body.plan && Object.keys(body.plan).length > 0) setProposal(body.plan);
-      else setProposalNote(res.ok ? '정리할 게 없습니다.' : `실패: ${String(body.error ?? res.status).slice(0, 60)}`);
+      else setProposalNote(res.ok ? 'Nothing to organize.' : `Failed: ${String(body.error ?? res.status).slice(0, 60)}`);
     } catch {
-      setProposalNote('실패: 서버에 못 붙었습니다.');
+      setProposalNote('Failed: server unreachable.');
     }
     setPlanning(false);
   }, [load]);
@@ -555,13 +587,15 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
           {view.newestSummary > 0 ? <span className="w stamp">{' '}· summarized {ago(view.newestSummary, now)}</span> : null}
         </span>
         {!view.summarized ? <span className="empty-hint">no summaries yet — <code>ttym map refresh</code> or</span> : null}
-        <button className={`refresh${planning ? ' busy' : ''}`} onClick={() => void runOrganizePlan()} disabled={refreshing || planning} aria-label="auto-organize into streams" title="AI로 stream 정리 제안 — 미리보고 적용할지 고른다" style={{ fontSize: 'calc(var(--wu)*0.82)', fontFamily: 'var(--mono)' }}>
-          {planning ? '제안 중…' : '정리'}
-        </button>
-        {proposalNote ? <span className="empty-hint">{proposalNote}</span> : null}
-        <button className={`refresh${refreshing ? ' busy' : ''}`} onClick={() => void runRefresh()} disabled={refreshing || planning} aria-label="refresh summaries" title="세션 요약만 새로고침 (stream은 안 건드림)">
+        <button className={`refresh${refreshing ? ' busy' : ''}`} onClick={() => void runRefresh()} disabled={refreshing || planning} aria-label="Refresh summaries" data-label="Refresh summaries">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 12a9 9 0 1 1-2.64-6.36" /><path d="M21 3v6h-6" />
+          </svg>
+        </button>
+        {proposalNote ? <span className="empty-hint">{proposalNote}</span> : null}
+        <button className={`refresh organize${planning ? ' busy' : ''}`} onClick={() => void runOrganizePlan()} disabled={refreshing || planning} aria-label="Auto-organize into streams" data-label={planning ? 'Organizing…' : 'Organize into streams'}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="M15 3v18" />
           </svg>
         </button>
       </header>
@@ -571,7 +605,7 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
           const unsorted = g.name === UNSORTED_STREAM;
           const isRenaming = renaming === g.name;
           return (
-            <div key={g.name} data-wmb-col={g.name} className={`wmb-col${lit === g.name ? ' lit' : ''}`}>
+            <div key={g.name} data-wmb-col={g.name} data-span={g.workspaces.length >= 9 ? 3 : g.workspaces.length >= 5 ? 2 : 1} className={`wmb-col${lit === g.name ? ' lit' : ''}`}>
               {isRenaming ? (
                 <div className="wmb-head">
                   <input
@@ -666,14 +700,14 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
           <div style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.45)' }} onClick={() => setProposal(null)}>
             <div onClick={(e) => e.stopPropagation()} style={{ width: 'min(560px, calc(100vw - 40px))', maxHeight: 'calc(100vh - 80px)', display: 'flex', flexDirection: 'column', background: 'var(--bg1, #1e1e1e)', border: '1px solid var(--line-strong, #555)', borderRadius: 10, boxShadow: '0 20px 50px rgba(0,0,0,.5)', fontFamily: 'var(--mono)', color: 'var(--wm-tx)' }}>
               <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid var(--wm-line)', fontWeight: 700 }}>
-                정리 제안
+                Organize suggestion
                 <span style={{ color: 'var(--wm-faint)', fontWeight: 400, marginLeft: 8, fontSize: 12 }}>
-                  {moves.length}개 이동{reorders > 0 ? ` · ${reorders}개 순서만 조정` : ''}
+                  {moves.length} moved{reorders > 0 ? ` · ${reorders} reordered` : ''}
                 </span>
               </div>
-              <div style={{ overflowY: 'auto', padding: '10px 16px', fontSize: 13, lineHeight: 1.9 }}>
+              <div className="thin-scroll" style={{ overflowY: 'auto', padding: '10px 16px', fontSize: 13, lineHeight: 1.9 }}>
                 {moves.length === 0 ? (
-                  <div style={{ color: 'var(--wm-dim)' }}>stream 이동은 없고 칸 안 순서만 바뀝니다.</div>
+                  <div style={{ color: 'var(--wm-dim)' }}>No stream changes — only card order within columns.</div>
                 ) : moves.map((r) => (
                   <div key={r.id} style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                     <b style={{ color: 'var(--wm-tx)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</b>
@@ -684,8 +718,8 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
                 ))}
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '10px 16px 14px', borderTop: '1px solid var(--wm-line)' }}>
-                <button onClick={() => setProposal(null)} style={{ ...menuItem, width: 'auto', padding: '7px 14px', border: '1px solid var(--wm-line)', borderRadius: 6 }}>취소</button>
-                <button onClick={() => void applyProposal()} disabled={refreshing} style={{ ...menuItem, width: 'auto', padding: '7px 14px', border: '1px solid var(--wm-soft)', borderRadius: 6, color: 'var(--wm-tx)', fontWeight: 700 }}>{refreshing ? '적용 중…' : '적용'}</button>
+                <button onClick={() => setProposal(null)} style={{ ...menuItem, width: 'auto', padding: '7px 14px', border: '1px solid var(--wm-line)', borderRadius: 6 }}>Cancel</button>
+                <button onClick={() => void applyProposal()} disabled={refreshing} style={{ ...menuItem, width: 'auto', padding: '7px 14px', border: '1px solid var(--wm-soft)', borderRadius: 6, color: 'var(--wm-tx)', fontWeight: 700 }}>{refreshing ? 'Applying…' : 'Apply'}</button>
               </div>
             </div>
           </div>,
