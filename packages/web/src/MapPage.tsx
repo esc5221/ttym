@@ -35,6 +35,7 @@ interface MapSessionRow {
   lastSeq: number;
   agentKind: string | null;
   agentActive: boolean;
+  agentActiveAt: number | null;
   summary: MapSummary | null;
   stale: boolean;
 }
@@ -96,6 +97,35 @@ const MAP_CSS = `
 }
 .wmap header .refresh:hover::after { opacity:1; }
 
+/* 상단 세션 카드 행: 에이전트가 최근 돈 세션 최대 3개. ws 카드가 아니라 세션 —
+   누르면 그 세션 하나에 포커스. 보드 안 전체폭 첫 행이라 보드와 같이 스크롤된다.
+   디자인은 보드 카드(.wmb-card)와 같은 톤: 얇은 테두리 + 은은한 배경, 종류는
+   작은 색 점 하나로만(왼쪽 색 바 없음 — 이 화면의 언어에 없다). */
+.wmb-agents {
+  flex:0 0 100%; width:100%; display:flex; flex-wrap:wrap; gap:calc(var(--wu)*0.7);
+}
+.wmb-agent {
+  display:flex; align-items:center; gap:calc(var(--wu)*0.6);
+  min-width:calc(var(--wu)*13.5); max-width:calc(var(--wu)*22); min-height:calc(var(--wu)*2.7);
+  padding:calc(var(--wu)*0.5) calc(var(--wu)*0.85);
+  border:1px solid var(--wm-line); border-radius:7px;
+  background:color-mix(in srgb, var(--wm-tx) 3%, transparent);
+  cursor:pointer; user-select:none; transition:none;
+}
+.wmb-agent:hover { border-color:var(--wm-dim); background:color-mix(in srgb, var(--wm-tx) 6%, transparent); }
+.wmb-agent.claude { --adot:var(--wm-claude); }
+.wmb-agent.codex { --adot:var(--wm-codex); }
+.wmb-agent .adot { flex:0 0 auto; width:calc(var(--wu)*0.42); height:calc(var(--wu)*0.42); border-radius:50%; background:var(--adot, var(--wm-dim)); }
+.wmb-agent.live .adot { animation:wmb-live 1.8s ease-out infinite; }
+@keyframes wmb-live { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--adot) 55%, transparent); } 70%,100% { box-shadow:0 0 0 calc(var(--wu)*0.4) transparent; } }
+.wmb-agent .meat { min-width:0; display:flex; flex-direction:column; line-height:1.3; }
+.wmb-agent .meat b { font-size:calc(var(--wu)*0.88); font-weight:650; color:var(--wm-tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wmb-agent .meat small { font-size:calc(var(--wu)*0.72); color:var(--wm-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wmb-agent .meat .wsn { color:var(--wm-soft); }
+/* 모바일: 한 줄에 하나씩 꽉 차게, 터치 타깃 크게. */
+@media (max-width:560px) {
+  .wmb-agent { max-width:none; flex:1 1 100%; min-height:calc(var(--wu)*3.1); }
+}
 /* 보드: stream 칸이 가로로 늘어서되, 화면 폭을 넘으면 아래로 접힌다(wrap) —
    오른쪽으로 튀어나가는 가로 스크롤 대신 세로 스크롤. 칸 하나가 stream, 그 안에
    workspace 카드(박스). 칸은 넉넉히(약 330px) — 한글 요약이 세 단어쯤 한 줄에.
@@ -247,6 +277,8 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
   const [data, setData] = useState<MapData | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [refreshing, setRefreshing] = useState(false);
+  // 상단 세션 카드 순서를 이 세션(새로고침 전까지) 동안 고정한다.
+  const topOrderRef = useRef<number[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -408,7 +440,25 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
     }
     const newestSummary = Math.max(0, ...data.sessions.map((s) => s.summary?.updatedAt ?? 0));
     const summarized = data.sessions.some((s) => s.summary);
-    return { sessionById, columns, standalone, counts, newestSummary, summarized };
+
+    // 세션 id → 소속 workspace(포커스 이동·이름 표시용).
+    const wsBySession = new Map<number, { wsId: string; wsName: string }>();
+    for (const w of data.workspaces) for (const m of w.members) wsBySession.set(m.sessionId, { wsId: w.id, wsName: w.name });
+
+    // 상단 세션 카드: 에이전트가 실제로 돌았던(agentActiveAt 있는) 세션을 최신순 후보로.
+    // 순서는 첫 로드 때 잡아 topOrderRef에 고정 — 폴링/라이브 갱신으로 재정렬되지
+    // 않는다(내용만 갱신). 사라진 것만 빠지고, 빈 슬롯(<3)만 새 후보로 채운다.
+    const cands = data.sessions
+      .filter((s) => (s.agentKind === 'claude-code' || s.agentKind === 'codex') && typeof s.agentActiveAt === 'number')
+      .sort((a, b) => (b.agentActiveAt as number) - (a.agentActiveAt as number));
+    const candIds = new Set(cands.map((s) => s.id));
+    let order = topOrderRef.current.filter((id) => candIds.has(id));
+    for (const s of cands) { if (order.length >= 3) break; if (!order.includes(s.id)) order.push(s.id); }
+    order = order.slice(0, 3);
+    topOrderRef.current = order;
+    const topSessions = order.map((id) => sessionById.get(id)).filter((s): s is MapSessionRow => !!s);
+
+    return { sessionById, columns, standalone, counts, newestSummary, summarized, wsBySession, topSessions };
   }, [data]);
 
   // ── 드래그: 카드는 칸 사이로, 머리는 좌우로 ──
@@ -541,6 +591,15 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
     setCreating(null); setCreateDraft('');
   };
 
+  // 상단 카드 클릭 → 그 세션 하나에 포커스. 모바일(coarse 포인터)은 전체화면 pane,
+  // 데스크톱은 zen 읽기모드. 소속 workspace가 없으면 standalone 세션 뷰로.
+  const openAgentFocus = (sid: number) => {
+    const loc = view?.wsBySession.get(sid);
+    const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer:coarse)').matches;
+    if (loc) navigate({ page: 'workspace', id: loc.wsId, ...(coarse ? { pane: sid } : { zen: sid }) });
+    else navigate({ page: 'session', id: sid });
+  };
+
   const renderSession = (sid: number, name: string | undefined, isLast: boolean, wsId?: string) => {
     const s = view.sessionById.get(sid);
     if (!s) return null;
@@ -601,6 +660,35 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
       </header>
 
       <div className="wmb-board">
+        {view.topSessions.length > 0 ? (
+        <div className="wmb-agents">
+          {view.topSessions.map((s) => {
+            const loc = view.wsBySession.get(s.id);
+            const title = s.summary?.title || loc?.wsName || `#${s.id}`;
+            return (
+              <div
+                key={s.id}
+                className={`wmb-agent ${dotClass(s.agentKind)}${s.agentActive ? ' live' : ''}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => openAgentFocus(s.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAgentFocus(s.id); } }}
+                title={loc ? `${loc.wsName} · focus session ${s.id}` : `focus session ${s.id}`}
+              >
+                <span className="adot" />
+                <span className="meat">
+                  <b>{title}</b>
+                  <small>
+                    <span className="wsn">{loc?.wsName ?? `#${s.id}`}</span>
+                    {' · '}
+                    {s.agentActive ? 'working' : ago(s.agentActiveAt ?? undefined, now)}
+                  </small>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        ) : null}
         {cols.map((g) => {
           const unsorted = g.name === UNSORTED_STREAM;
           const isRenaming = renaming === g.name;

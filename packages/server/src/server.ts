@@ -848,6 +848,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         lastSeq: info.lastSeq,
         agentKind: agentKindOf(meta),
         agentActive: agentIsActive(meta),
+        agentActiveAt: typeof meta.agentActiveAt === 'number' ? meta.agentActiveAt : null,
         summary,
         stale: atSeq === null || info.lastSeq > atSeq,
       };
