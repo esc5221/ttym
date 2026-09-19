@@ -1,5 +1,5 @@
 import { execFileSync, execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import process from 'node:process';
@@ -36,12 +36,20 @@ export function readServiceMarker(): ServiceMarker | null {
 export function renderLaunchdPlist(opts: {
   label: string; nodePath: string; serverJs: string; holderBin: string;
   port: number; bind?: string | null; logPath: string; homeDir: string;
+  path?: string; home?: string;
 }): string {
   const env: Record<string, string> = {
     PORT: String(opts.port),
     TTYM_HOLDER_BIN: opts.holderBin,
     TTYM_HOME: opts.homeDir,
   };
+  // launchd hands a job a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin), and
+  // buildSessionEnv copies the server's environment verbatim into every pane it
+  // spawns — so an unset PATH here means every future shell loses
+  // /opt/homebrew/bin. HOME is set by the gui domain but stated anyway: the
+  // server resolves ~/.ttym from it.
+  if (opts.path) env.PATH = opts.path;
+  if (opts.home) env.HOME = opts.home;
   if (opts.bind) env.TTYM_BIND = opts.bind;
   const envXml = Object.entries(env)
     .map(([k, v]) => `    <key>${k}</key><string>${v}</string>`)
@@ -107,6 +115,41 @@ function gui(): string {
   return `gui/${process.getuid?.() ?? 501}`;
 }
 
+/**
+ * process.execPath on Homebrew is the versioned path
+ * (/opt/homebrew/Cellar/node/26.0.0/bin/node), which `brew upgrade node`
+ * deletes — the job then fails to start and KeepAlive spins on a missing
+ * binary. Prefer a stable symlink that resolves to this same executable.
+ */
+export function stableNodePath(execPath: string): string {
+  const real = (p: string) => { try { return realpathSync(p); } catch { return null; } };
+  const self = real(execPath);
+  if (!self) return execPath;
+  for (const candidate of ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node']) {
+    if (real(candidate) === self) return candidate;
+  }
+  return execPath;
+}
+
+/**
+ * PATH for the job. Not process.env.PATH — install often runs from inside an
+ * agent's shell, whose PATH carries that agent's plugin dirs, and
+ * buildSessionEnv fossilizes whatever the server got into every pane it ever
+ * spawns. A login shell started from an empty environment gives the PATH the
+ * user actually has in a terminal.
+ */
+export function loginShellPath(shell = process.env.SHELL): string | null {
+  if (!shell) return null;
+  try {
+    const out = execFileSync(shell, ['-lc', 'printf %s "$PATH"'], {
+      encoding: 'utf8', timeout: 5000,
+      env: { HOME: homedir(), SHELL: shell, TERM: 'dumb' },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return out.includes('/usr/bin') ? out : null;
+  } catch { return null; }
+}
+
 async function serverUp(port: number): Promise<boolean> {
   try {
     const res = await fetch(`${apiBase(port)}/api/version`, { signal: AbortSignal.timeout(1500) });
@@ -138,9 +181,11 @@ async function installLaunchd(port: number, bind: string | null) {
 
   mkdirSync(resolve(homedir(), 'Library', 'LaunchAgents'), { recursive: true });
   writeFileSync(plistPath, renderLaunchdPlist({
-    label: LABEL, nodePath: process.execPath, serverJs: SERVER_JS,
+    label: LABEL, nodePath: stableNodePath(process.execPath), serverJs: SERVER_JS,
     holderBin: process.env.TTYM_HOLDER_BIN || HOLDER_BIN,
     port, bind, logPath: LOG_FILE, homeDir: HOME_DIR,
+    path: loginShellPath() ?? '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
+    home: homedir(),
   }));
   launchctl(['bootout', gui(), plistPath], { allowFail: true });
   launchctl(['bootstrap', gui(), plistPath]);

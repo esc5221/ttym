@@ -15,7 +15,9 @@ import { copyFile, stat, truncate } from 'node:fs/promises';
  * chatter, which is an acceptable price for not restarting holders.
  */
 export const LOG_ROTATE_BYTES = 64 * 1024 * 1024;
-export const LOG_ROTATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// Hourly, not six-hourly: the check is one stat, and at six hours ttym.log.1
+// had reached 125MB — twice the threshold it is supposed to cap.
+export const LOG_ROTATE_INTERVAL_MS = 60 * 60 * 1000;
 
 export async function rotateLogIfNeeded(
   logPath: string,

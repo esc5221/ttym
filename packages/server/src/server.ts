@@ -11,7 +11,7 @@ import { InteractionStore } from './interaction.js';
 import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
 import { ConfigStore } from './config-file.js';
 import { agentKindOf } from './agent-providers.js';
-import { getHomeDir, type Session } from './session.js';
+import { getHomeDir, drainSyncStats, type Session } from './session.js';
 import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { ViewerStore } from './viewer/store.js';
 import { ViewerService } from './viewer/service.js';
@@ -48,6 +48,13 @@ const WS_LOW_WATER = 1 << 18;
 
 const DEBUG = true;
 const log = (...args: unknown[]) => DEBUG && console.log(`[srv ${new Date().toISOString().slice(11, 23)}]`, ...args);
+/**
+ * View pause/resume fires on every browser visibilitychange, once per attached
+ * session — tab-switching alone wrote 47,000 lines into one 60MB stretch of the
+ * log. Lifecycle (ATTACH, WS close, HELLO) stays; this is the noise floor.
+ */
+const VERBOSE = process.env.TTYM_DEBUG === '1';
+const trace = (...args: unknown[]) => VERBOSE && log(...args);
 
 const SERVER_DIR = fileURLToPath(new URL('.', import.meta.url));
 // Works both from source (packages/server/src/) and bundle (dist/)
@@ -1414,6 +1421,17 @@ export async function createServer(port: number): Promise<TtymServer> {
       alive.set(client, false);
       try { client.ping(); } catch {}
     }
+    // One aggregate line in place of two per sync block. Silent when idle, so
+    // a quiet server writes nothing rather than a heartbeat's worth of noise.
+    const s = drainSyncStats();
+    if (s.blocks || s.overflow || s.timeout || s.resets) {
+      const kb = (n: number) => Math.round(n / 1024);
+      log(
+        `sync ${WS_PING_INTERVAL_MS / 1000}s sessions=${s.sessions} blocks=${s.blocks} ` +
+        `raw=${kb(s.rawBytes)}KB emitted=${kb(s.emittedBytes)}KB ` +
+        `overflow=${s.overflow} timeout=${s.timeout} resets=${s.resets}`,
+      );
+    }
   }, WS_PING_INTERVAL_MS);
   heartbeat.unref();
 
@@ -1959,7 +1977,7 @@ export async function createServer(port: number): Promise<TtymServer> {
             session.pauseViewer(viewerId);
             const batcher = batchers.get(sessionId);
             if (batcher) batcher.pausedView = true;
-            log(`PAUSE_VIEW session=${sessionId} viewer=${viewerId.slice(0, 8)}`);
+            trace(`PAUSE_VIEW session=${sessionId} viewer=${viewerId.slice(0, 8)}`);
           }
           break;
         }
@@ -1976,7 +1994,7 @@ export async function createServer(port: number): Promise<TtymServer> {
             sendResync(sessionId, session, batcher, fromSeq);
 
             session.resumeViewer(viewerId);
-            log(`RESUME_VIEW session=${sessionId} viewer=${viewerId.slice(0, 8)} fromSeq=${fromSeq}`);
+            trace(`RESUME_VIEW session=${sessionId} viewer=${viewerId.slice(0, 8)} fromSeq=${fromSeq}`);
           }
           break;
         }

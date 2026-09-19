@@ -98,6 +98,41 @@ function getSyncBlockTimeoutMs(): number {
 }
 
 /**
+ * Per-block sync tracing is opt-in. A full-screen TUI opens a sync block per
+ * frame, so one busy pane wrote 260,000 lines by itself and the server's
+ * stdout log reached 716MB — 93.6% of its last 60MB was sync start/end.
+ * The counters below survive without the lines: the heartbeat prints one
+ * aggregate, and anomalies (overflow, timeout, reset) still log unconditionally.
+ */
+const VERBOSE = process.env.TTYM_DEBUG === '1';
+
+const syncTotals = {
+  blocks: 0, overflow: 0, timeout: 0, resets: 0,
+  rawBytes: 0, emittedBytes: 0,
+  sessions: new Set<number>(),
+};
+
+export interface SyncStats {
+  blocks: number; overflow: number; timeout: number; resets: number;
+  rawBytes: number; emittedBytes: number; sessions: number;
+}
+
+/** Read the counters accumulated since the last call and reset them. */
+export function drainSyncStats(): SyncStats {
+  const out: SyncStats = {
+    blocks: syncTotals.blocks, overflow: syncTotals.overflow,
+    timeout: syncTotals.timeout, resets: syncTotals.resets,
+    rawBytes: syncTotals.rawBytes, emittedBytes: syncTotals.emittedBytes,
+    sessions: syncTotals.sessions.size,
+  };
+  syncTotals.blocks = 0; syncTotals.overflow = 0;
+  syncTotals.timeout = 0; syncTotals.resets = 0;
+  syncTotals.rawBytes = 0; syncTotals.emittedBytes = 0;
+  syncTotals.sessions.clear();
+  return out;
+}
+
+/**
  * Runtime markers a parent agent stamps on its own child processes. A ttym
  * server started from inside a Claude Code Bash tool inherits them, survives
  * as a daemon, and hands the fossilized set to every session it ever spawns.
@@ -305,6 +340,11 @@ export class Session {
 
   private debug(message: string): void {
     console.log(`[sess ${this.id}] ${message}`);
+  }
+
+  /** Per-frame diagnostics. Silent unless TTYM_DEBUG=1 — see VERBOSE above. */
+  private trace(message: string): void {
+    if (VERBOSE) this.debug(message);
   }
 
   get dirty(): boolean { return this._dirty; }
@@ -937,11 +977,13 @@ export class Session {
     if (result.syncStarted) {
       this.syncBlocksStarted += 1;
       this.armSyncTimer();
-      this.debug(`sync start count=${this.syncBlocksStarted}`);
+      syncTotals.sessions.add(this.id);
+      this.trace(`sync start count=${this.syncBlocksStarted}`);
     }
     if (result.overflowed) {
       this.syncOverflowCount += 1;
       this.clearSyncTimer();
+      syncTotals.overflow += 1;
       this.debug(`sync overflow count=${this.syncOverflowCount}`);
     }
     if (result.syncEnded) {
@@ -949,7 +991,11 @@ export class Session {
       this.clearSyncTimer();
       this.syncBufferedBytes += data.length;
       this.syncEmittedBytes += result.coalescedBytes;
-      this.debug(
+      syncTotals.blocks += 1;
+      syncTotals.sessions.add(this.id);
+      syncTotals.rawBytes += data.length;
+      syncTotals.emittedBytes += result.coalescedBytes;
+      this.trace(
         `sync end count=${this.syncBlocksCompleted} raw=${data.length} emitted=${result.coalescedBytes} open=${result.syncOpen}`,
       );
     }
@@ -973,6 +1019,7 @@ export class Session {
     this.clearSyncTimer();
     const aborted = this.syncFilter.abortOpenBlock();
     if (aborted && aborted.length > 0) {
+      syncTotals.resets += 1;
       this.debug(`sync reset reason=${reason} replaying-open-block-bytes=${aborted.length}`);
       this.emitViewerChunk(aborted, true);
     }
@@ -982,6 +1029,7 @@ export class Session {
     this.clearSyncTimer();
     this.syncTimer = setTimeout(() => {
       this.syncTimeoutCount += 1;
+      syncTotals.timeout += 1;
       this.debug(`sync timeout count=${this.syncTimeoutCount}`);
       this.resetSyncEmissionState('timeout');
     }, getSyncBlockTimeoutMs());

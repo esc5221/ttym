@@ -1,5 +1,5 @@
 import { pathToFileURL } from 'node:url';
-import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { writeFileSync, unlinkSync, mkdirSync, fstatSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createServer } from './server.js';
 import { rotateLogIfNeeded, LOG_ROTATE_INTERVAL_MS } from './log-rotate.js';
@@ -25,6 +25,18 @@ if (isMain()) {
     // The log grew unbounded — 130MB over one 41-day run. Check at boot and
     // every few hours; copy-truncate keeps every existing append fd valid.
     const logPath = resolve(homeDir, 'ttym.log');
+
+    // Rotation only ever touches this path, so a supervisor that points stdout
+    // somewhere else gets no rotation at all — a hand-written launchd plist sent
+    // it to ~/Library/Logs/ttym-server.log, which reached 716MB unnoticed.
+    // Comparing inodes catches that at boot instead of in six months.
+    try {
+      const out = fstatSync(1);
+      if (out.isFile() && out.ino !== statSync(logPath).ino) {
+        console.error(`[log] stdout is not ${logPath} — rotation does not apply to it`);
+      }
+    } catch {}
+
     const rotate = () => rotateLogIfNeeded(logPath)
       .then((did) => { if (did) console.log('[log] rotated ttym.log'); })
       .catch(() => {});
