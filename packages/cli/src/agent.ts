@@ -51,6 +51,11 @@ export const AGENTS = {
     resumeArgs: (sid) => ['claude', '--resume', sid],
     resumeFlagsEnv: 'TTYM_CLAUDE_RESUME_FLAGS',
     resumeFlagsConfig: 'agent-claude-resume-flags',
+    // The pane already ran claude in this folder, so the trust question is
+    // settled. Asking again breaks wake: since 2.1.261 the dialog defaults to
+    // "No, exit" and the queued Enter kills the agent. settings.json env does
+    // not cover the home directory — the process env does.
+    resumeEnv: { CLAUDE_CODE_SANDBOXED: '1' },
   },
   codex: {
     name: 'Codex CLI (experimental)',
@@ -359,7 +364,10 @@ export async function cmdAgent() {
       extra: extraArgs,
     });
     console.log(`resuming ${targetCfg.name}: ${args.join(' ')}`);
-    const child = spawn(args[0], args.slice(1), { stdio: 'inherit' });
+    const child = spawn(args[0], args.slice(1), {
+      stdio: 'inherit',
+      env: { ...process.env, ...(targetCfg.resumeEnv || {}) },
+    });
     child.on('exit', (code) => process.exit(code ?? 0));
     return;
   }
