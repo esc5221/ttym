@@ -443,20 +443,26 @@ export class Session {
     if (cwd) args.push('--cwd', cwd);
     args.push('--', ...cmd);
 
+    // A missing holder used to surface as an unhandled spawn 'error' event,
+    // which took the whole server down with every other session's viewer.
+    const bin = holderBin();
+    if (!existsSync(bin)) throw new Error(`ttym-holder not found at ${bin} — reinstall ttym, or point TTYM_HOLDER_BIN at the binary`);
     const holderLogFd = openSync(resolve(getHomeDir(), 'ttym.log'), 'a');
     const env = buildSessionEnv(extraEnv);
-    const proc = spawn(holderBin(), args, {
+    const proc = spawn(bin, args, {
       detached: true,
       stdio: ['ignore', holderLogFd, holderLogFd],
       env,
     });
+    const spawnFailed = new Promise<never>((_, reject) => proc.once('error', (e) => reject(new Error(`holder spawn failed: ${e.message}`))));
+    spawnFailed.catch(() => {});
     proc.unref();
 
     // Wait for socket to appear (holder needs a moment)
     // 10s, not 3: on a machine already running a fleet of agents, a holder
     // plus its shell can take longer than 3s to reach the socket, and the old
     // limit turned load into spurious 'spawn failed' errors.
-    await waitForSocket(socketPath, 10_000);
+    await Promise.race([waitForSocket(socketPath, 10_000), spawnFailed]);
 
     // Connect and wait for STATE
     const sock = await connectSocket(socketPath);

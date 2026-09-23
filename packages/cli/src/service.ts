@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFil
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import process from 'node:process';
-import { EXIT, HOME_DIR, LOG_FILE, SERVER_JS, HOLDER_BIN, PID_FILE, getPort, apiBase, hasFlag, printOutput, readPid } from './common.js';
+import { EXIT, HOME_DIR, LOG_FILE, SERVER_JS, holderBinForServer, PID_FILE, getPort, apiBase, hasFlag, printOutput, readPid } from './common.js';
 
 /**
  * ttym service — 상주는 OS 감독자(launchd/systemd)에게 맡기고, 사용자에겐
@@ -34,13 +34,13 @@ export function readServiceMarker(): ServiceMarker | null {
 
 /** 순수 렌더러 — 테스트가 여기를 본다. KeepAlive + 10초 스로틀(크래시 루프 방어). */
 export function renderLaunchdPlist(opts: {
-  label: string; nodePath: string; serverJs: string; holderBin: string;
+  label: string; nodePath: string; serverJs: string; holderBin: string | null;
   port: number; bind?: string | null; logPath: string; homeDir: string;
   path?: string; home?: string;
 }): string {
   const env: Record<string, string> = {
     PORT: String(opts.port),
-    TTYM_HOLDER_BIN: opts.holderBin,
+    ...(opts.holderBin ? { TTYM_HOLDER_BIN: opts.holderBin } : {}),
     TTYM_HOME: opts.homeDir,
   };
   // launchd hands a job a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin), and
@@ -79,12 +79,12 @@ ${envXml}
 }
 
 export function renderSystemdUnit(opts: {
-  nodePath: string; serverJs: string; holderBin: string;
+  nodePath: string; serverJs: string; holderBin: string | null;
   port: number; bind?: string | null; homeDir: string;
 }): string {
   const envLines = [
     `Environment=PORT=${opts.port}`,
-    `Environment=TTYM_HOLDER_BIN=${opts.holderBin}`,
+    ...(opts.holderBin ? [`Environment=TTYM_HOLDER_BIN=${opts.holderBin}`] : []),
     `Environment=TTYM_HOME=${opts.homeDir}`,
     ...(opts.bind ? [`Environment=TTYM_BIND=${opts.bind}`] : []),
   ].join('\n');
@@ -182,7 +182,7 @@ async function installLaunchd(port: number, bind: string | null) {
   mkdirSync(resolve(homedir(), 'Library', 'LaunchAgents'), { recursive: true });
   writeFileSync(plistPath, renderLaunchdPlist({
     label: LABEL, nodePath: stableNodePath(process.execPath), serverJs: SERVER_JS,
-    holderBin: process.env.TTYM_HOLDER_BIN || HOLDER_BIN,
+    holderBin: holderBinForServer(),
     port, bind, logPath: LOG_FILE, homeDir: HOME_DIR,
     path: loginShellPath() ?? '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
     home: homedir(),
@@ -213,7 +213,7 @@ async function installSystemd(port: number, bind: string | null) {
   mkdirSync(unitDir, { recursive: true });
   writeFileSync(unitPath, renderSystemdUnit({
     nodePath: process.execPath, serverJs: SERVER_JS,
-    holderBin: process.env.TTYM_HOLDER_BIN || HOLDER_BIN,
+    holderBin: holderBinForServer(),
     port, bind, homeDir: HOME_DIR,
   }));
   execFileSync('systemctl', ['--user', 'daemon-reload']);

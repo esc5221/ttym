@@ -8,16 +8,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION=$(node -e "console.log(require('$ROOT/package.json').version)")
 PLATFORM="${TTYM_NPM_PLATFORM:-$(node -e 'console.log(process.platform + "-" + process.arch)')}"
 STAGE="$ROOT/npm-staging"
+DIST="${TTYM_DIST:-$ROOT/dist}"
 # CI builds each holder on its own runner and hands the binary in here.
-HOLDER="${TTYM_NPM_HOLDER:-$ROOT/dist/ttym-holder}"
+HOLDER="${TTYM_NPM_HOLDER:-$DIST/ttym-holder}"
 
-[ -f "$ROOT/dist/ttym" ] || { echo "dist/ 없음 — scripts/build.sh 먼저"; exit 1; }
+[ -f "$DIST/ttym" ] || { echo "dist/ 없음 — scripts/build.sh 먼저"; exit 1; }
 # Only this run's two packages — CI calls this once per platform into the same stage.
 rm -rf "$STAGE/ttym" "$STAGE/holder-$PLATFORM"
 mkdir -p "$STAGE/ttym/dist" "$STAGE/holder-$PLATFORM"
 
 # 메인 패키지 (holder 제외 — 플랫폼 패키지가 담당)
-cp "$ROOT/dist/ttym" "$ROOT/dist/ttym-server.js" "$ROOT/dist/package.json" "$STAGE/ttym/dist/"
+cp "$DIST/ttym" "$DIST/ttym-server.js" "$DIST/package.json" "$STAGE/ttym/dist/"
 cp "$ROOT/README.md" "$STAGE/ttym/"
 # The paths below mirror the repo on purpose: the server reads the web app
 # from dist/../packages/web/dist and `ttym agent install` points hooks at

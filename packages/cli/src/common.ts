@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync } from 'no
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { createRequire as moduleRequire } from 'node:module';
 import process from 'node:process';
 import { WebSocket as WsWebSocket } from 'ws';
 import { request as apiRequest, ApiError } from '@ttym/api';
@@ -20,6 +21,21 @@ export const PID_FILE = resolve(HOME_DIR, 'ttym.pid');
 export const LOG_FILE = resolve(HOME_DIR, 'ttym.log');
 export const SERVER_JS = resolve(__dirname, 'ttym-server.js');
 export const HOLDER_BIN = resolve(__dirname, 'ttym-holder');
+
+/**
+ * The holder the server should run, in session.ts's order: an explicit
+ * TTYM_HOLDER_BIN, the binary next to this CLI (source build, release
+ * tarball), the npm platform package. null lets the server resolve it — an
+ * npm install has no dist/ttym-holder, and pinning that path made every new
+ * session fail (caught by the release smoke on a clean Linux runner).
+ */
+export function holderBinForServer(): string | null {
+  if (process.env.TTYM_HOLDER_BIN) return process.env.TTYM_HOLDER_BIN;
+  if (existsSync(HOLDER_BIN)) return HOLDER_BIN;
+  try {
+    return moduleRequire(import.meta.url).resolve(`@ttym/holder-${process.platform}-${process.arch}/ttym-holder`);
+  } catch { return null; }
+}
 export const HTTP_TIMEOUT_MS = parseInt(process.env.TTYM_HTTP_TIMEOUT_MS || '5000', 10);
 export const ATTACH_RETRY_MS = parseInt(process.env.TTYM_ATTACH_RETRY_MS || '1000', 10);
 export const DETACH_KEY = '\u001d';

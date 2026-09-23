@@ -6,13 +6,15 @@ import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import { readServiceMarker, serviceRestart } from './service.js';
-import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
+import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY, holderBinForServer } from './common.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 import {} from './common.js';
 // ───── Commands ─────
 
 /** 서버가 없으면 조용히 띄운다 — 진입 동사(attach/new/split)의 게으른 자동 기동.
  *  조회 동사들의 exit 4 계약은 건드리지 않는다: 이 함수는 진입 경로에서만 불린다. */
+const holderEnv = () => { const bin = holderBinForServer(); return bin ? { TTYM_HOLDER_BIN: bin } : {}; };
+
 export async function ensureServerRunning(port) {
   try {
     const res = await fetch(`${apiBase(port)}/api/version`, { signal: AbortSignal.timeout(1500) });
@@ -27,7 +29,7 @@ export async function ensureServerRunning(port) {
   const child = spawn('node', [SERVER_JS], {
     detached: true,
     stdio: ['ignore', logFd, logFd],
-    env: { ...process.env, PORT: String(port), TTYM_HOLDER_BIN: process.env.TTYM_HOLDER_BIN || HOLDER_BIN },
+    env: { ...process.env, PORT: String(port), ...holderEnv() },
   });
   child.unref();
   writeFileSync(PID_FILE, String(child.pid));
@@ -80,7 +82,7 @@ export function cmdStart() {
     // an explicit TTYM_HOLDER_BIN win — session.ts already honours it, and
     // overwriting it here silently ignored anyone pinning a specific holder
     // (a dev server, or a cross-version check against the installed one).
-    TTYM_HOLDER_BIN: process.env.TTYM_HOLDER_BIN || HOLDER_BIN,
+    ...holderEnv(),
   };
 
   const child = spawn('node', [SERVER_JS], {
