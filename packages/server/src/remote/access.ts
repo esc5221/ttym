@@ -29,8 +29,28 @@ export interface Caller {
   remote: boolean;
   /** Host header hostname, lowercased, brackets and port stripped. */
   hostname: string | null;
-  /** Why it counted as remote — logged on refusals. */
-  reason: 'local' | 'peer' | 'host' | 'proxy';
+  /** Why it counted as remote (or, for `local-proxy`, as local) — logged on refusals. */
+  reason: 'local' | 'local-proxy' | 'peer' | 'host' | 'proxy';
+}
+
+/** Headers only an internet-facing proxy adds: never "this machine", whatever the addresses say. */
+const EDGE_HEADERS = ['cf-connecting-ip', 'cf-ray', 'tailscale-user-login'];
+
+/**
+ * Client addresses a proxy reported: every X-Forwarded-For hop, X-Real-IP,
+ * and Forwarded for=. nginx's $proxy_add_x_forwarded_for appends the real
+ * peer to whatever the client sent, so a spoofed "127.0.0.1" from the LAN
+ * still leaves the LAN address at the end of the list.
+ */
+function forwardedClients(req: IncomingMessage): string[] {
+  const out: string[] = [];
+  const xff = req.headers['x-forwarded-for'];
+  for (const part of (Array.isArray(xff) ? xff.join(',') : xff ?? '').split(',')) if (part.trim()) out.push(part.trim());
+  const real = req.headers['x-real-ip'];
+  if (typeof real === 'string' && real.trim()) out.push(real.trim());
+  const fwd = req.headers.forwarded;
+  if (typeof fwd === 'string') for (const m of fwd.matchAll(/for="?\[?([^\]";,]+)/gi)) out.push(m[1]!);
+  return out;
 }
 
 export function hostnameOf(hostHeader: string | undefined): string | null {
@@ -53,19 +73,35 @@ export function isLoopbackAddress(addr: string | undefined): boolean {
 
 export const isLoopbackHostname = (h: string | null) => !!h && LOOPBACK_HOSTNAMES.has(h);
 
-export function classify(req: IncomingMessage): Caller {
+/**
+ * `allowHosts` enables one more local case: a reverse proxy on this machine
+ * (nginx serving ttym.lullu.lan) relaying a browser that is also on this
+ * machine. It counts as local only when the Host is allow-listed (so DNS
+ * rebinding still cannot use it), no internet-edge header is present, and
+ * every client address the proxy reported is loopback. A proxy that reports
+ * nothing stays remote — there is no way to tell.
+ */
+export function classify(req: IncomingMessage, allowHosts: ReadonlySet<string> = new Set()): Caller {
   const peerLoopback = isLoopbackAddress(req.socket.remoteAddress);
   const hostname = hostnameOf(req.headers.host);
   const base = { hostname };
   if (!peerLoopback) return { ...base, remote: true, reason: 'peer' };
-  if (!isLoopbackHostname(hostname)) return { ...base, remote: true, reason: 'host' };
-  if (PROXY_HEADERS.some((h) => req.headers[h] !== undefined)) return { ...base, remote: true, reason: 'proxy' };
-  return { ...base, remote: false, reason: 'local' };
+  const proxied = PROXY_HEADERS.some((h) => req.headers[h] !== undefined);
+  if (isLoopbackHostname(hostname)) {
+    return proxied ? { ...base, remote: true, reason: 'proxy' } : { ...base, remote: false, reason: 'local' };
+  }
+  if (hostname && allowHosts.has(hostname) && !EDGE_HEADERS.some((h) => req.headers[h] !== undefined)) {
+    const clients = forwardedClients(req);
+    if (clients.length && clients.every((a) => isLoopbackAddress(a) || isLoopbackHostname(a))) {
+      return { ...base, remote: false, reason: 'local-proxy' };
+    }
+  }
+  return { ...base, remote: true, reason: 'host' };
 }
 
-/** Local callers always name a loopback host (by definition); remote ones need an allow-listed name. */
+/** Local callers name a loopback host (or, via a local proxy, an allow-listed one); remote ones need an allow-listed name. */
 export function hostAllowed(caller: Caller, allowHosts: ReadonlySet<string>): boolean {
-  if (!caller.remote) return true;
+  if (caller.reason === 'local') return true;
   return !!caller.hostname && allowHosts.has(caller.hostname);
 }
 

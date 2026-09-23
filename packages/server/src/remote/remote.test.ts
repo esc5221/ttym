@@ -53,6 +53,18 @@ describe('access rules', () => {
     expect(classify(fakeReq({ host: 'localhost' }, '192.168.0.9')).reason).toBe('peer');
   });
 
+  it('a local reverse proxy relaying a browser on this machine is local, only for an allowed host', () => {
+    const allow = new Set(['ttym.lullu.lan']);
+    const nginx = (xff: string, extra: Record<string, string> = {}) =>
+      classify(fakeReq({ host: 'ttym.lullu.lan', 'x-forwarded-for': xff, 'x-real-ip': xff.split(',').pop()!.trim(), ...extra }), allow);
+    expect(nginx('127.0.0.1').reason).toBe('local-proxy');
+    expect(nginx('192.168.0.9').remote).toBe(true);                 // a phone on the Wi-Fi
+    expect(nginx('127.0.0.1, 192.168.0.9').remote).toBe(true);      // spoofed XFF, nginx appended the real peer
+    expect(nginx('127.0.0.1', { 'cf-connecting-ip': '1.2.3.4' }).remote).toBe(true);
+    expect(classify(fakeReq({ host: 'ttym.lullu.lan' }), allow).remote).toBe(true); // proxy said nothing
+    expect(classify(fakeReq({ host: 'evil.example', 'x-forwarded-for': '127.0.0.1' }), allow).remote).toBe(true); // not allowed: rebinding stays out
+  });
+
   it('accepts only same-origin pages', () => {
     const ok = (h: Record<string, string>) => originAllowed(fakeReq(h));
     expect(ok({ host: '127.0.0.1:7690' })).toBe(true); // CLI: no Origin

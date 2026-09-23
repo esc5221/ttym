@@ -61,7 +61,7 @@ function wantsHtml(req: IncomingMessage): boolean {
  * route); false when the normal handlers should take it.
  */
 export function gate(req: IncomingMessage, res: ServerResponse, ctx: RemoteContext): boolean {
-  const caller = classify(req);
+  const caller = classify(req, ctx.store.allowHosts);
   const path = (req.url || '/').split('?')[0]!;
   const allow = ctx.store.allowHosts;
 
@@ -107,7 +107,7 @@ export function gate(req: IncomingMessage, res: ServerResponse, ctx: RemoteConte
 
 /** Same decision for a WebSocket upgrade. Returns null to accept, or [code, message]. */
 export function gateUpgrade(req: IncomingMessage, ctx: RemoteContext): [number, string] | null {
-  const caller = classify(req);
+  const caller = classify(req, ctx.store.allowHosts);
   const allow = ctx.store.allowHosts;
   if (!hostAllowed(caller, allow)) return [403, 'host not allowed'];
   // Browsers always send Origin on a WebSocket handshake; a cross-site page is refused here.
