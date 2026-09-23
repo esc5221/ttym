@@ -2,7 +2,7 @@
   <a href="https://ttym.pages.dev"><img src="docs/assets/hero.png" alt="ttym — Know which agent needs you. Get back into its terminal from anywhere. A web terminal multiplexer for coding agents." width="880"></a>
 </p>
 
-<p align="center"><a href="https://ttym.pages.dev"><b>Website</b></a> · <a href="#install">Install</a> · <a href="#quick-start">Quick start</a> · <a href="https://ttym.pages.dev/#film">Film (69 s)</a> · <a href="docs/remote-access.md">Remote access</a> · <a href="#architecture">Architecture</a> · <a href="README.ko.md">한국어</a></p>
+<p align="center"><a href="https://ttym.pages.dev"><b>Website</b></a> · <a href="#install">Install</a> · <a href="#quick-start">Quick start</a> · <a href="https://ttym.pages.dev/#film">Film (69 s)</a> · <a href="docs/remote-access.md">Remote access</a> · <a href="#cli-reference">CLI</a> · <a href="#architecture">Architecture</a> · <a href="README.ko.md">한국어</a></p>
 
 <p align="center">
   <a href="https://ttym.pages.dev/#film"><img src="docs/assets/film.jpg" alt="Watch the 69-second film: one real Claude Code session on ttym" width="880"></a>
@@ -169,10 +169,7 @@ small Rust process, so a server restart or upgrade does not close it. How the
 pieces fit, with diagrams: [ttym.pages.dev/internals](https://ttym.pages.dev/internals).
 Package layers and operations: [docs/architecture.md](docs/architecture.md).
 
-## Reference
-
-<details>
-<summary><b>CLI reference</b> — addresses, exit codes, every verb and flag</summary>
+## CLI reference
 
 ### Addresses
 
@@ -200,6 +197,55 @@ Exit codes are a contract, verified by the contract suite:
 5  API version mismatch
 ```
 
+### attach — interactive TUI
+
+`ttym attach` works like `tmux attach`: your terminal becomes the session, a
+prefix key (`C-b`) starts commands, and detaching leaves everything running.
+
+```
+tmux                          ttym
+tmux new -s work              ttym work
+tmux attach -t work           ttym work          (or ttym attach work)
+C-b d   detach                C-b d
+C-b s   choose a session      C-b s              session picker
+C-b n/p next/previous window  C-b n/p            next/previous member of the workspace
+C-b ?   list keys             C-b ?
+tmux split-window             ttym split :main ai -- claude
+set -g prefix C-a             ttym attach work --prefix C-a
+```
+
+What differs:
+
+- **One member at a time.** attach shows one session of the workspace in your
+  terminal and `C-b n/p` moves between them. Splits are laid out side by side
+  in the browser.
+- **Several views of one session.** The CLI, the browser and a phone can be
+  attached to the same session at once; `--readonly` watches without typing.
+- **The server can restart.** Each session's PTY lives in its own holder
+  process, so stopping, restarting or upgrading the server does not end it.
+  In tmux, the server holds the sessions.
+
+```bash
+ttym <workspace>                         # shorthand for attach — the everyday entry
+ttym attach <session-id>
+ttym attach <workspace>                  # sole member, or the first (C-b n/p to cycle)
+ttym attach <workspace>/<member>         # creation asks [Y/n]; --new skips the ask (scripts)
+ttym attach work/ai --new --cmd claude --dangerously-skip-permissions
+ttym attach <target> --readonly          # observe only
+ttym attach <target> --prefix C-a        # change the prefix key (default C-b)
+```
+
+Key bindings (prefix = `C-b` by default):
+
+```
+C-b d         detach (session keeps running)
+C-b s         session picker
+C-b n / p     next / previous workspace member
+C-b ?         help
+C-b C-b       send a literal prefix to the PTY
+C-]           alternate detach
+```
+
 ### Sessions
 
 ```bash
@@ -208,7 +254,7 @@ ttym split <ws:name|:name> <new> [-- cmd]  # split next to the target
 ttym send <ws:name|:name|#id> -- "data"    # raw bytes to the PTY
 ttym screen <ws:name|:name|#id> [--json]   # read the current screen
 ttym await <ws:name|:name|#id> [--timeout ms] -- "prompt"
-                                           # agent turn or shell command — see routing above
+                                           # agent turn or shell command (shell integration)
 ttym commands <addr> [--limit N]           # command history (shell integration)
 ttym output <addr> [--cmd N|last] [--raw]  # one command's output, sliced from the ring
 ttym resize <ws:name|:name|#id> <cols> <rows>
@@ -240,29 +286,6 @@ marker, not on guesswork. The generated launchd plist throttles respawns
 enters **safe mode**: session recovery is skipped (holders untouched) so a
 poison session cannot crash-loop the supervisor; `/api/version` reports
 `safeMode: true`.
-
-### attach — interactive TUI
-
-```bash
-ttym <workspace>                         # shorthand for attach — the everyday entry
-ttym attach <session-id>
-ttym attach <workspace>                  # sole member, or the first (C-b n/p to cycle)
-ttym attach <workspace>/<member>         # creation asks [Y/n]; --new skips the ask (scripts)
-ttym attach work/ai --new --cmd claude --dangerously-skip-permissions
-ttym attach <target> --readonly          # observe only
-ttym attach <target> --prefix C-a        # change the prefix key (default C-b)
-```
-
-Key bindings (prefix = `C-b` by default):
-
-```
-C-b d         detach (session keeps running)
-C-b s         session picker
-C-b n / p     next / previous workspace member
-C-b ?         help
-C-b C-b       send a literal prefix to the PTY
-C-]           alternate detach
-```
 
 ### Workspace control plane
 
@@ -310,7 +333,7 @@ ttym agent info [session-id]    # the claude/codex session linked to a ttym sess
 ttym agent resume [agent]       # claude --resume / codex resume into that session
 ```
 
-</details>
+## Reference
 
 <details>
 <summary><b>HTTP API</b> — every route, JSON in and out</summary>

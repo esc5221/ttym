@@ -2,7 +2,7 @@
   <a href="https://ttym.pages.dev"><img src="docs/assets/hero-ko.png" alt="ttym — 어떤 에이전트가 나를 기다리는지 알고, 어디서든 그 터미널로 돌아간다. 코딩 에이전트를 위한 웹 터미널 멀티플렉서." width="880"></a>
 </p>
 
-<p align="center"><a href="https://ttym.pages.dev"><b>웹사이트</b></a> · <a href="#설치">설치</a> · <a href="#빠른-시작">빠른 시작</a> · <a href="https://ttym.pages.dev/#film">영상 (69초)</a> · <a href="docs/remote-access.md">원격 접속</a> · <a href="#아키텍처">아키텍처</a> · <a href="README.md">English</a></p>
+<p align="center"><a href="https://ttym.pages.dev"><b>웹사이트</b></a> · <a href="#설치">설치</a> · <a href="#빠른-시작">빠른 시작</a> · <a href="https://ttym.pages.dev/#film">영상 (69초)</a> · <a href="docs/remote-access.md">원격 접속</a> · <a href="#cli-레퍼런스">CLI</a> · <a href="#아키텍처">아키텍처</a> · <a href="README.md">English</a></p>
 
 <p align="center">
   <a href="https://ttym.pages.dev/#film"><img src="docs/assets/film.jpg" alt="69초 영상 보기: ttym 위의 실제 Claude Code 세션" width="880"></a>
@@ -165,10 +165,7 @@ SSH와 세부 동작은 [docs/remote-access.md](docs/remote-access.md). 에이�
 구성과 도식: [ttym.pages.dev/internals](https://ttym.pages.dev/internals).
 패키지 계층과 운영: [docs/architecture.md](docs/architecture.md).
 
-## 레퍼런스
-
-<details>
-<summary><b>CLI 레퍼런스</b> — 주소 체계, exit code, 모든 동사와 플래그</summary>
+## CLI 레퍼런스
 
 ### 주소 체계
 
@@ -193,6 +190,54 @@ exit code 는 계약이고, contract 스위트가 검증한다:
 5  API 버전 불일치
 ```
 
+### attach — 인터랙티브 TUI
+
+`ttym attach`는 `tmux attach`처럼 동작한다. 지금 터미널이 그 세션이 되고, prefix 키
+(`C-b`)로 명령을 시작하며, detach해도 전부 계속 돈다.
+
+```
+tmux                          ttym
+tmux new -s work              ttym work
+tmux attach -t work           ttym work          (또는 ttym attach work)
+C-b d   detach                C-b d
+C-b s   세션 고르기            C-b s              세션 피커
+C-b n/p 다음/이전 창           C-b n/p            workspace의 다음/이전 멤버
+C-b ?   키 목록               C-b ?
+tmux split-window             ttym split :main ai -- claude
+set -g prefix C-a             ttym attach work --prefix C-a
+```
+
+다른 점:
+
+- **한 번에 멤버 하나.** attach는 workspace의 세션 하나를 터미널에 보여 주고,
+  `C-b n/p`로 옮겨 다닌다. 분할은 브라우저에서 나란히 배치된다.
+- **한 세션을 여러 곳에서.** CLI, 브라우저, 폰이 같은 세션에 동시에 붙을 수 있다.
+  `--readonly`는 입력 없이 보기만 한다.
+- **서버가 재시작해도 된다.** 세션마다 PTY가 별도 holder 프로세스에 살기 때문에
+  서버를 멈추거나 재시작, 업그레이드해도 세션이 끝나지 않는다. tmux는 서버가
+  세션을 들고 있다.
+
+```bash
+ttym <workspace>                         # attach 의 축약 — 일상의 진입
+ttym attach <session-id>
+ttym attach <workspace>                  # 멤버 하나면 그것, 여럿이면 첫 멤버 (C-b n/p 순회)
+ttym attach <workspace>/<member>         # 없으면 [Y/n] 확인 후 생성; --new 는 확인 생략(스크립트용)
+ttym attach work/ai --new --cmd claude --dangerously-skip-permissions
+ttym attach <target> --readonly          # 관찰만
+ttym attach <target> --prefix C-a        # prefix 키 변경 (기본 C-b)
+```
+
+키 바인딩 (prefix = 기본 `C-b`):
+
+```
+C-b d         detach (세션은 계속 돈다)
+C-b s         세션 피커
+C-b n / p     다음 / 이전 workspace 멤버
+C-b ?         도움말
+C-b C-b       PTY 에 prefix 문자 그대로 전송
+C-]           대체 detach
+```
+
 ### 세션
 
 ```bash
@@ -201,7 +246,7 @@ ttym split <ws:name|:name> <new> [-- cmd]  # 대상 옆에 분할
 ttym send <ws:name|:name|#id> -- "data"    # PTY 에 raw byte
 ttym screen <ws:name|:name|#id> [--json]   # 현재 화면 읽기
 ttym await <ws:name|:name|#id> [--timeout ms] -- "prompt"
-                                           # 에이전트 턴 또는 셸 명령 — 라우팅은 위 참조
+                                           # 에이전트 턴 또는 셸 명령 (셸 통합)
 ttym commands <addr> [--limit N]           # 명령 이력 (셸 통합)
 ttym output <addr> [--cmd N|last] [--raw]  # 그 명령의 출력만 ring 에서 슬라이스
 ttym resize <ws:name|:name|#id> <cols> <rows>
@@ -232,29 +277,6 @@ ttym start [--port] [--bind]  # 일회성 수동 기동 (개발용; 감독 중�
 직전 3회 부팅이 전부 수초 내 사망이면 다음 부팅은 **safe mode** — 세션
 복구를 건너뛰어(holder 는 무접촉) poison 세션이 감독자를 크래시 루프에
 빠뜨리지 못한다. `/api/version` 이 `safeMode: true` 로 보고한다.
-
-### attach — 인터랙티브 TUI
-
-```bash
-ttym <workspace>                         # attach 의 축약 — 일상의 진입
-ttym attach <session-id>
-ttym attach <workspace>                  # 멤버 하나면 그것, 여럿이면 첫 멤버 (C-b n/p 순회)
-ttym attach <workspace>/<member>         # 없으면 [Y/n] 확인 후 생성; --new 는 확인 생략(스크립트용)
-ttym attach work/ai --new --cmd claude --dangerously-skip-permissions
-ttym attach <target> --readonly          # 관찰만
-ttym attach <target> --prefix C-a        # prefix 키 변경 (기본 C-b)
-```
-
-키 바인딩 (prefix = 기본 `C-b`):
-
-```
-C-b d         detach (세션은 계속 돈다)
-C-b s         세션 피커
-C-b n / p     다음 / 이전 workspace 멤버
-C-b ?         도움말
-C-b C-b       PTY 에 prefix 문자 그대로 전송
-C-]           대체 detach
-```
 
 ### workspace 컨트롤 플레인
 
@@ -298,7 +320,7 @@ ttym agent info [session-id]    # ttym 세션에 연결된 claude/codex 세션
 ttym agent resume [agent]       # 그 세션으로 claude --resume / codex resume
 ```
 
-</details>
+## 레퍼런스
 
 <details>
 <summary><b>HTTP API</b> — 모든 라우트, 입출력은 JSON</summary>
