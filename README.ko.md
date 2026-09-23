@@ -26,29 +26,13 @@
 curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh
 ```
 
-Node 20 이상이 필요하다. 스크립트가 짧으니 먼저 [읽어 보기](install.sh)를 권한다.
+Node 20 이상이 필요하다.
 
-<details>
-<summary>스크립트가 하는 일</summary>
-
-이 기기에 맞는 빌드를 [GitHub Releases](https://github.com/esc5221/ttym/releases)에서
-받아 sha256을 확인하고, `~/.local/share/ttym`에 설치한 뒤 `~/.local/bin`에 `ttym`
-링크를 만든다. 특정 릴리스를 설치하려면 `TTYM_VERSION=v0.3.0`.
-
-</details>
-
-그다음 기기마다 한 번:
+그다음:
 
 ```bash
 ttym service install        # 로그인하면 뜨고, 죽으면 다시 뜬다
 ttym agent install claude   # Claude Code 훅 (codex도)
-```
-
-나중에:
-
-```bash
-ttym upgrade                # 최신 릴리스로. 세션은 그대로 돈다
-ttym upgrade --rollback     # 직전 설치로 되돌리기
 ```
 
 <details>
@@ -61,20 +45,6 @@ git clone https://github.com/esc5221/ttym && cd ttym
 pnpm install
 ./scripts/build.sh
 ln -s "$PWD/dist/ttym" ~/.local/bin/ttym
-```
-
-체크아웃에서는 `ttym upgrade`가 다시 빌드해서 rename으로 교체한다.
-
-</details>
-
-<details>
-<summary>제거</summary>
-
-```bash
-ttym service uninstall
-ttym stop
-rm -rf ~/.local/share/ttym ~/.local/share/ttym.prev ~/.local/bin/ttym
-rm -rf ~/.ttym              # 세션, 설정, 원격 로그인
 ```
 
 </details>
@@ -115,14 +85,9 @@ Rust 프로세스다. 서버는 세션마다 headless xterm을 돌려서 화면�
 | | [`@ttym/shared`](packages/shared) | 양쪽이 같이 지키는 규칙 (레이아웃 트리) |
 | Base | [`holder`](holder) | Rust, 터미널마다 하나, PTY를 소유 |
 
-복구, seq 프로토콜, `await`, 절전, 원격 관문을 도식과 함께:
-[ttym.pages.dev/internals](https://ttym.pages.dev/internals). 계층과 운영:
-[docs/architecture.md](docs/architecture.md).
+더 보기: [ttym.pages.dev/internals](https://ttym.pages.dev/internals)
 
 ## 하는 일
-
-각 항목은 영상의 한 장면이고, 실제 화면은
-[ttym.pages.dev](https://ttym.pages.dev)에서 볼 수 있다.
 
 - **누가 나를 기다리는지.** 작업 지도가 모든 세션을 지금 하는 일과 기다리는 것
   한 줄씩으로 보여 준다. `ttym map refresh`
@@ -144,9 +109,7 @@ ttym workspace add --current --name helper --role agent --cmd claude
 ttym await :helper --json -- "이 스택트레이스 원인 뭐야?"
 ```
 
-`await`은 프롬프트를 보내고, 에이전트의 턴이 끝나면 그 턴의 답을 돌려준다. 여러
-에이전트를 동시에 기다릴 수 있다.
-[턴이 끝난 걸 어떻게 아는지](https://ttym.pages.dev/internals#await).
+`await`은 프롬프트를 보내고, 에이전트의 턴이 끝나면 그 턴의 답을 돌려준다.
 
 ## 셸 통합
 
@@ -164,25 +127,11 @@ ttym output :build --cmd 3        # 명령 하나의 출력
 ttym await :build -- "make test"  # 실행하고 기다려서 exit code + 출력
 ```
 
-웹 터미널에서는 ⌘↑ / ⌘↓로 명령 사이를 이동한다.
-
-## 작업 지도
-
-설정 → main view → **map**에서 모든 workspace와 세션을 트리로, 각각 한 줄 요약과
-함께 본다.
-
-```bash
-ttym map refresh    # 출력이 바뀐 세션만 요약
-```
-
-기본은 `claude -p`이고, OpenAI 호환 엔드포인트도 쓸 수 있다([설정](#레퍼런스)).
-주기 요약은 화면 내용을 모델로 보내기 때문에 기본으로 꺼져 있다.
-
 ## 웹 터미널
 
 - **⌘F**로 스크롤백을 검색한다.
 - **⌘↑ / ⌘↓**로 명령 사이를 이동한다 (셸 통합 필요).
-- **URL**을 누를 수 있고, 세션 안의 프로그램이 클립보드를 쓸 수 있다 (OSC 52).
+- **URL**을 누를 수 있고, 세션 안의 프로그램이 클립보드를 쓸 수 있다.
 - 파일을 pane에 **끌어다 놓으면** 경로가 입력된다.
 
 ## 다른 기기에서
@@ -192,8 +141,7 @@ ttym remote tailscale
 ```
 
 이 기기 밖에서 오는 요청은 허용된 호스트와 로그인이 필요하다. Cloudflare Tunnel,
-SSH와 세부 동작은 [docs/remote-access.md](docs/remote-access.md). 에이전트는
-`ttym remote doctor --json`부터 실행한다.
+SSH와 세부 동작은 [docs/remote-access.md](docs/remote-access.md).
 
 ## CLI 레퍼런스
 
@@ -300,6 +248,7 @@ ttym restart               # 감독 중이면 launchd/systemd 에 위임, 아니
 ttym status                # 서버 + 세션 목록
 ttym log [-f]              # ~/.ttym/ttym.log
 ttym start [--port] [--bind]  # 일회성 수동 기동 (개발용; 감독 중엔 거부)
+ttym upgrade [--rollback]     # 최신 릴리스로 교체, 세션은 그대로 돈다
 ```
 
 감독 사실은 `~/.ttym/service.json` 마커에 산다 — restart 는 추측이 아니라
@@ -351,6 +300,18 @@ ttym agent resume [agent]       # 그 세션으로 claude --resume / codex resum
 ```
 
 ## 레퍼런스
+
+<details>
+<summary>제거</summary>
+
+```bash
+ttym service uninstall
+ttym stop
+rm -rf ~/.local/share/ttym ~/.local/share/ttym.prev ~/.local/bin/ttym
+rm -rf ~/.ttym              # 세션, 설정, 원격 로그인
+```
+
+</details>
 
 <details>
 <summary><b>HTTP API</b> — 모든 라우트, 입출력은 JSON</summary>
@@ -433,7 +394,7 @@ main-view    = preview | map        메인 화면: 세션 미리보기 또는 �
 font-size    = 14                   터미널 폰트 크기 (8–32)
 local-echo   = true | false         낙관적 local echo (실험적)
 zoom         = 1.0                  데스크톱 창 zoom (앱이 쓴다)
-map-model    = haiku                요약기 모델 (작업 지도 참조)
+map-model    = haiku                ttym map refresh의 요약 모델
 map-base-url =                      있으면 OpenAI 호환 HTTP; 없으면 claude CLI
 map-interval =                      서버 내장 주기 (10m, 1h) — 비우면 off (기본)
 ```

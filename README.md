@@ -26,30 +26,13 @@ working, and you're cycling through terminal tabs to find which.
 curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh
 ```
 
-Needs Node 20 or newer. The script is short; [read it](install.sh) first.
+Needs Node 20 or newer.
 
-<details>
-<summary>What the script does</summary>
-
-It downloads the build for your machine from
-[GitHub Releases](https://github.com/esc5221/ttym/releases), checks its sha256,
-installs it to `~/.local/share/ttym` and links `ttym` into `~/.local/bin`.
-`TTYM_VERSION=v0.3.0` installs a specific release.
-
-</details>
-
-Then, once per machine:
+Then:
 
 ```bash
 ttym service install        # start at login, restart after a crash
 ttym agent install claude   # hooks for Claude Code (codex too)
-```
-
-Later:
-
-```bash
-ttym upgrade                # latest release; sessions keep running
-ttym upgrade --rollback     # back to the previous install
 ```
 
 <details>
@@ -62,20 +45,6 @@ git clone https://github.com/esc5221/ttym && cd ttym
 pnpm install
 ./scripts/build.sh
 ln -s "$PWD/dist/ttym" ~/.local/bin/ttym
-```
-
-In a checkout, `ttym upgrade` rebuilds and swaps the build by rename.
-
-</details>
-
-<details>
-<summary>Uninstall</summary>
-
-```bash
-ttym service uninstall
-ttym stop
-rm -rf ~/.local/share/ttym ~/.local/share/ttym.prev ~/.local/bin/ttym
-rm -rf ~/.ttym              # sessions, config, remote logins
 ```
 
 </details>
@@ -117,14 +86,9 @@ The packages, lowest layer last:
 | | [`@ttym/shared`](packages/shared) | rules both ends share (the layout tree) |
 | Base | [`holder`](holder) | Rust, one per terminal, owns the PTY |
 
-Recovery, the seq protocol, `await`, sleep and the remote gate, with diagrams:
-[ttym.pages.dev/internals](https://ttym.pages.dev/internals). Layers and
-operations: [docs/architecture.md](docs/architecture.md).
+More: [ttym.pages.dev/internals](https://ttym.pages.dev/internals)
 
 ## What it does
-
-Each of these is a chapter of the film, with the real screen, on
-[ttym.pages.dev](https://ttym.pages.dev).
 
 - **Which agent needs you.** The work map lists every session with a one-line
   summary of what it is doing and what it waits on. `ttym map refresh`
@@ -148,8 +112,7 @@ ttym await :helper --json -- "Why does this stack trace happen?"
 ```
 
 `await` sends the prompt and returns that turn's answer when the agent's turn
-ends. Several agents can be awaited at once.
-[How it knows the turn ended](https://ttym.pages.dev/internals#await).
+ends.
 
 ## Shell integration
 
@@ -167,26 +130,11 @@ ttym output :build --cmd 3        # the output of one command
 ttym await :build -- "make test"  # run, wait, get exit code + output
 ```
 
-In the web terminal, ⌘↑ / ⌘↓ jump between commands.
-
-## The work map
-
-Settings → main view → **map** shows every workspace and session as a tree,
-each with a one-line summary.
-
-```bash
-ttym map refresh    # summarize sessions whose output changed
-```
-
-It uses `claude -p` by default, or any OpenAI-compatible endpoint
-([config](#reference)). Periodic refresh is off by default, because it sends
-screen text to the model.
-
 ## The web terminal
 
 - **⌘F** searches the scrollback.
 - **⌘↑ / ⌘↓** jump between commands (with shell integration).
-- **URLs** are clickable; programs in the session can use your clipboard (OSC 52).
+- **URLs** are clickable; programs in the session can use your clipboard.
 - **Drop a file** on a pane to insert its path.
 
 ## From another device
@@ -197,8 +145,7 @@ ttym remote tailscale
 
 Off this machine, every request needs an allowed host and a login.
 Cloudflare Tunnel, SSH and the details are in
-[docs/remote-access.md](docs/remote-access.md). Agents can start with
-`ttym remote doctor --json`.
+[docs/remote-access.md](docs/remote-access.md).
 
 ## CLI reference
 
@@ -309,6 +256,7 @@ ttym restart               # supervised → delegated to launchd/systemd; else s
 ttym status                # server + session list
 ttym log [-f]              # ~/.ttym/ttym.log
 ttym start [--port] [--bind]  # one-shot manual start (dev; refused when supervised)
+ttym upgrade [--rollback]     # swap in the latest release; sessions keep running
 ```
 
 Supervision facts live in `~/.ttym/service.json` — restart delegates on that
@@ -365,6 +313,18 @@ ttym agent resume [agent]       # claude --resume / codex resume into that sessi
 ```
 
 ## Reference
+
+<details>
+<summary>Uninstall</summary>
+
+```bash
+ttym service uninstall
+ttym stop
+rm -rf ~/.local/share/ttym ~/.local/share/ttym.prev ~/.local/bin/ttym
+rm -rf ~/.ttym              # sessions, config, remote logins
+```
+
+</details>
 
 <details>
 <summary><b>HTTP API</b> — every route, JSON in and out</summary>
@@ -459,7 +419,7 @@ main-view    = preview | map        main page: session previews or the work map
 font-size    = 14                   terminal font size (8–32)
 local-echo   = true | false         optimistic local echo (experimental)
 zoom         = 1.0                  desktop window zoom (written by the app)
-map-model    = haiku                summarizer model (see the work map)
+map-model    = haiku                summarizer model for ttym map refresh
 map-base-url =                      set → OpenAI-compatible HTTP; unset → claude CLI
 map-interval =                      server-side cadence (10m, 1h) — empty = off (default)
 ```
