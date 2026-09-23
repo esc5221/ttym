@@ -1,6 +1,15 @@
 <p align="center">
-  <a href="https://ttym.pages.dev"><img src="docs/assets/hero.png" alt="ttym — Know which agent needs you. Get back into its terminal from anywhere. A web terminal multiplexer for coding agents." width="880"></a>
+  <a href="https://ttym.pages.dev">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
+      <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="180">
+    </picture>
+  </a>
 </p>
+
+<h3 align="center">Know which agent needs you.<br>Get back into its terminal from anywhere.</h3>
+
+<p align="center">A web terminal multiplexer for coding agents</p>
 
 <p align="center"><a href="https://ttym.pages.dev"><b>Website</b></a> · <a href="#install">Install</a> · <a href="#quick-start">Quick start</a> · <a href="https://ttym.pages.dev/#film">Film (69 s)</a> · <a href="docs/remote-access.md">Remote access</a> · <a href="#cli-reference">CLI</a> · <a href="#architecture">Architecture</a> · <a href="README.ko.md">한국어</a></p>
 

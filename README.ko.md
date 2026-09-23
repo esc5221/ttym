@@ -1,6 +1,15 @@
 <p align="center">
-  <a href="https://ttym.pages.dev"><img src="docs/assets/hero-ko.png" alt="ttym — 어떤 에이전트가 나를 기다리는지 알고, 어디서든 그 터미널로 돌아간다. 코딩 에이전트를 위한 웹 터미널 멀티플렉서." width="880"></a>
+  <a href="https://ttym.pages.dev">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
+      <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="180">
+    </picture>
+  </a>
 </p>
+
+<h3 align="center">어떤 에이전트가 나를 기다리는지 알고,<br>어디서든 그 터미널로 돌아간다.</h3>
+
+<p align="center">코딩 에이전트를 위한 웹 터미널 멀티플렉서</p>
 
 <p align="center"><a href="https://ttym.pages.dev"><b>웹사이트</b></a> · <a href="#설치">설치</a> · <a href="#빠른-시작">빠른 시작</a> · <a href="https://ttym.pages.dev/#film">영상 (69초)</a> · <a href="docs/remote-access.md">원격 접속</a> · <a href="#cli-레퍼런스">CLI</a> · <a href="#아키텍처">아키텍처</a> · <a href="README.md">English</a></p>
 
