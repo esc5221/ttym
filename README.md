@@ -233,6 +233,20 @@ marked stale with its age until the next refresh.
 - Hover a session in the list for a live preview; click for a full one — both
   are real terminals, not screenshots.
 
+## From another device
+
+ttym listens on `127.0.0.1`. To reach it from a phone, put it on your tailnet:
+
+```bash
+ttym remote tailscale            # tailscale serve → allow the name → login link + QR
+```
+
+Every request from off the machine needs an allow-listed host and a login
+cookie from a one-time link (`ttym remote link`). Cloudflare Tunnel + Access
+(`ttym remote cloudflare --host … --email …`), SSH forwarding and the details
+are in [docs/remote-access.md](docs/remote-access.md). Agents: start with
+`ttym remote doctor --json`.
+
 ## Reference
 
 <details>
@@ -379,7 +393,9 @@ ttym agent resume [agent]       # claude --resume / codex resume into that sessi
 <details>
 <summary><b>HTTP API</b> — every route, JSON in and out</summary>
 
-Default base `http://localhost:7690`.
+Default base `http://localhost:7690`. Requests from off the machine need an
+allowed host and a login cookie (see [remote access](docs/remote-access.md)); a
+write or WebSocket from another website's page is refused.
 
 ```
 GET    /api/version                         API_VERSION — client compatibility check
@@ -401,6 +417,13 @@ GET    /api/sessions/:id/commands/:n/output one command's bytes, sliced from the
 POST   /api/internal/sessions/:id/stop      agent Stop hooks only
 POST   /api/internal/sessions/:id/agent     runtime-key writes from hooks only
 POST   /api/upload?name=<file>              raw body → ~/.ttym/drops, Finder-style dedupe
+
+GET    /auth                                login page for a one-time link (#t=<token>)
+POST   /api/auth/login | /api/auth/logout   {token} → session cookie · sign this browser out
+GET    /api/remote                          bind, allowed hosts, signed-in count   (local only)
+POST   /api/remote/hosts · DELETE …/:host   allow-list                            (local only)
+POST   /api/remote/links                    mint a one-time login link            (local only)
+GET    /api/remote/sessions · DELETE …/:id  signed-in browsers; id `all` = every one (local only)
 
 GET|PATCH /api/config                       the flat config file, pushed to every client
 GET    /api/map                             work map: workspaces + sessions + summaries + freshness
@@ -475,8 +498,9 @@ Related but deliberately outside this file: the summarizer API key lives in
 
 ```
 PORT                   server port (default 7690)
-TTYM_BIND              listen host (default 127.0.0.1 — the API is unauthenticated;
-                       opening an interface is a boot-time decision, on purpose)
+TTYM_BIND              listen host (default 127.0.0.1). Opening an interface is a
+                       boot-time decision; LAN requests still need an allowed host
+                       and a login (docs/remote-access.md)
 TTYM_HOME              replaces the ~/.ttym root (test isolation)
 TTYM_RUNTIME_DIR       holder socket/manifest dir (default ~/.ttym/run)
 TTYM_HOLDER_BIN        holder binary path (default: auto-detected in dist/)
@@ -492,6 +516,7 @@ TTYM_ATTACH_RETRY_MS   attach reconnect interval (default 1000)
 ├── config                server-owned settings (see Config file)
 ├── map-api-key           summarizer key, 0600 — never served
 ├── map-prompt.txt        edited summarizer instructions (absent = built-in default)
+├── remote.json           allowed remote hosts + signed-in browsers (0600, hashed tokens)
 ├── ttym.pid              server PID
 ├── ttym.log              server stdout/stderr (copy-truncate at 64MB → .1)
 ├── drops/                files uploaded via browser drag-and-drop
@@ -619,3 +644,5 @@ uses to bootstrap a server when none is running.
   format, meta ownership, the work map, operational hygiene
 - [docs/adr-0001-membership.md](docs/adr-0001-membership.md) — workspace
   membership model
+- [docs/remote-access.md](docs/remote-access.md) — Tailscale, Cloudflare
+  Tunnel + Access, SSH, LAN; how remote login works

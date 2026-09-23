@@ -188,6 +188,19 @@ ttym map refresh              # 출력이 움직인 세션만 요약 — 신선�
 - **폰트**: macOS 는 네이티브 스택 그대로, 그 외 플랫폼은 동봉된 D2Coding 웹폰트 — 한글이 어디서나 고정폭이다.
 - 목록에서 세션에 호버하면 라이브 미리보기, 클릭하면 전체 — 둘 다 스크린샷이 아니라 진짜 터미널이다.
 
+## 다른 기기에서
+
+ttym은 `127.0.0.1`에서만 듣는다. 폰에서 쓰려면 tailnet에 올린다:
+
+```bash
+ttym remote tailscale            # tailscale serve → 호스트 허용 → 로그인 링크 + QR
+```
+
+이 머신 밖에서 오는 요청은 허용된 호스트여야 하고, 1회용 링크(`ttym remote link`)로 받은
+로그인 쿠키가 있어야 한다. Cloudflare Tunnel + Access(`ttym remote cloudflare --host … --email …`),
+SSH 포워딩과 세부 동작은 [docs/remote-access.md](docs/remote-access.md). 에이전트는
+`ttym remote doctor --json`부터 실행한다.
+
 ## 레퍼런스
 
 <details>
@@ -418,8 +431,9 @@ map-interval =                      서버 내장 주기 (10m, 1h) — 비우면
 
 ```
 PORT                   서버 포트 (기본 7690)
-TTYM_BIND              listen 호스트 (기본 127.0.0.1 — API 가 무인증이라
-                       인터페이스 개방은 부팅 시점의 의도적 결정이다)
+TTYM_BIND              listen 호스트 (기본 127.0.0.1). 인터페이스 개방은 부팅 시점에만
+                       정한다. LAN 요청도 허용 호스트 + 로그인이 필요하다
+                       (docs/remote-access.md)
 TTYM_HOME              ~/.ttym 루트 교체 (테스트 격리)
 TTYM_RUNTIME_DIR       holder socket/manifest 디렉토리 (기본 ~/.ttym/run)
 TTYM_HOLDER_BIN        holder 바이너리 경로 (기본: dist/ 에서 자동 탐지)
@@ -529,3 +543,4 @@ ditto packages/desktop/src-tauri/target/release/bundle/macos/ttym.app /Applicati
 
 - [docs/architecture.md](docs/architecture.md) — 계층, holder 프로토콜, wire 포맷, meta 소유권, 작업 지도, 운영 위생
 - [docs/adr-0001-membership.md](docs/adr-0001-membership.md) — workspace 멤버십 모델
+- [docs/remote-access.md](docs/remote-access.md) — Tailscale, Cloudflare Tunnel + Access, SSH, LAN, 원격 로그인 동작
