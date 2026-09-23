@@ -18,7 +18,8 @@ const HELP = `usage: ttym remote <command> [--json]
   Agents: run \`ttym remote doctor --json\` first — it reports state and the next command.
   Every command is non-interactive and safe to re-run; setup commands take --dry-run.
 
-  tailscale                          Recommended. tailscale serve → allow-host → login link → doctor
+  tailscale [--ip]                   Recommended. tailscale serve → allow-host → login link → doctor
+                                     --ip: http://<100.x>:<port>, no MagicDNS name or HTTPS certificate needed
   cloudflare --host <h> --email <e>  Cloudflare Tunnel + Access via the API (token: CLOUDFLARE_API_TOKEN,
              [--token-env NAME] [--replace-dns]   ~/.ttym/cloudflare-token, or --token-env)
   link [--host <h>]                  One-time login URL (10 min) + QR for a browser elsewhere

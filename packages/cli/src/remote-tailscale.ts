@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import process from 'node:process';
-import { Steps, checkTarget } from './remote-steps.js';
+import { Steps, checkTarget, rawStatus } from './remote-steps.js';
 import { addAllowHost, mintLink, printQr, remoteStatus } from './remote.js';
 
 /**
@@ -12,6 +12,14 @@ import { addAllowHost, mintLink, printQr, remoteStatus } from './remote.js';
  * and ttym keeps listening on loopback. Measured against tailscale 1.102:
  *   serve --bg --yes --https=443 http://127.0.0.1:<port>
  *   serve status --json → { Web: { "<name>:443": { Handlers: { "/": { Proxy } } } } }
+ *
+ * --ip: no name, no certificate — http://<100.x IP>:<port>. HTTP serve
+ * handlers are keyed by the MagicDNS name, so a request by IP gets
+ * Tailscale's own 404 (measured); a raw TCP forward carries any Host:
+ *   serve --bg --yes --tcp=<port> tcp://127.0.0.1:<port>
+ *   serve status --json → { TCP: { "<port>": { TCPForward: "127.0.0.1:<port>" } } }
+ * WireGuard still encrypts the path, but the browser sees plain HTTP (not a
+ * secure context: no Secure cookie, no clipboard API).
  */
 const CANDIDATES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale'];
 
@@ -32,6 +40,7 @@ interface ServeStatus { Web?: Record<string, { Handlers?: Record<string, { Proxy
 export async function cmdRemoteTailscale(port: number, args: string[], json: boolean) {
   const dryRun = args.includes('--dry-run');
   const force = args.includes('--force');
+  const ipMode = args.includes('--ip');
   const steps = new Steps(json);
   const target = `http://127.0.0.1:${port}`;
   const done = (extra: Record<string, unknown> = {}, note?: string) => steps.finish({ path: 'tailscale', dryRun, ...extra }, note);
@@ -46,12 +55,13 @@ export async function cmdRemoteTailscale(port: number, args: string[], json: boo
   }
   steps.add('cli', 'ok', `${bin} (${ts(bin!, ['version']).split('\n')[0]})`);
 
-  let st: { BackendState?: string; Self?: { DNSName?: string }; CertDomains?: string[] | null; MagicDNSSuffix?: string };
+  let st: { BackendState?: string; Self?: { DNSName?: string; TailscaleIPs?: string[] }; CertDomains?: string[] | null; MagicDNSSuffix?: string };
   try { st = JSON.parse(ts(bin!, ['status', '--json'])); } catch { st = {}; }
   if (st.BackendState !== 'Running') {
     steps.add('login', 'human', `Tailscale is ${st.BackendState ?? 'not running'} — sign this machine in`, { fix: 'tailscale up   (prints a login URL; open it in a browser)' });
     done();
   }
+  if (ipMode) return ipPath(bin!, st.Self?.TailscaleIPs ?? [], port, steps, dryRun, force, json, done);
   const name = (st.Self?.DNSName ?? '').replace(/\.$/, '');
   if (!name) {
     steps.add('name', 'human', 'MagicDNS is off, so this machine has no tailnet name', { url: 'https://login.tailscale.com/admin/dns' });
@@ -60,7 +70,7 @@ export async function cmdRemoteTailscale(port: number, args: string[], json: boo
   steps.add('login', 'ok', `signed in as ${name}`);
 
   if (!(st.CertDomains ?? []).includes(name)) {
-    steps.add('https', 'human', 'HTTPS certificates are off for this tailnet — turn on "HTTPS Certificates" under DNS (once per tailnet)', { url: 'https://login.tailscale.com/admin/dns' });
+    steps.add('https', 'human', 'HTTPS certificates are off for this tailnet — turn on "HTTPS Certificates" under DNS (once per tailnet). Without them: ttym remote tailscale --ip', { url: 'https://login.tailscale.com/admin/dns' });
     done({ host: name });
   }
   steps.add('https', 'ok', 'HTTPS certificates enabled');
@@ -102,4 +112,51 @@ export async function cmdRemoteTailscale(port: number, args: string[], json: boo
     await printQr(l.url);
   }
   done({ host: name, url: `https://${name}`, link: l.url, linkExpiresAt: l.expiresAt, next });
+}
+
+interface TcpServe { TCP?: Record<string, { TCPForward?: string }> }
+
+async function ipPath(bin: string, ips: string[], port: number, steps: Steps, dryRun: boolean, force: boolean, json: boolean,
+  done: (extra?: Record<string, unknown>, note?: string) => never) {
+  const ip = ips.find((a) => a.includes('.'));
+  if (!ip) { steps.add('ip', 'fail', 'this machine has no Tailscale IPv4 address'); done(); }
+  steps.add('ip', 'ok', ip!);
+  const target = `127.0.0.1:${port}`;
+  const readTcp = (): string | null => {
+    try { return (JSON.parse(ts(bin, ['serve', 'status', '--json'])) as TcpServe).TCP?.[String(port)]?.TCPForward ?? null; } catch { return null; }
+  };
+  const current = readTcp();
+  if (current === target) steps.add('serve', 'ok', `tailnet ${ip}:${port} → ${target} (tcp)`);
+  else if (current && !force) {
+    steps.add('serve', 'fail', `tailnet port ${port} already forwards to ${current}`, { fix: 'ttym remote tailscale --ip --force' });
+    done({ host: ip });
+  } else if (dryRun) steps.add('serve', 'planned', `tailscale serve --bg --tcp=${port} tcp://${target}`);
+  else {
+    try { ts(bin, ['serve', '--bg', '--yes', `--tcp=${port}`, `tcp://${target}`]); } catch (err) {
+      const e = err as { stderr?: string; message: string };
+      steps.add('serve', 'fail', `tailscale serve failed: ${(e.stderr || e.message).trim().split('\n')[0]}`, { fix: `tailscale serve --bg --tcp=${port} tcp://${target}` });
+      done({ host: ip });
+    }
+    if (readTcp() !== target) { steps.add('serve', 'fail', 'tailscale serve ran but the forward is not there'); done({ host: ip }); }
+    steps.add('serve', 'changed', `tailnet ${ip}:${port} → ${target} (tcp)`);
+  }
+
+  const allowed = (await remoteStatus(port)).allowHosts.includes(ip!);
+  if (allowed) steps.add('allow-host', 'ok', ip!);
+  else if (dryRun) steps.add('allow-host', 'planned', ip!);
+  else { await addAllowHost(port, ip!); steps.add('allow-host', 'changed', ip!); }
+  steps.add('http', 'warn', 'plain HTTP inside the tailnet: WireGuard encrypts it, but the browser treats the page as insecure (no clipboard API)');
+  if (dryRun) done({ host: ip });
+
+  // A request from this machine to its own tailnet IP does not go through serve, so the gate is
+  // checked with the Host a tailnet device sends (the TCP forward adds no headers).
+  const probe = await rawStatus(port, '/api/sessions', { host: `${ip}:${port}` });
+  steps.add('doctor', probe === 401 ? 'ok' : 'fail', `a tailnet device without a login gets ${probe || 'no answer'} (want 401)`);
+  if (steps.blocked) done({ host: ip });
+
+  const l = await mintLink(port, ip!);
+  steps.add('link', 'ok', 'login link minted (one use, 10 min)');
+  const next = 'On the phone: install Tailscale, sign in with the same account, then open the link.';
+  if (!json) { console.log(`\n${next}\n\n  ${l.url}\n`); await printQr(l.url); }
+  done({ host: ip, url: `http://${ip}:${port}`, link: l.url, linkExpiresAt: l.expiresAt, next });
 }

@@ -72,6 +72,24 @@ Then open the printed link on the phone.
 `tailscale funnel` would put the same URL on the public internet. Don't use
 it for ttym.
 
+### Without MagicDNS names or HTTPS certificates: `--ip`
+
+```sh
+ttym remote tailscale --ip       # http://100.x.y.z:7690
+```
+
+HTTP serve handlers answer only the MagicDNS name (by IP, Tailscale returns its
+own 404), so this mode forwards raw TCP: `tailscale serve --tcp=7690
+tcp://127.0.0.1:7690`, and allows the machine's 100.x address. WireGuard
+encrypts the traffic, but the browser sees plain HTTP: the page is not a secure
+context, so the clipboard API and other secure-only features are unavailable.
+Prefer the name when you can.
+
+If MagicDNS was turned off because it fought with this machine's own DNS, keep
+it on for the tailnet and switch off only this machine's use of it:
+`tailscale set --accept-dns=false`. The name and certificate still work, and
+other devices still resolve it.
+
 ## Path 2 · Cloudflare Tunnel + Access
 
 A URL on your own domain (`ttym.example.com`) that works from any browser
