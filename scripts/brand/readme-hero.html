@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- README hero, 1760x560 (shown at 880x280). Rendered by scripts/brand/make-cards.mjs → docs/assets/hero.png.
+     Transparent outside the rounded card, so it sits on GitHub's light and dark pages alike. -->
+<html><head><meta charset="utf-8"><style>
+@font-face { font-family: "Geist"; src: url("../../site/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; }
+@font-face { font-family: "Geist Mono"; src: url("../../site/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
+html, body { margin: 0; width: 1760px; height: 560px; background: transparent; overflow: hidden; }
+.card { box-sizing: border-box; width: 1760px; height: 560px; border-radius: 36px; border: 2px solid rgba(255,255,255,.08);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px; font-family: "Geist", "Apple SD Gothic Neo", sans-serif;
+  background: radial-gradient(1100px 420px at 50% -20%, rgba(242,156,92,.16), transparent 70%), radial-gradient(800px 500px at 100% 120%, rgba(140,120,255,.06), transparent 70%), #0b0b0c; }
+img { height: 150px; }
+p { margin: 0; text-align: center; font-size: 50px; font-weight: 540; letter-spacing: -0.02em; line-height: 1.25; color: #d8d8dc; }
+p span { display: block; color: #f29c5c; }
+small { font: 500 26px "Geist Mono", "Apple SD Gothic Neo", monospace; color: #8d8d93; letter-spacing: 0.01em; }
+</style></head><body><div class="card">
+<img src="../../site/brand/ttym-logo-dark.svg" alt="">
+<p id="t">Know which agent needs you.<span>Get back into its terminal from anywhere.</span></p>
+<small id="s">a web terminal multiplexer for coding agents</small>
+<script>
+// ?ko renders the Korean card for README.ko.md
+if (location.search === '?ko') {
+  document.getElementById('t').innerHTML = '어떤 에이전트가 나를 기다리는지 알고,<span>어디서든 그 터미널로 돌아간다.</span>';
+  document.getElementById('s').textContent = '코딩 에이전트를 위한 웹 터미널 멀티플렉서';
+  document.documentElement.lang = 'ko';
+}
+</script>
+</div></body></html>

@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- README film poster with a play button, 1760x990. Rendered by scripts/brand/make-cards.mjs → docs/assets/film.jpg.
+     GitHub strips <video> from READMEs, so the poster links to the film on the site. -->
+<html><head><meta charset="utf-8"><style>
+@font-face { font-family: "Geist Mono"; src: url("../../site/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; }
+html, body { margin: 0; width: 1760px; height: 990px; overflow: hidden; background: #0b0b0c; }
+.f { position: relative; width: 1760px; height: 990px; background: url("../../site/media/film.jpg") center / cover; }
+.f::after { content: ""; position: absolute; inset: 0; background: rgba(0,0,0,.42); }
+.play { position: absolute; left: 50%; top: 52%; width: 168px; height: 168px; margin: -84px 0 0 -84px; z-index: 1; border-radius: 50%;
+  background: rgba(11,11,12,.78); border: 3px solid #f29c5c; box-shadow: 0 20px 60px rgba(0,0,0,.55); }
+.play::before { content: ""; position: absolute; left: 64px; top: 50px; border-style: solid; border-width: 34px 0 34px 56px; border-color: transparent transparent transparent #f3f3f4; }
+.tag { position: absolute; left: 50%; top: calc(52% + 110px); transform: translateX(-50%); z-index: 1; white-space: nowrap;
+  font: 500 30px "Geist Mono", monospace; color: #f3f3f4; background: rgba(11,11,12,.78); padding: 12px 24px; border-radius: 12px; border: 1px solid rgba(255,255,255,.12); }
+.tag span { color: #f29c5c; }
+</style></head><body><div class="f"><div class="play"></div><div class="tag">Watch the film <span>· 69 s</span></div></div></body></html>
