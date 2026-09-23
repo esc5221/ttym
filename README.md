@@ -1,23 +1,111 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
-    <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="280">
-  </picture>
+  <a href="https://ttym.pages.dev">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
+      <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="300">
+    </picture>
+  </a>
 </p>
 
-<p align="center"><b>Know which agent needs you. Get back into its terminal from anywhere.</b></p>
+<h3 align="center">Know which agent needs you.<br>Get back into its terminal from anywhere.</h3>
+
+<p align="center">A web terminal multiplexer for coding agents · macOS and Linux · Node ≥ 20</p>
+
+<p align="center"><a href="https://ttym.pages.dev"><b>Website</b></a> · <a href="#install">Install</a> · <a href="#quick-start">Quick start</a> · <a href="https://ttym.pages.dev/#film">Film (69 s)</a> · <a href="docs/remote-access.md">Remote access</a> · <a href="#architecture">Architecture</a> · <a href="README.ko.md">한국어</a></p>
 
 <p align="center">
-  <code>npm i -g ttym</code> · Node ≥ 20 · macOS and Linux<br>
-  <a href="https://ttym.pages.dev">Site</a> · <a href="#install">Install</a> · <a href="docs/remote-access.md">Remote access</a> · <a href="README.ko.md">한국어</a>
+  <a href="https://ttym.pages.dev/#film"><img src="docs/assets/film.jpg" alt="The 69-second film: one real Claude Code session on ttym, end to end" width="880"></a>
 </p>
-
-[![The 69-second film: one real Claude Code session on ttym, end to end](docs/assets/film.jpg)](https://ttym.pages.dev/#film)
 
 You're running a dozen coding agents. One is blocked on you, the rest are still
 working, and you're cycling through terminal tabs to find which. ttym is a web
 terminal multiplexer: one server holds every PTY, and the browser, the CLI and
 your phone are views of the same live terminals.
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh
+```
+
+The script downloads the build for your machine (macOS or Linux, arm64 or
+x86_64) from [GitHub Releases](https://github.com/esc5221/ttym/releases),
+checks its sha256, installs it to `~/.local/share/ttym` and links `ttym` into
+`~/.local/bin`. Node ≥ 20 is the only prerequisite. It is short;
+[read it](install.sh) before piping it to `sh`. `TTYM_VERSION=v0.3.0` pins a
+version.
+
+Then, once per machine:
+
+```bash
+ttym service install          # keep the server running: starts at login, restarts after a crash
+                              # (launchd on macOS, systemd on Linux)
+ttym agent install claude     # hooks for Claude Code: who needs you, await, sleep/wake (codex too)
+```
+
+Without the service, the first `ttym` command starts the server in the
+background and nothing brings it back after a reboot. Either way each terminal
+lives in its own holder process, so restarting or upgrading the server does not
+close it.
+
+```bash
+ttym upgrade                  # swap in the latest release; sessions keep running
+ttym upgrade --rollback       # back to the previous install
+```
+
+<details>
+<summary>From source (development)</summary>
+
+Prerequisites: Node.js ≥ 20, Rust, pnpm.
+
+```bash
+git clone https://github.com/esc5221/ttym && cd ttym
+pnpm install
+./scripts/build.sh
+ln -s "$PWD/dist/ttym" ~/.local/bin/ttym
+```
+
+Build outputs:
+
+```
+dist/
+├── ttym              # CLI (esbuild bundle)
+├── ttym-server.js    # bundled server
+└── ttym-holder       # Rust binary (one per session)
+packages/web/dist/    # the web app the server serves
+```
+
+In a checkout, `ttym upgrade` rebuilds into `dist.next` and swaps by rename —
+running sessions keep their processes.
+
+</details>
+
+<details>
+<summary>Uninstall</summary>
+
+```bash
+ttym service uninstall                       # if you installed the service
+ttym stop
+rm -rf ~/.local/share/ttym ~/.local/share/ttym.prev ~/.local/bin/ttym
+rm -rf ~/.ttym                               # state: sessions, config, remote logins
+```
+
+Terminals that are still open keep running in their holder processes until you
+exit them.
+
+</details>
+
+## Quick start
+
+```bash
+ttym work                        # the server starts if needed, workspace "work" + a shell
+                                 # are created (one [Y/n]), and you're attached
+ttym split :main ai -- claude    # a real split beside it — nesting and ratios survive
+open http://localhost:7690       # the same session, live in the browser
+ttym remote tailscale            # and on your phone (see "From another device")
+```
+
+`C-b d` detaches; everything keeps running.
 
 ## What it does
 
@@ -99,126 +187,6 @@ ttym agent resume
   server: the processes and scrollback stay.
 - **Drive agents like functions.** Group terminals into a `workspace` and script
   them with `send` / `await`.
-
-## Architecture
-
-### Processes
-
-```
-Clients (viewers)                     Server                  PTY backend
-─────────────────                    ────────                ───────────────
-
-ttym attach        (Node TUI)       ┌──────────┐             ┌─ Holder #1 ─► zsh
-                                    │          │         UDS │
-@ttym/web          (browser)   ───► │  server  │ ──────────► ├─ Holder #2 ─► claude
-                                    │  (Node)  │  frame      │
-@ttym/desktop      (Tauri)          │          │  protocol   └─ Holder #N ─► codex
-                                    └──────────┘
-                                         ▲                   Rust · ~1MB · one per session
-ttym new/split/send/await  ────────────┘                    outlives the server
-ttym start/stop/status       HTTP only
-(CLI control-plane)
-```
-
-Key points:
-
-- **The server is the only hub.** Nothing but the server talks to holders.
-- **Three viewers.** All speak the same `HTTP + WebSocket` protocol.
-- **The CLI plays two roles.** `attach` is a viewer; everything else is the
-  control plane — and the compatibility boundary.
-- **One holder per session.** The server can die; the PTY and its ring buffer stay.
-
-### Components
-
-```
-Component        Lang         Role                                      Source
-───────────────────────────────────────────────────────────────────────────────────────
-@ttym/cli        TS → Node    server lifecycle · attach TUI ·           packages/cli
-                              new/split/send/await/map control plane
-@ttym/server     TS → Node    HTTP + WS hub, headless xterm mirror,     packages/server
-                              OutputRing (seq-based delta), workspace
-                              store, command index, interactions
-holder           Rust         PTY fd + ring buffer. The persistence.    holder/src
-@ttym/vt         TS           framework-free client core: the WS mux,   packages/vt
-                              local echo, ANSI utilities, panel state
-@ttym/protocol   TS           WS wire format — one impl for both ends   packages/protocol
-@ttym/api        TS           HTTP client shared by all three apps      packages/api
-@ttym/ui         React/TS     xterm.js terminal host + layout views     packages/ui
-@ttym/web        React/Vite   browser app                               packages/web
-@ttym/desktop    Tauri        desktop shell around the served web app   packages/desktop
-@ttym/shared     TS           domain rules, e.g. the layout tree        packages/shared
-```
-
-### Data flow (one session)
-
-```
-input (keystroke):
-  viewer → CMD.DATA(sessionId, bytes) → WS → server → unix socket → holder → PTY
-
-output (PTY byte):
-  PTY → holder ring → unix socket → server.OutputRing.append(seq)
-                                      ├─► CMD.DATA(seq) to every attached viewer
-                                      └─► headless xterm mirror (feeds SNAPSHOT on ATTACH)
-  viewer → renders → replies CMD.ACK(seq)
-
-fresh attach:
-  viewer → CMD.ATTACH{ fromSeq, cols, rows, mode }
-  server → CMD.SNAPSHOT (full screen) → then CMD.DATA deltas only
-
-server restart:
-  server → seeds xterm from the per-session checkpoint (rendered ANSI + offset)
-         → DUMP_SINCE(offset) to the holder → REPLAY of the delta only
-```
-
-## Install
-
-```bash
-npm i -g ttym          # Node ≥ 20 is the only prerequisite
-```
-
-The native PTY holder ships as a platform package (`@ttym/holder-*`) via
-`optionalDependencies` — no postinstall downloads, no Rust toolchain.
-Prebuilt tarballs with checksums live on the GitHub Releases page.
-
-<details>
-<summary>From source (development)</summary>
-
-Prerequisites: Node.js, Rust, pnpm.
-
-```bash
-pnpm install
-./scripts/build.sh
-```
-
-Build outputs:
-
-```
-dist/
-├── ttym              # CLI (esbuild bundle)
-├── ttym-server.js    # bundled server + web static assets
-└── ttym-holder       # Rust binary
-```
-
-`ttym upgrade` rebuilds into `dist.next` and swaps by rename — running
-sessions keep their processes.
-
-</details>
-
-## Quick start
-
-```bash
-./dist/ttym work                 # that's it — the server autostarts, workspace "work" +
-                                 # a shell are created (one [Y/n]), and you're attached
-./dist/ttym split :main ai -- claude    # a real split beside it — nesting and ratios survive
-open http://localhost:7690       # the same session, live in the browser
-```
-
-`C-b d` detaches; everything keeps running. Want it to survive reboots and
-crashes too? One optional verb:
-
-```bash
-ttym service install             # boots at login, restarts on crash (launchd/systemd)
-```
 
 ## Agents in the loop
 
@@ -308,6 +276,76 @@ cookie from a one-time link (`ttym remote link`). Cloudflare Tunnel + Access
 (`ttym remote cloudflare --host … --email …`), SSH forwarding and the details
 are in [docs/remote-access.md](docs/remote-access.md). Agents: start with
 `ttym remote doctor --json`.
+
+## Architecture
+
+### Processes
+
+```
+Clients (viewers)                     Server                  PTY backend
+─────────────────                    ────────                ───────────────
+
+ttym attach        (Node TUI)       ┌──────────┐             ┌─ Holder #1 ─► zsh
+                                    │          │         UDS │
+@ttym/web          (browser)   ───► │  server  │ ──────────► ├─ Holder #2 ─► claude
+                                    │  (Node)  │  frame      │
+@ttym/desktop      (Tauri)          │          │  protocol   └─ Holder #N ─► codex
+                                    └──────────┘
+                                         ▲                   Rust · ~1MB · one per session
+ttym new/split/send/await  ────────────┘                    outlives the server
+ttym start/stop/status       HTTP only
+(CLI control-plane)
+```
+
+Key points:
+
+- **The server is the only hub.** Nothing but the server talks to holders.
+- **Three viewers.** All speak the same `HTTP + WebSocket` protocol.
+- **The CLI plays two roles.** `attach` is a viewer; everything else is the
+  control plane — and the compatibility boundary.
+- **One holder per session.** The server can die; the PTY and its ring buffer stay.
+
+### Components
+
+```
+Component        Lang         Role                                      Source
+───────────────────────────────────────────────────────────────────────────────────────
+@ttym/cli        TS → Node    server lifecycle · attach TUI ·           packages/cli
+                              new/split/send/await/map control plane
+@ttym/server     TS → Node    HTTP + WS hub, headless xterm mirror,     packages/server
+                              OutputRing (seq-based delta), workspace
+                              store, command index, interactions
+holder           Rust         PTY fd + ring buffer. The persistence.    holder/src
+@ttym/vt         TS           framework-free client core: the WS mux,   packages/vt
+                              local echo, ANSI utilities, panel state
+@ttym/protocol   TS           WS wire format — one impl for both ends   packages/protocol
+@ttym/api        TS           HTTP client shared by all three apps      packages/api
+@ttym/ui         React/TS     xterm.js terminal host + layout views     packages/ui
+@ttym/web        React/Vite   browser app                               packages/web
+@ttym/desktop    Tauri        desktop shell around the served web app   packages/desktop
+@ttym/shared     TS           domain rules, e.g. the layout tree        packages/shared
+```
+
+### Data flow (one session)
+
+```
+input (keystroke):
+  viewer → CMD.DATA(sessionId, bytes) → WS → server → unix socket → holder → PTY
+
+output (PTY byte):
+  PTY → holder ring → unix socket → server.OutputRing.append(seq)
+                                      ├─► CMD.DATA(seq) to every attached viewer
+                                      └─► headless xterm mirror (feeds SNAPSHOT on ATTACH)
+  viewer → renders → replies CMD.ACK(seq)
+
+fresh attach:
+  viewer → CMD.ATTACH{ fromSeq, cols, rows, mode }
+  server → CMD.SNAPSHOT (full screen) → then CMD.DATA deltas only
+
+server restart:
+  server → seeds xterm from the per-session checkpoint (rendered ANSI + offset)
+         → DUMP_SINCE(offset) to the holder → REPLAY of the delta only
+```
 
 ## Reference
 

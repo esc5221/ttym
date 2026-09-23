@@ -1,23 +1,107 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
-    <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="280">
-  </picture>
+  <a href="https://ttym.pages.dev">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
+      <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="300">
+    </picture>
+  </a>
 </p>
 
-<p align="center"><b>어떤 에이전트가 나를 기다리는지 알고, 어디서든 그 터미널로 돌아간다.</b></p>
+<h3 align="center">어떤 에이전트가 나를 기다리는지 알고,<br>어디서든 그 터미널로 돌아간다.</h3>
+
+<p align="center">코딩 에이전트를 위한 웹 터미널 멀티플렉서 · macOS, Linux · Node ≥ 20</p>
+
+<p align="center"><a href="https://ttym.pages.dev"><b>웹사이트</b></a> · <a href="#설치">설치</a> · <a href="#빠른-시작">빠른 시작</a> · <a href="https://ttym.pages.dev/#film">영상 (69초)</a> · <a href="docs/remote-access.md">원격 접속</a> · <a href="#아키텍처">아키텍처</a> · <a href="README.md">English</a></p>
 
 <p align="center">
-  <code>npm i -g ttym</code> · Node ≥ 20 · macOS, Linux<br>
-  <a href="https://ttym.pages.dev">사이트</a> · <a href="#설치">설치</a> · <a href="docs/remote-access.md">원격 접속</a> · <a href="README.md">English</a>
+  <a href="https://ttym.pages.dev/#film"><img src="docs/assets/film.jpg" alt="69초 영상: ttym 위에서 실제 Claude Code 세션 하나를 처음부터 끝까지" width="880"></a>
 </p>
-
-[![69초 영상: ttym 위에서 실제 Claude Code 세션 하나를 처음부터 끝까지](docs/assets/film.jpg)](https://ttym.pages.dev/#film)
 
 코딩 에이전트를 여러 개 돌리다 보면 하나는 내 입력을 기다리고 나머지는
 아직 작업 중인데, 어느 쪽인지 찾으려고 터미널 탭을 돌아다니게 된다. ttym은
 웹 터미널 멀티플렉서다. 서버 하나가 모든 PTY를 들고 있고, 브라우저·CLI·휴대폰은
 같은 live 터미널을 보는 창이다.
+
+## 설치
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh
+```
+
+스크립트는 이 기기에 맞는 빌드(macOS·Linux, arm64·x86_64)를
+[GitHub Releases](https://github.com/esc5221/ttym/releases)에서 받아 sha256을
+확인한 뒤 `~/.local/share/ttym`에 설치하고, `~/.local/bin`에 `ttym` 링크를 만든다.
+필요한 것은 Node ≥ 20 하나다. 스크립트가 짧으니 `sh`로 넘기기 전에
+[읽어 보기](install.sh)를 권한다. 버전을 고정하려면 `TTYM_VERSION=v0.3.0`.
+
+그다음 기기마다 한 번:
+
+```bash
+ttym service install          # 서버 상주: 로그인하면 뜨고, 죽으면 다시 뜬다
+                              # (macOS는 launchd, Linux는 systemd)
+ttym agent install claude     # Claude Code 훅: 누가 나를 기다리는지, await, 절전·깨우기 (codex도)
+```
+
+서비스를 설치하지 않으면 첫 `ttym` 명령이 서버를 백그라운드로 띄우고, 재부팅 뒤에는
+다시 띄워 주는 것이 없다. 어느 쪽이든 터미널은 각자의 holder 프로세스에 살기 때문에
+서버를 재시작하거나 업그레이드해도 닫히지 않는다.
+
+```bash
+ttym upgrade                  # 최신 Release로 교체. 세션은 그대로 돈다
+ttym upgrade --rollback       # 직전 설치로 되돌리기
+```
+
+<details>
+<summary>소스에서 (개발)</summary>
+
+전제: Node.js ≥ 20, Rust, pnpm.
+
+```bash
+git clone https://github.com/esc5221/ttym && cd ttym
+pnpm install
+./scripts/build.sh
+ln -s "$PWD/dist/ttym" ~/.local/bin/ttym
+```
+
+빌드 산출물:
+
+```
+dist/
+├── ttym              # CLI (esbuild 번들)
+├── ttym-server.js    # 번들된 서버
+└── ttym-holder       # Rust 바이너리 (세션당 하나)
+packages/web/dist/    # 서버가 서빙하는 웹 앱
+```
+
+체크아웃에서는 `ttym upgrade`가 `dist.next`로 빌드해 rename으로 스왑한다 — 돌아가는 세션의 프로세스는 그대로다.
+
+</details>
+
+<details>
+<summary>제거</summary>
+
+```bash
+ttym service uninstall                       # 서비스를 설치했다면
+ttym stop
+rm -rf ~/.local/share/ttym ~/.local/share/ttym.prev ~/.local/bin/ttym
+rm -rf ~/.ttym                               # 상태: 세션, 설정, 원격 로그인
+```
+
+아직 열려 있는 터미널은 직접 종료할 때까지 holder 프로세스에서 계속 돈다.
+
+</details>
+
+## 빠른 시작
+
+```bash
+ttym work                        # 서버가 없으면 띄우고, workspace "work" + 셸을 만들고
+                                 # ([Y/n] 한 번), 그대로 진입한다
+ttym split :main ai -- claude    # 옆에 분할 — 중첩과 비율이 유지된다
+open http://localhost:7690       # 같은 세션이 브라우저에 살아있다
+ttym remote tailscale            # 폰에서도 (아래 "다른 기기에서")
+```
+
+`C-b d` 로 나와도 전부 계속 돈다.
 
 ## 하는 일
 
@@ -97,6 +181,68 @@ ttym agent resume
   프로세스와 스크롤백은 남는다.
 - **에이전트를 함수처럼.** 터미널들을 `workspace`로 묶고 `send` / `await`로 스크립트를 짠다.
 
+## 에이전트를 함수처럼
+
+훅을 한 번 깔면 에이전트 세션이 호출 가능한 함수가 된다:
+
+```bash
+ttym agent install claude     # ~/.claude/settings.json 에 SessionStart/Stop 훅 주입
+ttym workspace add --current --name helper --role agent --cmd claude
+ttym await :helper --json -- "이 스택트레이스 원인 뭐야?"
+```
+
+`await` 는 화면 폴링이 아니라 Stop 훅을 신호로 에이전트의 턴이 실제로 끝날 때까지 기다리고, **그 턴의 답변만** 돌려준다 — 가능하면 에이전트의 구조화된 transcript 에서 추출하고(`transcriptSource: "structured"`), 아니면 렌더된 화면에서 잘라낸다. 여러 멤버에 동시에 걸어도 각자 독립적으로 완료된다. `ttym agent resume` 은 연결된 Claude/Codex 세션을 나중에 다시 열고, `ttym agent info` 는 연결 관계를 보여준다.
+
+## 셸 통합
+
+`~/.zshrc` 에 한 줄 (ttym pane 밖에서는 아무 일도 안 한다):
+
+```bash
+[[ -n "$TTYM_SESSION_ID" ]] && source /path/to/ttym/scripts/ttym-shell-integration.zsh
+```
+
+그러면 셸이 자기 출력 스트림에 명령 경계를 표시하고(OSC 133/633), 서버가 그걸 인덱싱해서, 평범한 셸이 스크립트 가능해진다:
+
+```bash
+ttym commands :build          # 장부: ✓/✗ + exit code, 소요시간, 명령줄
+ttym output :build --cmd 3    # 그 명령의 출력만 정확히 — 프롬프트 긁기 없음
+ttym await :build -- "make test"   # 보내고, 완료까지 막고, exit code + 출력 받기
+```
+
+`await` 는 증거로 라우팅한다: 통합 신호를 보인 pane 은 명령 경로, 에이전트 pane 은 훅 경로. 웹 터미널에서는 같은 표시가 **⌘↑ / ⌘↓** 를 움직인다 — 스크롤백의 명령 경계 사이를 점프한다.
+
+## 작업 지도
+
+메인 화면에는 두 번째 얼굴이 있다(settings → main view → **map**): 모든 workspace 와 세션이 하나의 트리에 오르고, 각 행에는 그 작업이 무엇이고 무엇을 기다리는지 AI 가 쓴 한 줄이 붙는다 — 이 README 의 저자가 손으로 그리던 바로 그 지도다.
+
+```bash
+ttym map refresh              # 출력이 움직인 세션만 요약 — 신선한 세션은 비용 0
+```
+
+모델 백엔드 규칙은 하나다: `~/.ttym/config` 에 `map-base-url` 을 넣으면 OpenAI 호환 HTTP(로컬이든 원격이든 아무 게이트웨이), 비워두면 `claude -p`(기본 모델 `haiku`). 프롬프트는 settings 에서 편집할 수 있고 — 데이터 블록(화면 꼬리, workspace 목록)은 자동으로 뒤에 붙는다 — 일회성 지시 한 줄로 저장 없이 이번 정리만 조종할 수도 있다. 상시 주기는 settings(또는 config)의 `map-interval = 10m` — 서버가 직접 돌리며, **기본은 꺼짐**이다: 화면이 기계 밖으로 나가는 건 명시적 선택이어야 한다. 연속 5회 실패하면 타이머가 스스로 멈춘다(interval 재저장으로 재개). 요약은 정직하게 낡는다: 요약 이후 출력이 흐른 세션은 다음 갱신까지 나이와 함께 stale 로 표시된다.
+
+## 웹 터미널
+
+- **⌘F** — 스크롤백 문자열 검색, VS Code 방식, 매치 하이라이트.
+- **⌘↑ / ⌘↓** — 명령 경계 점프 (셸 통합 필요).
+- **URL 클릭 가능**, 세션 안의 프로그램(vim, 원격 ssh)이 OSC 52 로 클립보드에 복사할 수 있다.
+- **파일 드롭**: 네이티브 표면은 실경로를 꽂고, 브라우저는 내용을 업로드해 서버 쪽 경로를 꽂는다 — Finder 식 이름, uuid 없음.
+- **폰트**: macOS 는 네이티브 스택 그대로, 그 외 플랫폼은 동봉된 D2Coding 웹폰트 — 한글이 어디서나 고정폭이다.
+- 목록에서 세션에 호버하면 라이브 미리보기, 클릭하면 전체 — 둘 다 스크린샷이 아니라 진짜 터미널이다.
+
+## 다른 기기에서
+
+ttym은 `127.0.0.1`에서만 듣는다. 폰에서 쓰려면 tailnet에 올린다:
+
+```bash
+ttym remote tailscale            # tailscale serve → 호스트 허용 → 로그인 링크 + QR
+```
+
+이 머신 밖에서 오는 요청은 허용된 호스트여야 하고, 1회용 링크(`ttym remote link`)로 받은
+로그인 쿠키가 있어야 한다. Cloudflare Tunnel + Access(`ttym remote cloudflare --host … --email …`),
+SSH 포워딩과 세부 동작은 [docs/remote-access.md](docs/remote-access.md). 에이전트는
+`ttym remote doctor --json`부터 실행한다.
+
 ## 아키텍처
 
 ### 프로세스 구성
@@ -165,114 +311,6 @@ holder           Rust         PTY fd + ring buffer. 영속성 담당.         ho
   server → 세션별 체크포인트(렌더된 ANSI + offset) 를 xterm 에 seed
          → holder 에 DUMP_SINCE(offset) → 그 이후 delta 만 REPLAY
 ```
-
-## 설치
-
-```bash
-npm i -g ttym          # 전제조건은 Node ≥ 20 하나
-```
-
-네이티브 PTY holder 는 플랫폼 패키지(`@ttym/holder-*`)로 `optionalDependencies` 를 타고 온다 — postinstall 다운로드 없음, Rust 툴체인 불필요. 체크섬 딸린 사전 빌드 tarball 은 GitHub Releases 에 있다.
-
-<details>
-<summary>소스에서 (개발)</summary>
-
-전제: Node.js, Rust, pnpm.
-
-```bash
-pnpm install
-./scripts/build.sh
-```
-
-빌드 산출물:
-
-```
-dist/
-├── ttym              # CLI (esbuild 번들)
-├── ttym-server.js    # 번들된 서버 + web 정적 리소스
-└── ttym-holder       # Rust 바이너리
-```
-
-`ttym upgrade` 는 `dist.next` 로 빌드해 rename 으로 스왑한다 — 돌아가는 세션의 프로세스는 그대로다.
-
-</details>
-
-## 빠른 시작
-
-```bash
-./dist/ttym work                 # 이게 전부다 — 서버는 알아서 뜨고, workspace "work" +
-                                 # 셸이 만들어지고([Y/n] 한 번), 그대로 진입한다
-./dist/ttym split :main ai -- claude    # 옆에 분할 — 중첩과 비율이 유지된다
-open http://localhost:7690       # 같은 세션이 브라우저에 살아있다
-```
-
-`C-b d` 로 나와도 전부 계속 돈다. 재부팅·크래시까지 버티게 하려면 선택 동사 하나:
-
-```bash
-ttym service install             # 로그인 시 기동, 죽으면 자동 재기동 (launchd/systemd)
-```
-
-## 에이전트를 함수처럼
-
-훅을 한 번 깔면 에이전트 세션이 호출 가능한 함수가 된다:
-
-```bash
-ttym agent install claude     # ~/.claude/settings.json 에 SessionStart/Stop 훅 주입
-ttym workspace add --current --name helper --role agent --cmd claude
-ttym await :helper --json -- "이 스택트레이스 원인 뭐야?"
-```
-
-`await` 는 화면 폴링이 아니라 Stop 훅을 신호로 에이전트의 턴이 실제로 끝날 때까지 기다리고, **그 턴의 답변만** 돌려준다 — 가능하면 에이전트의 구조화된 transcript 에서 추출하고(`transcriptSource: "structured"`), 아니면 렌더된 화면에서 잘라낸다. 여러 멤버에 동시에 걸어도 각자 독립적으로 완료된다. `ttym agent resume` 은 연결된 Claude/Codex 세션을 나중에 다시 열고, `ttym agent info` 는 연결 관계를 보여준다.
-
-## 셸 통합
-
-`~/.zshrc` 에 한 줄 (ttym pane 밖에서는 아무 일도 안 한다):
-
-```bash
-[[ -n "$TTYM_SESSION_ID" ]] && source /path/to/ttym/scripts/ttym-shell-integration.zsh
-```
-
-그러면 셸이 자기 출력 스트림에 명령 경계를 표시하고(OSC 133/633), 서버가 그걸 인덱싱해서, 평범한 셸이 스크립트 가능해진다:
-
-```bash
-ttym commands :build          # 장부: ✓/✗ + exit code, 소요시간, 명령줄
-ttym output :build --cmd 3    # 그 명령의 출력만 정확히 — 프롬프트 긁기 없음
-ttym await :build -- "make test"   # 보내고, 완료까지 막고, exit code + 출력 받기
-```
-
-`await` 는 증거로 라우팅한다: 통합 신호를 보인 pane 은 명령 경로, 에이전트 pane 은 훅 경로. 웹 터미널에서는 같은 표시가 **⌘↑ / ⌘↓** 를 움직인다 — 스크롤백의 명령 경계 사이를 점프한다.
-
-## 작업 지도
-
-메인 화면에는 두 번째 얼굴이 있다(settings → main view → **map**): 모든 workspace 와 세션이 하나의 트리에 오르고, 각 행에는 그 작업이 무엇이고 무엇을 기다리는지 AI 가 쓴 한 줄이 붙는다 — 이 README 의 저자가 손으로 그리던 바로 그 지도다.
-
-```bash
-ttym map refresh              # 출력이 움직인 세션만 요약 — 신선한 세션은 비용 0
-```
-
-모델 백엔드 규칙은 하나다: `~/.ttym/config` 에 `map-base-url` 을 넣으면 OpenAI 호환 HTTP(로컬이든 원격이든 아무 게이트웨이), 비워두면 `claude -p`(기본 모델 `haiku`). 프롬프트는 settings 에서 편집할 수 있고 — 데이터 블록(화면 꼬리, workspace 목록)은 자동으로 뒤에 붙는다 — 일회성 지시 한 줄로 저장 없이 이번 정리만 조종할 수도 있다. 상시 주기는 settings(또는 config)의 `map-interval = 10m` — 서버가 직접 돌리며, **기본은 꺼짐**이다: 화면이 기계 밖으로 나가는 건 명시적 선택이어야 한다. 연속 5회 실패하면 타이머가 스스로 멈춘다(interval 재저장으로 재개). 요약은 정직하게 낡는다: 요약 이후 출력이 흐른 세션은 다음 갱신까지 나이와 함께 stale 로 표시된다.
-
-## 웹 터미널
-
-- **⌘F** — 스크롤백 문자열 검색, VS Code 방식, 매치 하이라이트.
-- **⌘↑ / ⌘↓** — 명령 경계 점프 (셸 통합 필요).
-- **URL 클릭 가능**, 세션 안의 프로그램(vim, 원격 ssh)이 OSC 52 로 클립보드에 복사할 수 있다.
-- **파일 드롭**: 네이티브 표면은 실경로를 꽂고, 브라우저는 내용을 업로드해 서버 쪽 경로를 꽂는다 — Finder 식 이름, uuid 없음.
-- **폰트**: macOS 는 네이티브 스택 그대로, 그 외 플랫폼은 동봉된 D2Coding 웹폰트 — 한글이 어디서나 고정폭이다.
-- 목록에서 세션에 호버하면 라이브 미리보기, 클릭하면 전체 — 둘 다 스크린샷이 아니라 진짜 터미널이다.
-
-## 다른 기기에서
-
-ttym은 `127.0.0.1`에서만 듣는다. 폰에서 쓰려면 tailnet에 올린다:
-
-```bash
-ttym remote tailscale            # tailscale serve → 호스트 허용 → 로그인 링크 + QR
-```
-
-이 머신 밖에서 오는 요청은 허용된 호스트여야 하고, 1회용 링크(`ttym remote link`)로 받은
-로그인 쿠키가 있어야 한다. Cloudflare Tunnel + Access(`ttym remote cloudflare --host … --email …`),
-SSH 포워딩과 세부 동작은 [docs/remote-access.md](docs/remote-access.md). 에이전트는
-`ttym remote doctor --json`부터 실행한다.
 
 ## 레퍼런스
 

@@ -48,8 +48,8 @@ code, pre { font-family: var(--mono); }
 .tagline { font-size: clamp(22px, 3.2vw, 38px); font-weight: 520; letter-spacing: -0.02em; line-height: 1.25; margin: 0 auto 30px; max-width: 22em; color: var(--soft); }
 .tagline .a { display: block; }
 .tagline.small { font-size: clamp(18px, 2.2vw, 26px); margin-bottom: 18px; }
-.install-line { display: inline-flex; align-items: center; gap: 10px; padding: 8px 8px 8px 22px; border-radius: 12px; background: #161618; border: 1px solid var(--line); }
-.install-line code { font-size: clamp(18px, 2vw, 24px); }
+.install-line { display: inline-flex; align-items: center; gap: 12px; max-width: 100%; padding: 8px 8px 8px 20px; border-radius: 12px; background: #161618; border: 1px solid var(--line); text-align: left; }
+.install-line code { min-width: 0; font-size: clamp(14px, 1.35vw, 17px); overflow-wrap: anywhere; }
 .install-line .p { color: var(--accent); margin-right: 6px; }
 .copy { font: 500 14px var(--mono); color: var(--soft); background: #222226; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
 .copy:hover { color: var(--ink); border-color: rgba(242, 156, 92, 0.5); }
@@ -91,6 +91,10 @@ pre .c { color: var(--dim); }
 .steps li::before { content: counter(s, decimal-leading-zero); font: 13px var(--mono); color: var(--accent); }
 .steps li > code { font-size: 16px; }
 .steps li > span { color: var(--soft); font-size: 15px; }
+.steps li.long > code { grid-column: 2 / 4; font-size: 15px; overflow-wrap: anywhere; }   /* the one-liner gets the full row */
+.steps li.long > span { grid-column: 2 / 4; }
+.after { margin: 22px 0 0; color: var(--dim); font-size: 15px; }
+.after code { white-space: nowrap; font-size: 0.9em; color: var(--soft); background: rgba(255, 255, 255, 0.07); padding: 1px 6px; border-radius: 5px; }
 
 /* ── the closing shot */
 .end { text-align: center; padding: 110px var(--gutter) 90px; border-top: 1px solid var(--line); }
@@ -110,7 +114,21 @@ pre .c { color: var(--dim); }
   .chapter:nth-of-type(even) .text { order: 0; }
   .steps li { grid-template-columns: 30px 1fr; }
   .steps li > span { grid-column: 2; }
+  /* A fixed bar that slides in mid-scroll fights touch scrolling (it covers the top of the
+     page while the finger is still moving). On phones the nav is part of the page instead:
+     it sits above the hero and scrolls away with it. */
+  .nav { position: absolute; transform: none; transition: none; background: none; border-bottom: 0;
+    backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .nav-logo { visibility: hidden; }                /* the hero's logo is right below */
   .nav nav a:not(.gh) { display: none; }
+  /* The one-liner stays one line (a URL broken mid-word reads badly) and scrolls sideways;
+     the copy button is how it gets used on a phone anyway. */
+  .hero-body { width: 100%; min-width: 0; }         /* else the nowrap line below sets the column's width */
+  .install-line { padding-left: 14px; width: 100%; }
+  .install-line code, .steps li.long > code { overflow-wrap: normal; white-space: nowrap; overflow-x: auto; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent); mask-image: linear-gradient(90deg, #000 88%, transparent); }
+  .install-line code { flex: 1; }
+  .steps li.long > code, .steps li.long > span { grid-column: 2; }
   pre .c { display: none; }                        /* the command fits; its comment is in the text above */
   .clip video { cursor: zoom-in; }
   .meta { flex-direction: column; align-items: center; }

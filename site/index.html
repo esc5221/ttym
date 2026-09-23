@@ -8,11 +8,22 @@
   <meta name="theme-color" content="#0b0b0c">
   <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
+  <link rel="canonical" href="https://ttym.pages.dev/">
+  <!-- link previews (Slack, X, KakaoTalk, iMessage…) need absolute URLs; a relative og:image shows no card -->
   <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ttym">
+  <meta property="og:url" content="https://ttym.pages.dev/">
   <meta property="og:title" content="ttym — know which agent needs you">
   <meta property="og:description" content="Get back into its terminal from anywhere. Sessions outlive the server; idle agents sleep and wake into the same conversation.">
-  <meta property="og:image" content="brand/og.png">
+  <meta property="og:image" content="https://ttym.pages.dev/brand/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="640">
+  <meta property="og:image:alt" content="ttym — Know which agent needs you. Get back into its terminal from anywhere.">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ttym — know which agent needs you">
+  <meta name="twitter:description" content="Get back into its terminal from anywhere. Sessions outlive the server; idle agents sleep and wake into the same conversation.">
+  <meta name="twitter:image" content="https://ttym.pages.dev/brand/og.png">
   <link rel="preload" href="fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="style.css">
@@ -37,10 +48,10 @@
       <div class="hero-body">
         <p class="tagline">Know which agent needs you. <span class="a">Get back into its terminal from anywhere.</span></p>
         <div class="install-line">
-          <code><span class="p">$</span> npm i -g ttym</code>
-          <button class="copy" data-copy="npm i -g ttym" aria-label="Copy the install command">copy</button>
+          <code><span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh</code>
+          <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh" aria-label="Copy the install command">copy</button>
         </div>
-        <p class="meta"><span>Node ≥ 20 · macOS and Linux</span> <a href="#film">Watch the 69-second film ↓</a></p>
+        <p class="meta"><span>Node ≥ 20 · macOS and Linux · prebuilt, from GitHub Releases</span> <a href="#film">Watch the 69-second film ↓</a></p>
       </div>
     </section>
 
@@ -122,13 +133,15 @@
     </section>
 
     <section class="install" id="install">
-      <h2>Four commands. <span class="a">Then it's yours.</span></h2>
+      <h2>Five commands. <span class="a">Then it's yours.</span></h2>
       <ol class="steps">
-        <li><code>npm i -g ttym</code><span>Node ≥ 20. The PTY holder ships as a prebuilt package per platform.</span></li>
-        <li><code>ttym</code><span>Starts the server and drops you into a workspace. The same sessions are in the browser at <code>http://localhost:7690</code>.</span></li>
+        <li class="long"><code>curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh</code><span>Downloads the build for your machine from <a href="https://github.com/esc5221/ttym/releases">GitHub Releases</a>, checks its sha256 and installs it to <code>~/.local/share/ttym</code>, with <code>ttym</code> linked in <code>~/.local/bin</code>. Needs Node ≥ 20. <a href="https://github.com/esc5221/ttym/blob/master/install.sh">Read the script first</a>.</span></li>
+        <li><code>ttym service install</code><span>Keeps the server running: it starts at login and restarts after a crash (launchd on macOS, systemd on Linux). Terminals live in their own processes, so a restart does not close them.</span></li>
         <li><code>ttym agent install claude</code><span>Hooks for Claude Code (Codex too): which agent needs you, <code>await</code>, sleep and wake.</span></li>
+        <li><code>ttym</code><span>Opens a workspace in this terminal. The same sessions are in the browser at <code>http://localhost:7690</code>.</span></li>
         <li><code>ttym remote tailscale</code><span>Your phone, one login. <a href="https://github.com/esc5221/ttym/blob/master/docs/remote-access.md">Other ways in</a>.</span></li>
       </ol>
+      <p class="after"><code>ttym upgrade</code> swaps in the latest release while your sessions keep running; <code>ttym upgrade --rollback</code> goes back one. Building from source is in the <a href="https://github.com/esc5221/ttym#install">README</a>.</p>
     </section>
   </main>
 
