@@ -199,7 +199,7 @@ async function doctor(port: number, urls: string[], json: boolean) {
   for (const base of targets) {
     const host = new URL(base).hostname;
     if (!st.allowHosts.includes(host)) steps.add('allow-host', 'fail', `${host} is not in the allowed hosts`, { fix: `ttym remote allow-host ${host}` });
-    for (const c of await checkTarget(base)) steps.add('login-gate', c.status, c.detail, c.fix ? { fix: c.fix } : {});
+    for (const c of await checkTarget(base, { port })) steps.add('login-gate', c.status, c.detail, c.fix ? { fix: c.fix } : {});
   }
   steps.finish({ bindHost: st.bindHost, allowHosts: st.allowHosts, sessions: st.sessions },
     steps.blocked ? undefined : targets.length ? 'Remote access looks right. New device: ttym remote link' : undefined);

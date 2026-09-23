@@ -15,9 +15,11 @@ If you are an agent asked to "set up remote access for ttym":
 3. Read `steps[]`. For each step:
    - `ok` / `changed`: done.
    - `fail`: run `fix` if it is a command, then re-run the same setup command.
-   - `human`: tell the user what `detail` says and give them `url`. Wait until
-     they confirm, then re-run the same setup command. Finished steps come back
-     `ok`; nothing is created twice.
+   - `human`: tell the user what `detail` says and give them `url`. If the step
+     has `alternatives`, offer those too, with their `tradeoff`, and let the
+     user choose. Wait until they confirm, then re-run the chosen command.
+     Finished steps come back `ok`; nothing is created twice.
+   - `warn`: works; pass `detail` on (for example "confirm on another device").
 4. On `ok: true` the JSON has `link` (one-time login URL, 10 minutes) and
    `next`. Give both to the user. The link logs in one browser; mint another
    with `ttym remote link --json`.

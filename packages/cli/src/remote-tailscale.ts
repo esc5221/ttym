@@ -22,6 +22,7 @@ import { addAllowHost, mintLink, printQr, remoteStatus } from './remote.js';
  * secure context: no Secure cookie, no clipboard API).
  */
 const CANDIDATES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale'];
+const IP_ALT = { command: 'ttym remote tailscale --ip', tradeoff: 'works now at http://<100.x>:<port>; plain HTTP in the browser (no clipboard API), still WireGuard-encrypted' };
 
 function findTailscale(): string | null {
   for (const bin of CANDIDATES) {
@@ -64,13 +65,17 @@ export async function cmdRemoteTailscale(port: number, args: string[], json: boo
   if (ipMode) return ipPath(bin!, st.Self?.TailscaleIPs ?? [], port, steps, dryRun, force, json, done);
   const name = (st.Self?.DNSName ?? '').replace(/\.$/, '');
   if (!name) {
-    steps.add('name', 'human', 'MagicDNS is off, so this machine has no tailnet name', { url: 'https://login.tailscale.com/admin/dns' });
+    steps.add('name', 'human', 'MagicDNS is off, so this machine has no tailnet name — turn it on for the tailnet (this machine can keep its own DNS: tailscale set --accept-dns=false)', {
+      url: 'https://login.tailscale.com/admin/dns', alternatives: [IP_ALT],
+    });
     done();
   }
   steps.add('login', 'ok', `signed in as ${name}`);
 
   if (!(st.CertDomains ?? []).includes(name)) {
-    steps.add('https', 'human', 'HTTPS certificates are off for this tailnet — turn on "HTTPS Certificates" under DNS (once per tailnet). Without them: ttym remote tailscale --ip', { url: 'https://login.tailscale.com/admin/dns' });
+    steps.add('https', 'human', 'HTTPS certificates are off for this tailnet — turn on "HTTPS Certificates" under DNS (once per tailnet)', {
+      url: 'https://login.tailscale.com/admin/dns', alternatives: [IP_ALT],
+    });
     done({ host: name });
   }
   steps.add('https', 'ok', 'HTTPS certificates enabled');
@@ -101,7 +106,7 @@ export async function cmdRemoteTailscale(port: number, args: string[], json: boo
   if (dryRun) done({ host: name });
 
   // The first request on a fresh name waits for the certificate; give it time.
-  for (const c of await checkTarget(`https://${name}`, { retryMs: 45_000 })) steps.add('doctor', c.status, c.detail, c.fix ? { fix: c.fix } : {});
+  for (const c of await checkTarget(`https://${name}`, { retryMs: 45_000, port })) steps.add('doctor', c.status, c.detail, c.fix ? { fix: c.fix } : {});
   if (steps.blocked) done({ host: name });
 
   const l = await mintLink(port, name);

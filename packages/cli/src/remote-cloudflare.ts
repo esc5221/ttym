@@ -216,7 +216,7 @@ export async function cmdRemoteCloudflare(port: number, args: string[], json: bo
 
   if (dryRun) done();
 
-  for (const c of await checkTarget(`https://${host}`, { retryMs: 60_000 })) steps.add('doctor', c.status, c.detail, c.fix ? { fix: c.fix } : {});
+  for (const c of await checkTarget(`https://${host}`, { retryMs: 60_000, port })) steps.add('doctor', c.status, c.detail, c.fix ? { fix: c.fix } : {});
   if (steps.blocked) done();
 
   const l = await mintLink(port, host!);
