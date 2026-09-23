@@ -95,7 +95,7 @@ export async function cmdUpgrade() {
   }
 
   if (!existsSync(buildScript)) {
-    console.error('upgrade needs a source checkout (scripts/build.sh) — npm installs upgrade via npm itself');
+    console.error('this is an npm install — upgrade with: npm i -g ttym@latest && ttym restart   (sessions survive the restart)');
     process.exit(EXIT.FAIL);
   }
 

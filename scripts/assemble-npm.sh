@@ -8,14 +8,25 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION=$(node -e "console.log(require('$ROOT/package.json').version)")
 PLATFORM="${TTYM_NPM_PLATFORM:-$(node -e 'console.log(process.platform + "-" + process.arch)')}"
 STAGE="$ROOT/npm-staging"
+# CI builds each holder on its own runner and hands the binary in here.
+HOLDER="${TTYM_NPM_HOLDER:-$ROOT/dist/ttym-holder}"
 
 [ -f "$ROOT/dist/ttym" ] || { echo "dist/ 없음 — scripts/build.sh 먼저"; exit 1; }
-rm -rf "$STAGE"
+# Only this run's two packages — CI calls this once per platform into the same stage.
+rm -rf "$STAGE/ttym" "$STAGE/holder-$PLATFORM"
 mkdir -p "$STAGE/ttym/dist" "$STAGE/holder-$PLATFORM"
 
 # 메인 패키지 (holder 제외 — 플랫폼 패키지가 담당)
-cp "$ROOT/dist/ttym" "$ROOT/dist/ttym-server.js" "$STAGE/ttym/dist/"
+cp "$ROOT/dist/ttym" "$ROOT/dist/ttym-server.js" "$ROOT/dist/package.json" "$STAGE/ttym/dist/"
 cp "$ROOT/README.md" "$STAGE/ttym/"
+# The paths below mirror the repo on purpose: the server reads the web app
+# from dist/../packages/web/dist and `ttym agent install` points hooks at
+# dist/../scripts/*.sh. Same layout, no install-time path logic.
+[ -f "$ROOT/packages/web/dist/index.html" ] || { echo "packages/web/dist 없음 — scripts/build.sh 먼저"; exit 1; }
+mkdir -p "$STAGE/ttym/packages/web" "$STAGE/ttym/scripts"
+cp -R "$ROOT/packages/web/dist" "$STAGE/ttym/packages/web/dist"
+cp "$ROOT"/scripts/ttym-*-hook.sh "$ROOT/scripts/ttym-shell-integration.zsh" "$STAGE/ttym/scripts/"
+chmod 755 "$STAGE/ttym/scripts/"*.sh
 node - <<NODE
 const fs = require('fs');
 const platforms = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64'];
@@ -27,14 +38,16 @@ fs.writeFileSync('$STAGE/ttym/package.json', JSON.stringify({
   license: 'MIT',
   repository: { type: 'git', url: 'git+https://github.com/esc5221/ttym.git' },
   bin: { ttym: './dist/ttym' },
-  files: ['dist/'],
+  files: ['dist/', 'packages/web/dist/', 'scripts/'],
   engines: { node: '>=20' },
+  os: ['darwin', 'linux'],
   optionalDependencies: optional,
 }, null, 2) + '\n');
 NODE
 
 # 플랫폼 holder 패키지 (현재 러너의 것 하나)
-cp "$ROOT/dist/ttym-holder" "$STAGE/holder-$PLATFORM/"
+cp "$HOLDER" "$STAGE/holder-$PLATFORM/ttym-holder"
+chmod 755 "$STAGE/holder-$PLATFORM/ttym-holder"
 node - <<NODE
 const fs = require('fs');
 const [os, cpu] = '$PLATFORM'.split('-');

@@ -1,6 +1,7 @@
-# 태그 v*.*.* 푸시 → 플랫폼별 빌드 → npm publish + GitHub Release 부산물.
+# 태그 v*.*.* 푸시 → holder 4종 빌드 → 설치 스모크 → npm publish(holder 먼저, 메인 나중) + GitHub Release.
 # holder는 optionalDependencies 플랫폼 패키지로 배포된다 — postinstall 다운로드 금지.
-# 필요 시크릿: NPM_TOKEN (automation token, @ttym org publish 권한)
+# linux holder는 musl 정적 빌드: ubuntu 러너의 glibc 버전에 묶이면 오래된 배포판에서 실행이 안 된다.
+# 필요 시크릿: NPM_TOKEN (automation token, @ttym org publish 권한) — trusted publishing으로 옮기면 삭제.
 name: release
 
 on:
@@ -8,17 +9,35 @@ on:
     tags: ['v*.*.*']
 
 jobs:
-  build:
+  holder:
     strategy:
       matrix:
         include:
-          - os: macos-14
-            platform: darwin-arm64
-            publish_main: true   # 플랫폼 무관 메인 패키지는 한 러너만 publish
-          - os: ubuntu-latest
-            platform: linux-x64
-            publish_main: false
+          - { os: macos-14,         platform: darwin-arm64, target: aarch64-apple-darwin }
+          - { os: macos-14,         platform: darwin-x64,   target: x86_64-apple-darwin }
+          - { os: ubuntu-24.04,     platform: linux-x64,    target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-24.04-arm, platform: linux-arm64,  target: aarch64-unknown-linux-musl }
     runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: '${{ matrix.target }}' }
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --target ${{ matrix.target }}
+        working-directory: holder
+      - name: sign (macOS) and smoke
+        run: |
+          B=holder/target/${{ matrix.target }}/release/ttym-holder
+          if [ "$(uname)" = Darwin ]; then codesign -f -s - "$B"; fi
+          file "$B"
+          mkdir -p out && cp "$B" out/ttym-holder
+      - uses: actions/upload-artifact@v4
+        with: { name: 'holder-${{ matrix.platform }}', path: out/ttym-holder }
+
+  publish:
+    needs: holder
+    runs-on: ubuntu-24.04
     permissions:
       contents: write   # release 업로드
       id-token: write   # npm --provenance
@@ -29,26 +48,53 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, registry-url: 'https://registry.npmjs.org' }
       - uses: dtolnay/rust-toolchain@stable
+      - name: tag matches package.json
+        run: |
+          V=$(node -p "require('./package.json').version")
+          [ "v$V" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != package.json v$V"; exit 1; }
       - run: pnpm install --frozen-lockfile
       - run: ./scripts/build.sh
-      - run: ./scripts/assemble-npm.sh
-        env: { TTYM_NPM_PLATFORM: '${{ matrix.platform }}' }
-
-      - name: publish holder package
-        run: cd npm-staging/holder-${{ matrix.platform }} && npm publish --provenance --access public
-        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
-
-      - name: publish main package
-        if: matrix.publish_main
-        run: cd npm-staging/ttym && npm publish --provenance --access public
-        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
-
-      - name: tarball for the release page
+      - uses: actions/download-artifact@v4
+        with: { path: holders }
+      - name: assemble all platforms
         run: |
-          tar -czf ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz -C dist ttym ttym-server.js ttym-holder
-          shasum -a 256 ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz > ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz.sha256
+          for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            TTYM_NPM_PLATFORM=$p TTYM_NPM_HOLDER=holders/holder-$p/ttym-holder ./scripts/assemble-npm.sh
+          done
+          ls npm-staging
+      - name: install smoke (linux-x64, from the packed tarballs)
+        run: |
+          cd npm-staging
+          (cd ttym && npm pack --pack-destination ..) && (cd holder-linux-x64 && npm pack --pack-destination ..)
+          P=$RUNNER_TEMP/prefix
+          npm i -g --prefix $P ./ttym-holder-linux-x64-*.tgz ./ttym-[0-9]*.tgz
+          export TTYM_HOME=$RUNNER_TEMP/home PORT=7690
+          $P/bin/ttym new smoke -- /bin/sh
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7690/)" = 200
+          $P/bin/ttym remote doctor
+          test -x $P/lib/node_modules/ttym/scripts/ttym-claude-stop-hook.sh
+          $P/bin/ttym stop
+      - name: publish holders, then the main package
+        run: |
+          for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            (cd npm-staging/holder-$p && npm publish --provenance --access public)
+          done
+          cd npm-staging/ttym && npm publish --provenance --access public
+        env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
+      - name: tarballs for the release page
+        run: |
+          for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            # Same layout as the npm package: the server finds dist/../packages/web/dist, hooks dist/../scripts.
+            d=stage-$p; mkdir -p $d/dist $d/packages/web $d/scripts
+            cp dist/ttym dist/ttym-server.js dist/package.json holders/holder-$p/ttym-holder $d/dist/
+            cp -R packages/web/dist $d/packages/web/dist
+            cp scripts/ttym-*-hook.sh scripts/ttym-shell-integration.zsh $d/scripts/
+            chmod 755 $d/dist/ttym-holder $d/dist/ttym $d/scripts/*.sh
+            tar -czf ttym-${GITHUB_REF_NAME}-$p.tar.gz -C $d .
+            shasum -a 256 ttym-${GITHUB_REF_NAME}-$p.tar.gz > ttym-${GITHUB_REF_NAME}-$p.tar.gz.sha256
+          done
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz
-            ttym-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz.sha256
+            ttym-*.tar.gz
+            ttym-*.tar.gz.sha256
