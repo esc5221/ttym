@@ -28,7 +28,7 @@
 .sec p { margin: 0 0 18px; max-width: 46em; }
 .sec code, .doc-head code { font-size: 0.88em; background: rgba(255, 255, 255, 0.07); padding: 1px 5px; border-radius: 5px; }
 .sec pre code { background: none; padding: 0; font-size: inherit; }
-.sec pre { margin: 22px 0; font-size: 14px; line-height: 1.55; }
+.sec pre { margin: 22px 0; font-size: 14px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .sec pre .a { color: var(--accent); }
 .src { font: 13px var(--mono); color: var(--dim) !important; margin-top: 26px !important; }
 .src a { color: var(--soft); }
@@ -42,6 +42,10 @@
 
 .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; margin-top: 30px; }
 .split pre.mini { margin: 8px 0 14px; }
+.path { margin: 8px 0 6px !important; }
+.files { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 7px 16px; margin: 0; font-size: 14px; line-height: 1.45; }
+.files dt { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+.files dd { margin: 0; color: var(--soft); }
 .ladder { margin: 0; padding-left: 22px; display: grid; gap: 8px; font-size: 15px; }
 .ladder li::marker { color: var(--accent); font-family: var(--mono); }
 
@@ -111,7 +115,24 @@
 .frame b { color: var(--accent); font-weight: 600; margin-right: 6px; }
 .frame i { display: block; font-style: normal; font-size: 12px; color: var(--dim); }
 .frame .f-seq { background: rgba(242, 156, 92, 0.08); }
-pre.cmdtab { font-size: 13.5px; }
+/* command table: four columns; on phones the note drops under the name */
+.cmdtab { margin: 26px 0 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 14px; }
+.cmdtab .r { display: grid; grid-template-columns: 112px minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(0, 1.4fr); gap: 4px 14px; padding: 8px 16px; border-top: 1px solid var(--line); align-items: baseline; }
+.cmdtab .r:first-child { border-top: 0; }
+.cmdtab .h { background: var(--panel); font: 12px var(--mono); color: var(--dim); letter-spacing: 0.04em; }
+.cmdtab .x { font: 13px var(--mono); color: var(--accent); }
+.cmdtab b { font: 600 13.5px var(--mono); color: var(--ink); overflow-wrap: anywhere; }
+.cmdtab .d { color: var(--dim); font-size: 13.5px; }
+.cmdtab .o { font: 13px var(--mono); color: var(--soft); overflow-wrap: anywhere; }
+
+/* layers: the label on the left, packages beside it */
+.layers { margin: 22px 0 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.layer { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 16px; padding: 14px 18px; border-top: 1px solid var(--line); }
+.layer:first-child { border-top: 0; }
+.layer .ln { font: 600 12.5px var(--mono); color: var(--accent); letter-spacing: 0.06em; padding-top: 2px; }
+.layer dl { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 6px 18px; margin: 0; font-size: 14.5px; line-height: 1.45; }
+.layer dt { font: 13.5px var(--mono); color: var(--ink); }
+.layer dd { margin: 0; color: var(--soft); }
 
 /* ── 06: the gate as a numbered path */
 .gate { list-style: none; counter-reset: g; margin: 28px 0 0; padding: 0; display: grid; gap: 0; }
@@ -146,6 +167,13 @@ pre.cmdtab { font-size: 13.5px; }
   .seq-body, .split, .verdicts, .verdicts.two { grid-template-columns: minmax(0, 1fr); }
   .diagram { padding: 14px 12px 12px; }
   .gate > li { padding-left: 46px; }
+  .cmdtab .r { grid-template-columns: 64px minmax(0, 1fr); }
+  .cmdtab .h span:nth-child(n+3) { display: none; }
+  .cmdtab .d, .cmdtab .o { grid-column: 2; }
+  .cmdtab .d:empty, .cmdtab .o:empty { display: none; }
+  .layer { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .layer dl, .files { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .layer dd, .files dd { margin-bottom: 8px; }
 }
 /* the landing page hides the small logo on phones because its hero shows the big one; this page has no hero */
 @media (max-width: 860px), (pointer: coarse) {

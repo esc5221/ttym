@@ -76,7 +76,8 @@
         <p class="num">01</p>
         <h2>10 agents running. <span class="a">One is waiting on you.</span></h2>
         <p>The work map lists every session with a one-line summary of what it is doing and what it waits on. The one that needs you says so. Click it and you are in its terminal.</p>
-        <pre><code>ttym map refresh      <span class="c"># summarize every session that changed</span></code></pre>
+        <pre><code><span class="c"># summarize every session that changed</span>
+ttym map refresh</code></pre>
       </div>
       <figure class="clip"><video data-src="media/s1.mp4" poster="media/s1.jpg" muted loop playsinline preload="none"></video></figure>
     </section>
@@ -96,7 +97,8 @@
         <p class="num">03</p>
         <h2>Same terminal, <span class="a">on your phone.</span></h2>
         <p>One process holds the terminal; the laptop and the phone are both views of it. Type on either and it shows on both. Put ttym on your tailnet and devices signed in to your Tailscale account open it with no extra login.</p>
-        <pre><code>ttym remote tailscale   <span class="c"># or Cloudflare Tunnel + Access</span></code></pre>
+        <pre><code><span class="c"># or Cloudflare Tunnel + Access</span>
+ttym remote tailscale</code></pre>
       </div>
       <figure class="clip wide"><video data-src="media/s3.mp4" poster="media/s3.jpg" muted loop playsinline preload="none"></video></figure>
     </section>
@@ -116,7 +118,8 @@
         <p class="num">05</p>
         <h2>Idle agents sleep. <span class="a">Same conversation when they wake.</span></h2>
         <p>An agent left alone for 30 minutes is stopped and its RAM returned (374 MB in the film). The screen stays. The next keystroke runs <code>claude --resume</code> with the same session id; in the film it was back in 2.5 s.</p>
-        <pre><code>ttym agent sleep :limiter   <span class="c"># or let the 30-minute timer do it</span></code></pre>
+        <pre><code><span class="c"># or let the 30-minute timer do it</span>
+ttym agent sleep :limiter</code></pre>
       </div>
       <figure class="clip"><video data-src="media/s5.mp4" poster="media/s5.jpg" muted loop playsinline preload="none"></video></figure>
     </section>

@@ -200,22 +200,24 @@
           <div class="card"><h3>Snapshots carry a seq</h3><p>The seq on a snapshot is the watermark it was rendered at. The client moves its <code>fromSeq</code> to it, so a resync does not fall back into another snapshot.</p></div>
         </div>
 
-<pre class="cmdtab"><code><span class="c">cmd   name          direction</span>
-0x00  DATA          both (seq prefix server → client only)
-0x01  RESIZE        client → server
-0x02  CREATE        client → server
-0x03  DESTROY       client → server
-0x06  HELLO         handshake
-0x07  LIST          sessions
-0x08  ATTACH        client → server   {fromSeq, cols, rows, mode}
-0x09  DETACH        client → server
-0x0a  SNAPSHOT      server → client   [u32 seq] + screen
-0x0b  ACK           client → server   [u32 seq]
-0x04  PAUSE · 0x05 RESUME · 0x0c PAUSE_VIEW · 0x0d RESUME_VIEW   flow control
-0x0e  WORKSPACE     server → client   full tree + generation, never a diff
-0x0f  AGENT         server → client   agent kind / active / sleep
-0x10  CONFIG        server → client   full values, never a diff
-0x11  VIEW          server → client   the pane's viewer tabs, whole set</code></pre>
+<div class="cmdtab" role="table" aria-label="Client–server commands">
+          <div class="r h" role="row"><span role="columnheader">cmd</span><span role="columnheader">name</span><span role="columnheader">direction</span><span role="columnheader">payload / note</span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x00</span><b role="cell">DATA</b><span class="d" role="cell">both</span><span class="o" role="cell">seq prefix server → client only</span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x01</span><b role="cell">RESIZE</b><span class="d" role="cell">client → server</span><span class="o" role="cell"></span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x02</span><b role="cell">CREATE</b><span class="d" role="cell">client → server</span><span class="o" role="cell"></span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x03</span><b role="cell">DESTROY</b><span class="d" role="cell">client → server</span><span class="o" role="cell"></span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x06</span><b role="cell">HELLO</b><span class="d" role="cell">handshake</span><span class="o" role="cell"></span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x07</span><b role="cell">LIST</b><span class="d" role="cell">sessions</span><span class="o" role="cell"></span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x08</span><b role="cell">ATTACH</b><span class="d" role="cell">client → server</span><span class="o" role="cell">{fromSeq, cols, rows, mode}</span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x09</span><b role="cell">DETACH</b><span class="d" role="cell">client → server</span><span class="o" role="cell"></span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x0a</span><b role="cell">SNAPSHOT</b><span class="d" role="cell">server → client</span><span class="o" role="cell">[u32 seq] + screen</span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x0b</span><b role="cell">ACK</b><span class="d" role="cell">client → server</span><span class="o" role="cell">[u32 seq]</span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x04 0x05 0x0c 0x0d</span><b role="cell">PAUSE · RESUME · PAUSE_VIEW · RESUME_VIEW</b><span class="d" role="cell">flow control</span><span class="o" role="cell"></span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x0e</span><b role="cell">WORKSPACE</b><span class="d" role="cell">server → client</span><span class="o" role="cell">full tree + generation, never a diff</span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x0f</span><b role="cell">AGENT</b><span class="d" role="cell">server → client</span><span class="o" role="cell">agent kind / active / sleep</span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x10</span><b role="cell">CONFIG</b><span class="d" role="cell">server → client</span><span class="o" role="cell">full values, never a diff</span></div>
+          <div class="r" role="row"><span class="x" role="cell">0x11</span><b role="cell">VIEW</b><span class="d" role="cell">server → client</span><span class="o" role="cell">the pane's viewer tabs, whole set</span></div>
+        </div>
         <p class="src">Source: <a href="https://github.com/esc5221/ttym/blob/master/docs/architecture.md">docs/architecture.md · wire protocol</a> · <a href="https://github.com/esc5221/ttym/blob/master/packages/protocol/src/index.ts">packages/protocol</a></p>
       </section>
 
@@ -224,7 +226,8 @@
         <p class="num">04</p>
         <h2><a href="#await">Agents as functions</a></h2>
         <p><code>ttym await</code> sends a prompt to an agent's terminal and blocks until that turn ends, then returns that turn's answer. The end of a turn comes from the agent's own Stop hook, not from watching the screen, so a long pause in the output does not end the wait early.</p>
-<pre><code>ttym agent install claude          <span class="c"># SessionStart / Stop / StopFailure / SessionEnd hooks</span>
+<pre><code><span class="c"># SessionStart / Stop / StopFailure / SessionEnd hooks</span>
+ttym agent install claude
 ttym workspace add --current --name helper --role agent --cmd claude
 ttym await :helper --json -- "Why does this stack trace happen?"</code></pre>
 
@@ -370,9 +373,12 @@ sleeps per tick      3, 3 s apart</code></pre>
 <pre><code><span class="c"># ~/.zshrc; does nothing outside ttym panes</span>
 [[ -n "$TTYM_SESSION_ID" ]] &amp;&amp; source ~/.local/share/ttym/scripts/ttym-shell-integration.zsh
 
-ttym commands :build              <span class="c"># ✓/✗, exit code, duration, command line</span>
-ttym output :build --cmd 3        <span class="c"># one command's output, cut at the marks</span>
-ttym await :build -- "make test"  <span class="c"># send, wait for the end mark, get exit code + output</span></code></pre>
+<span class="c"># ✓/✗, exit code, duration, command line</span>
+ttym commands :build
+<span class="c"># one command's output, cut at the marks</span>
+ttym output :build --cmd 3
+<span class="c"># send, wait for the end mark, get exit code + output</span>
+ttym await :build -- "make test"</code></pre>
         <p><code>await</code> picks its path from evidence: a pane that has shown integration marks gets the command path, and agent panes keep the Stop hook path. In the web terminal the same marks drive ⌘↑ / ⌘↓, which jump between command boundaries in the scrollback.</p>
         <p class="src">Source: <a href="https://github.com/esc5221/ttym#shell-integration">README · Shell integration</a></p>
       </section>
@@ -382,35 +388,27 @@ ttym await :build -- "make test"  <span class="c"># send, wait for the end mark,
         <p class="num">08</p>
         <h2><a href="#repo">Repo map</a></h2>
         <p>Lower layers change least. Fixes go in from the bottom, and the surface changes last.</p>
-<pre class="layers"><code><span class="a">CONSUMER</span>  @ttym/web        browser app: dashboard, splits, agent state
-          @ttym/desktop    Tauri shell around the same contract
-          anything with a shell: the CLI is the compatibility boundary
-
-<span class="a">CONTRACT</span>  @ttym/cli        headless surface: new · split · send · await · screen
-          @ttym/protocol   wire format, one implementation for both ends
-          @ttym/api        HTTP client shared by the apps
-
-<span class="a">CORE</span>      @ttym/server     authority on terminal state: cell grid, scrollback,
-                           markers, sessions, workspaces, interactions
-          @ttym/vt         framework-free client core: WS mux, local echo, ANSI
-          @ttym/ui         React terminal host + layout views
-          @ttym/shared     domain rules both ends must agree on (layout tree)
-
-<span class="a">BASE</span>      ttym-holder      Rust, one per session, detached, owns the PTY.
-                           Talks to the server over a unix socket only.</code></pre>
+<div class="layers">
+          <div class="layer"><span class="ln">CONSUMER</span><dl><dt>@ttym/web</dt><dd>browser app: dashboard, splits, agent state</dd><dt>@ttym/desktop</dt><dd>Tauri shell around the same contract</dd><dt>any shell</dt><dd>the CLI is the compatibility boundary</dd></dl></div>
+          <div class="layer"><span class="ln">CONTRACT</span><dl><dt>@ttym/cli</dt><dd>headless surface: new · split · send · await · screen</dd><dt>@ttym/protocol</dt><dd>wire format, one implementation for both ends</dd><dt>@ttym/api</dt><dd>HTTP client shared by the apps</dd></dl></div>
+          <div class="layer"><span class="ln">CORE</span><dl><dt>@ttym/server</dt><dd>authority on terminal state: cell grid, scrollback, markers, sessions, workspaces, interactions</dd><dt>@ttym/vt</dt><dd>framework-free client core: WS mux, local echo, ANSI</dd><dt>@ttym/ui</dt><dd>React terminal host + layout views</dd><dt>@ttym/shared</dt><dd>domain rules both ends must agree on (layout tree)</dd></dl></div>
+          <div class="layer"><span class="ln">BASE</span><dl><dt>ttym-holder</dt><dd>Rust, one per session, detached, owns the PTY. Talks to the server over a unix socket only.</dd></dl></div>
+        </div>
 
         <div class="split">
           <div>
             <h3>State on disk</h3>
-<pre class="mini"><code>~/.ttym/
-  run/workspaces.json      workspaces, atomic writes
-  run/session-N.json       one per session
-  run/snapshot-N.json      checkpoints (rendered ANSI)
-  run/meta-N.json          annotations + runtime keys
-  run/sleep-N.ansi         frozen screens of sleeping agents
-  run/viewer.json          ttym open tabs
-  remote.json              gate state, 0600, hashed tokens
-  ttym.log                 one log; copy-truncate at 64 MB</code></pre>
+<p class="path"><code>~/.ttym/</code></p>
+            <dl class="files">
+              <dt>run/workspaces.json</dt><dd>workspaces, atomic writes</dd>
+              <dt>run/session-N.json</dt><dd>one per session</dd>
+              <dt>run/snapshot-N.json</dt><dd>checkpoints (rendered ANSI)</dd>
+              <dt>run/meta-N.json</dt><dd>annotations + runtime keys</dd>
+              <dt>run/sleep-N.ansi</dt><dd>frozen screens of sleeping agents</dd>
+              <dt>run/viewer.json</dt><dd><code>ttym open</code> tabs</dd>
+              <dt>remote.json</dt><dd>gate state, 0600, hashed tokens</dd>
+              <dt>ttym.log</dt><dd>one log, copy-truncate at 64 MB</dd>
+            </dl>
           </div>
           <div>
             <h3>Tests</h3>
