@@ -9,6 +9,7 @@
   "dependencies": {
     "@ttym/api": "workspace:*",
     "@ttym/protocol": "workspace:*",
+    "qrcode-terminal": "0.12.0",
     "ws": "^8.18.0"
   }
 }
