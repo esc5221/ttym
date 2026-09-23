@@ -2,18 +2,41 @@
 
 > 🇰🇷 한국어: [README.ko.md](README.ko.md)
 
-A web-based terminal multiplexer. One server owns the PTY sessions; attach from
-the CLI, a browser, or the desktop app and you see and drive the same session.
-Restart the server, or swap in a new build, and the sessions survive: same
-processes, same screens.
+You're running a dozen coding agents. Right now one is blocked on you and the
+rest are still working — and you're cycling through terminal tabs to find which.
+ttym puts them on one board, tells you which needs you, and drops you into that
+exact terminal from your phone, the browser, or the CLI.
+
+![The work map — which of your sessions needs you, on one board](docs/assets/s1-hero.png)
+
+One server owns the PTYs, so the agents keep running when you close the tab,
+restart the server, or swap in a new build. Idle agents sleep to give your RAM
+back and wake into the same conversation. Ask an agent to write a plan and it
+opens as a tab on that agent's pane — not a lost Chrome tab.
+
+![The same live session in two windows — type in one, it shows in the other](docs/assets/s2-mirror.png)
+
+*One PTY, many clients: the CLI, a browser tab, your phone — all attached to the
+same live terminal. Type in one, it's in the others.*
 
 ## Why
 
-- Run agents (Claude Code, Codex, …) for hours and attach/detach from anywhere.
-- Group terminals into a `workspace` and script them with `send` / `await`.
-- Watch the very same session from a browser.
-- Ask an AI to keep a live map of what every session is doing.
-- Upgrade the server without killing the work running inside it.
+- **Know which agent needs you.** A live map of every session with an AI
+  one-liner of what it's doing and what it waits on — jump straight in.
+- **Sessions outlive everything.** One server holds the PTYs; the CLI, browser,
+  and desktop are just viewers. Close a client, restart or upgrade the server —
+  the processes and scrollback stay.
+- **Reclaim RAM without losing work.** Idle Claude/Codex panes sleep (hundreds
+  of MB each) and wake into the exact conversation on your next keystroke.
+- **Drive agents like functions.** Group terminals into a `workspace` and script
+  them with `send` / `await`.
+- **Same session, any screen — including your phone.** The browser is the real
+  interactive terminal, not a dashboard.
+
+![An idle agent asleep — the process is gone, the conversation stays, a keystroke wakes it](docs/assets/s3-sleep.png)
+
+*Turn an idle agent off to get its RAM back; the screen and the conversation
+stay frozen on disk, and the next keystroke resumes it right where it left off.*
 
 ## Architecture
 
