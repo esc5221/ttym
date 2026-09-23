@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
+import { dedupeFlags } from '@ttym/protocol';
 import { resolveCurrentWorkspace, findWorkspaceBySessionId, listWorkspaces, resolveAddress } from './addresses.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 // ───── Agent Integration ─────
@@ -96,12 +97,16 @@ export const AGENTS = {
  *
  *  같은 플래그가 겹치면 뒤엣것이 이기는 건 에이전트 CLI 의 몫이다. 우리는
  *  순서만 보장한다.
+ *
+ *  값까지 똑같은 플래그는 마지막 것 하나만 남긴다(dedupeFlags). 절전이 돌려준
+ *  argv 에 지난번 config 가 이미 들어 있어서, 안 거르면 wake 마다 하나씩 쌓인다.
  */
 export function buildResumeArgs(options) {
   const { baseArgs, config = '', env = '', extra = [] } = options;
   const split = (text) => String(text || '').split(/\s+/).filter(Boolean);
-  return [...baseArgs, ...split(config), ...split(env), ...extra];
+  return [...baseArgs, ...dedupeFlags([...split(config), ...split(env), ...extra])];
 }
+
 
 function isttymHook(command, cfg) {
   return cfg.hooks.some((hook) => command === hook.command)

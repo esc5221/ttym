@@ -114,6 +114,9 @@ describe('helpers', () => {
   it('resume gets the flags the agent ran with, minus the ones that name a session', () => {
     expect(resumeArgsFrom('/x/claude --dangerously-skip-permissions --model opus')).toEqual(['--dangerously-skip-permissions', '--model', 'opus']);
     expect(resumeArgsFrom('claude --resume abc --dangerously-skip-permissions')).toEqual(['--dangerously-skip-permissions']);
+    // wake 를 여러 번 거친 pane 의 argv — 쌓인 중복은 저장할 때 하나로
+    expect(resumeArgsFrom('claude --resume abc --dangerously-skip-permissions --dangerously-skip-permissions --fork-session --dangerously-skip-permissions'))
+      .toEqual(['--fork-session', '--dangerously-skip-permissions']);
     expect(resumeArgsFrom('claude -c')).toEqual([]);
     expect(resumeArgsFrom('claude --session-id x -r y --verbose')).toEqual(['--verbose']);
     expect(resumeArgsFrom('claude')).toEqual([]);

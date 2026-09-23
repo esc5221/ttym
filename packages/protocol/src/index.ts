@@ -173,3 +173,4 @@ export function payloadText(payload: Uint8Array): string {
 export { isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from './meta.js';
 export type { ViewKind, ViewRenderer, ViewPresentation, ViewItem, ViewOpenRequest, ViewerState, ViewChangeEvent } from './viewer.js';
 export { VIEW_MAX_TABS } from './viewer.js';
+export { dedupeFlags } from './resume-args.js';

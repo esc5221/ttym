@@ -27,6 +27,7 @@
  */
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { dedupeFlags } from '@ttym/protocol';
 import type { Session } from './session.js';
 
 export type SleepPhase = 'sleeping' | 'waking' | 'failed';
@@ -125,6 +126,8 @@ export function isPassiveInput(data: Buffer): boolean {
 /**
  * The flags to hand `resume`: the agent's own argv minus the ones that name a
  * session (`--resume x`, `--continue`, `--session-id x`) — resume names one itself.
+ * Duplicates collapse (dedupeFlags) so a pane that already piled some up types
+ * a clean line on its next wake.
  */
 export function resumeArgsFrom(command: string): string[] {
   const tokens = command.trim().split(/\s+/).slice(1);
@@ -139,7 +142,7 @@ export function resumeArgsFrom(command: string): string[] {
     if (t === '-c') { if (tokens[i + 1]?.includes('=')) { out.push(t, tokens[++i]!); } continue; }
     out.push(t);
   }
-  return out;
+  return dedupeFlags(out);
 }
 
 function shellQuote(arg: string): string {
