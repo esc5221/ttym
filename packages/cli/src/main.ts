@@ -41,7 +41,7 @@ function printHelp() {
   console.log('  agent install <agent>        Install agent hook (claude, codex)');
   console.log('  service install|uninstall|status  Supervised residency: boot at login, restart on crash');
   console.log('  remote <command>             Reach ttym from another device (tailscale · cloudflare · link · doctor)');
-  console.log('  upgrade [--check|--rollback]  Swap in a new build, sessions stay alive');
+  console.log('  upgrade [--check|--rollback|--force]  Swap in the latest release (or a new build), sessions stay alive');
   console.log('  version [--json]             CLI + server versions');
   console.log('  start / stop / restart / log Server lifecycle (start is one-shot; entry verbs autostart)');
   console.log('  help                         This text');

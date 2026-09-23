@@ -1,7 +1,8 @@
-# 태그 v*.*.* 푸시 → holder 4종 빌드 → 설치 스모크 → npm publish(holder 먼저, 메인 나중) + GitHub Release.
-# holder는 optionalDependencies 플랫폼 패키지로 배포된다 — postinstall 다운로드 금지.
+# 태그 v*.*.* 푸시 → holder 4종 빌드 → 설치 스모크 2종 → GitHub Release(tarball + install.sh) → npm publish.
+# GitHub Release가 1차 배포 경로다 (install.sh가 releases/latest/download/ttym-<platform>.tar.gz를 받는다).
+# npm은 NPM_TOKEN 시크릿이 있을 때만 publish한다 — 없으면 건너뛰고 Release는 그대로 나간다.
+# holder는 npm에선 optionalDependencies 플랫폼 패키지로 배포된다 — postinstall 다운로드 금지.
 # linux holder는 musl 정적 빌드: ubuntu 러너의 glibc 버전에 묶이면 오래된 배포판에서 실행이 안 된다.
-# 필요 시크릿: NPM_TOKEN (automation token, @ttym org publish 권한) — trusted publishing으로 옮기면 삭제.
 name: release
 
 on:
@@ -41,6 +42,9 @@ jobs:
   publish:
     needs: holder
     runs-on: ubuntu-24.04
+    env:
+      # secrets.* cannot appear in a step `if:`; a job env can.
+      HAS_NPM: ${{ secrets.NPM_TOKEN != '' }}
     permissions:
       contents: write   # release 업로드
       id-token: write   # npm --provenance
@@ -78,30 +82,35 @@ jobs:
           $P/bin/ttym remote doctor
           test -x $P/lib/node_modules/ttym/scripts/ttym-claude-stop-hook.sh
           $P/bin/ttym stop
-      - name: publish holders, then the main package
+      - name: release tarballs
+        run: |
+          for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            ./scripts/pack-release.sh $p holders/holder-$p/ttym-holder release-staging
+          done
+          cp install.sh release-staging/
+          ls -l release-staging
+      - name: install smoke (linux-x64, install.sh from the release tarball)
+        run: |
+          export HOME=$RUNNER_TEMP/rhome TTYM_HOME=$RUNNER_TEMP/rhome/.ttym PORT=7691
+          mkdir -p $HOME
+          TTYM_TARBALL=release-staging/ttym-linux-x64.tar.gz sh install.sh
+          $HOME/.local/bin/ttym new smoke -- /bin/sh
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7691/)" = 200
+          test "$($HOME/.local/bin/ttym version --json | node -p 'JSON.parse(require("fs").readFileSync(0)).version')" = "$(node -p "require('./package.json').version")"
+          test -x $HOME/.local/share/ttym/scripts/ttym-claude-stop-hook.sh
+          $HOME/.local/bin/ttym stop
+      - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release-staging/ttym-*.tar.gz
+            release-staging/ttym-*.tar.gz.sha256
+            release-staging/install.sh
+      - name: npm publish (holders first, then the main package)
+        if: startsWith(github.ref, 'refs/tags/') && env.HAS_NPM == 'true'
         run: |
           for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
             (cd npm-staging/holder-$p && npm publish --provenance --access public)
           done
           cd npm-staging/ttym && npm publish --provenance --access public
         env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
-      - name: tarballs for the release page
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
-            # Same layout as the npm package: the server finds dist/../packages/web/dist, hooks dist/../scripts.
-            d=stage-$p; mkdir -p $d/dist $d/packages/web $d/scripts
-            cp dist/ttym dist/ttym-server.js dist/package.json holders/holder-$p/ttym-holder $d/dist/
-            cp -R packages/web/dist $d/packages/web/dist
-            cp scripts/ttym-*-hook.sh scripts/ttym-shell-integration.zsh $d/scripts/
-            chmod 755 $d/dist/ttym-holder $d/dist/ttym $d/scripts/*.sh
-            tar -czf ttym-${GITHUB_REF_NAME}-$p.tar.gz -C $d .
-            shasum -a 256 ttym-${GITHUB_REF_NAME}-$p.tar.gz > ttym-${GITHUB_REF_NAME}-$p.tar.gz.sha256
-          done
-      - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
-        with:
-          files: |
-            ttym-*.tar.gz
-            ttym-*.tar.gz.sha256
