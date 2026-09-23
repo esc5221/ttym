@@ -40,6 +40,9 @@ code, pre { font-family: var(--mono); }
 .nav nav { display: flex; gap: clamp(14px, 3vw, 28px); font-size: 15px; }
 .nav nav a { text-decoration: none; color: var(--soft); }
 .nav nav a:hover { color: var(--ink); }
+.nav nav { align-items: center; }
+.nav nav a.btn { color: var(--ink); border: 1px solid rgba(242, 156, 92, 0.6); border-radius: 8px; padding: 5px 12px; font-size: 14px; }
+.nav nav a.btn:hover { background: rgba(242, 156, 92, 0.12); }
 
 /* ── hero: the opening frame, still */
 .hero { min-height: min(88svh, 820px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 96px var(--gutter) 56px; text-align: center; }
@@ -55,6 +58,7 @@ code, pre { font-family: var(--mono); }
 .copy:hover { color: var(--ink); border-color: rgba(242, 156, 92, 0.5); }
 .meta { margin-top: 18px; font: 14px var(--mono); color: var(--dim); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; }
 .meta a { color: var(--soft); white-space: nowrap; }
+.meta .go { display: inline-flex; gap: 18px; }
 
 /* ── film: the table of contents is the chapter list */
 .film { display: grid; grid-template-columns: 250px 1fr; gap: 40px; max-width: 1440px; margin: 0 auto; padding: 48px var(--gutter) 96px; align-items: start; }
@@ -96,6 +100,19 @@ pre .c { color: var(--dim); }
 .after { margin: 22px 0 0; color: var(--dim); font-size: 15px; }
 .after code { white-space: nowrap; font-size: 0.9em; color: var(--soft); background: rgba(255, 255, 255, 0.07); padding: 1px 6px; border-radius: 5px; }
 
+/* ── under the hood: the doorway to /internals */
+.hood { max-width: 1000px; margin: 0 auto; padding: 8px var(--gutter) 96px; }
+.hood h2 { font-size: clamp(22px, 2.4vw, 30px); font-weight: 620; letter-spacing: -0.02em; margin: 0 0 20px; }
+.hood-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.hood-card { display: flex; flex-direction: column; gap: 8px; padding: 18px 20px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
+  text-decoration: none; transition: border-color 0.2s; }
+.hood-card:hover { border-color: rgba(242, 156, 92, 0.55); }
+.hood-card .num { margin: 0; font-size: 12px; }
+.hood-card b { font-size: 17px; font-weight: 600; color: var(--ink); }
+.hood-card span:last-child { font-size: 14.5px; color: var(--soft); line-height: 1.5; }
+.hood-card code { font-size: 0.9em; background: rgba(255, 255, 255, 0.07); padding: 1px 5px; border-radius: 5px; }
+.hood-more { margin: 18px 0 0; font: 14px var(--mono); }
+
 /* ── the closing shot */
 .end { text-align: center; padding: 110px var(--gutter) 90px; border-top: 1px solid var(--line); }
 .end-logo { font-size: clamp(56px, 9vw, 110px); margin-bottom: 26px; }
@@ -114,7 +131,9 @@ pre .c { color: var(--dim); }
   .chapter:nth-of-type(even) .text { order: 0; }
   .steps li { grid-template-columns: 30px 1fr; }
   .steps li > span { grid-column: 2; }
-  .nav nav a:not(.gh) { display: none; }
+  .nav nav a.btn { display: none; }             /* the install line is right there on the page */
+  .hood-cards { grid-template-columns: minmax(0, 1fr); }
+  .meta .go { flex-direction: column; gap: 8px; align-items: center; }
   /* The one-liner stays one line (a URL broken mid-word reads badly) and scrolls sideways;
      the copy button is how it gets used on a phone anyway. */
   .hero-body { width: 100%; min-width: 0; }         /* else the nowrap line below sets the column's width */

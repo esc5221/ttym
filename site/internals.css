@@ -1,0 +1,156 @@
+/* ttym internals: same room as the landing page; a sticky table of contents beside a long document. */
+
+.page-internals { background-image: radial-gradient(1000px 420px at 70% -10%, rgba(242, 156, 92, 0.07), transparent 70%); }
+.nav nav a[aria-current="page"] { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 6px; }
+
+.int { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: clamp(28px, 4vw, 64px); max-width: 1240px; margin: 0 auto; padding: 96px var(--gutter) 40px; }
+
+/* ── table of contents */
+.toc ol { list-style: none; margin: 0; padding: 0; position: sticky; top: 92px; border-left: 1px solid var(--line); }
+.toc a { display: flex; gap: 12px; align-items: baseline; padding: 7px 0 7px 16px; margin-left: -1px; border-left: 2px solid transparent;
+  color: var(--dim); text-decoration: none; font-size: 15px; transition: color 0.2s, border-color 0.2s; }
+.toc a:hover { color: var(--ink); }
+.toc a.on { color: var(--ink); border-left-color: var(--accent); }
+.toc .n { font: 12px var(--mono); color: var(--dim); letter-spacing: 0.06em; }
+.toc a.on .n { color: var(--accent); }
+
+/* ── document */
+.doc { min-width: 0; max-width: 900px; }
+.doc-head h1 { font-size: clamp(34px, 4.4vw, 56px); font-weight: 640; letter-spacing: -0.03em; line-height: 1.05; margin: 0 0 18px; }
+.lede { font-size: clamp(18px, 1.6vw, 21px); color: var(--soft); max-width: 40em; margin: 0; }
+.sec { padding: 64px 0 8px; border-top: 1px solid var(--line); margin-top: 56px; scroll-margin-top: 72px; }
+.sec h2 { font-size: clamp(26px, 2.8vw, 36px); font-weight: 620; letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 16px; }
+.sec h2 a { color: inherit; text-decoration: none; }
+.sec h2 a::after { content: " #"; color: var(--accent); opacity: 0; transition: opacity 0.15s; }
+.sec h2 a:hover::after, .sec h2 a:focus-visible::after { opacity: 1; }
+.sec h3 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 8px; }
+.sec p, .sec li { color: var(--soft); }
+.sec p { margin: 0 0 18px; max-width: 46em; }
+.sec code, .doc-head code { font-size: 0.88em; background: rgba(255, 255, 255, 0.07); padding: 1px 5px; border-radius: 5px; }
+.sec pre code { background: none; padding: 0; font-size: inherit; }
+.sec pre { margin: 22px 0; font-size: 14px; line-height: 1.55; }
+.sec pre .a { color: var(--accent); }
+.src { font: 13px var(--mono); color: var(--dim) !important; margin-top: 26px !important; }
+.src a { color: var(--soft); }
+
+.points { margin: 26px 0 0; padding-left: 20px; display: grid; gap: 12px; max-width: 46em; }
+.points b { color: var(--ink); font-weight: 600; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; margin: 28px 0 0; }
+.card { padding: 18px 20px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+.card p { margin: 0; font-size: 15px; line-height: 1.55; }
+
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; margin-top: 30px; }
+.split pre.mini { margin: 8px 0 14px; }
+.ladder { margin: 0; padding-left: 22px; display: grid; gap: 8px; font-size: 15px; }
+.ladder li::marker { color: var(--accent); font-family: var(--mono); }
+
+/* ── 01: the process diagram, with a stoppable server */
+.diagram { margin: 30px 0 0; padding: 22px 22px 16px; border-radius: 14px; background: #101012; border: 1px solid var(--line); }
+.diagram svg { display: block; width: 100%; height: auto; }
+.diagram .box rect { fill: var(--panel); stroke: rgba(255, 255, 255, 0.14); stroke-width: 1.2; transition: opacity 0.35s, stroke 0.35s; }
+.diagram .server > rect { stroke: var(--accent); stroke-width: 1.6; }
+.diagram .server .rows rect { fill: #1b1b1e; stroke: rgba(255, 255, 255, 0.08); }
+.diagram .holder rect { stroke: rgba(242, 156, 92, 0.45); }
+.diagram .ctl rect { stroke-dasharray: 5 4; }
+.diagram text { font-family: var(--mono); fill: var(--soft); }
+.diagram .t { font-size: 17px; fill: var(--ink); font-weight: 560; }
+.diagram .t.big { font-size: 20px; }
+.diagram .s { font-size: 13.5px; fill: var(--dim); }
+.diagram .lbl { font-size: 13px; fill: var(--dim); }
+.diagram .edges path { fill: none; stroke: rgba(255, 255, 255, 0.28); stroke-width: 1.4; transition: opacity 0.35s, stroke 0.35s; }
+.diagram .edges .dash { stroke-dasharray: 5 4; }
+.diagram .holder-edges path { stroke: rgba(242, 156, 92, 0.55); }
+.diagram .ah { fill: rgba(242, 156, 92, 0.7); }
+.diagram .led { fill: #6fcf8f; }
+.diagram .down { display: none; }
+.diagram.is-down .up { display: none; }
+.diagram.is-down .down { display: inline; }
+.diagram.is-down .server, .diagram.is-down .viewer-edges, .diagram.is-down .holder-edges { opacity: 0.22; }
+.diagram.is-down .server > rect { stroke-dasharray: 6 5; }
+.diagram.is-down .viewer rect, .diagram.is-down .ctl rect { stroke: rgba(255, 255, 255, 0.07); }
+.diagram.is-down .led { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.diagram figcaption { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 12px; font-size: 14.5px; color: var(--dim); }
+.toggle { font: 500 14px var(--mono); color: var(--ink); background: #222226; border: 1px solid rgba(242, 156, 92, 0.5); border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+.toggle:hover { background: #2a2a2e; }
+.toggle[aria-pressed="true"] { background: rgba(242, 156, 92, 0.14); }
+
+/* ── sequence diagrams: numbered arrows on the left, the same numbers in the list on the right */
+.seq { margin: 28px 0 0; padding: 18px 20px 20px; border-radius: 14px; background: #101012; border: 1px solid var(--line); }
+.seq-title { font: 13px var(--mono); color: var(--dim) !important; letter-spacing: 0.04em; margin: 0 0 10px !important; }
+.seq-tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.seq-tabs button { font: 500 14px var(--mono); color: var(--dim); background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; cursor: pointer; }
+.seq-tabs button:hover { color: var(--ink); }
+.seq-tabs button[aria-selected="true"] { color: var(--ink); border-color: rgba(242, 156, 92, 0.6); background: rgba(242, 156, 92, 0.12); }
+.seq-body { display: grid; grid-template-columns: minmax(0, 11fr) minmax(0, 10fr); gap: 24px; align-items: start; }
+.seq-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.seq-svg .lane-name { font: 500 13px var(--mono); fill: var(--ink); }
+.seq-svg .lane-box { fill: var(--panel); stroke: rgba(255, 255, 255, 0.14); }
+.seq-svg .life { stroke: rgba(255, 255, 255, 0.12); stroke-dasharray: 3 4; }
+.seq-svg .arr { fill: none; stroke: rgba(255, 255, 255, 0.4); stroke-width: 1.4; transition: stroke 0.15s; }
+.seq-svg .dot { fill: #1b1b1e; stroke: rgba(242, 156, 92, 0.6); transition: fill 0.15s; }
+.seq-svg .no { font: 600 11px var(--mono); fill: var(--accent); }
+.seq-svg .hd { fill: rgba(255, 255, 255, 0.4); }
+.seq-svg g.hot .arr { stroke: var(--accent); }
+.seq-svg g.hot .hd { fill: var(--accent); }
+.seq-svg g.hot .dot { fill: var(--accent); }
+.seq-svg g.hot .no { fill: #111; }
+.seq-steps { list-style: none; counter-reset: st; margin: 0; padding: 0; display: grid; gap: 4px; }
+.seq-steps[hidden] { display: none; }   /* display:grid above would otherwise override [hidden] */
+.seq-steps li { counter-increment: st; position: relative; padding: 6px 8px 6px 42px; border-radius: 8px; font-size: 14.5px; line-height: 1.45; cursor: default; }
+.seq-steps li::before { content: counter(st); position: absolute; left: 8px; top: 6px; font: 600 12px var(--mono); color: var(--accent); width: 22px; height: 22px; border-radius: 50%;
+  border: 1px solid rgba(242, 156, 92, 0.6); display: flex; align-items: center; justify-content: center; }
+.seq-steps li.hot { background: rgba(242, 156, 92, 0.08); color: var(--ink); }
+.seq-steps li .who { display: block; font: 12px var(--mono); color: var(--dim); }
+
+/* ── 03: frame layout strip and the command table */
+.frame { display: flex; flex-wrap: wrap; margin: 26px 0 0; border-radius: 10px; overflow: hidden; border: 1px solid var(--line); font: 13.5px var(--mono); }
+.frame .f { padding: 10px 14px; background: var(--panel); border-right: 1px solid var(--line); color: var(--soft); }
+.frame .f:last-child { border-right: 0; flex: 1; }
+.frame b { color: var(--accent); font-weight: 600; margin-right: 6px; }
+.frame i { display: block; font-style: normal; font-size: 12px; color: var(--dim); }
+.frame .f-seq { background: rgba(242, 156, 92, 0.08); }
+pre.cmdtab { font-size: 13.5px; }
+
+/* ── 06: the gate as a numbered path */
+.gate { list-style: none; counter-reset: g; margin: 28px 0 0; padding: 0; display: grid; gap: 0; }
+.gate > li { counter-increment: g; position: relative; padding: 0 0 22px 52px; }
+.gate > li::before { content: counter(g); position: absolute; left: 0; top: -2px; width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font: 600 14px var(--mono); color: var(--accent); background: #161618; border: 1px solid rgba(242, 156, 92, 0.55); }
+.gate > li:not(:last-child)::after { content: ""; position: absolute; left: 16px; top: 32px; bottom: 2px; width: 1px; background: var(--line); }
+.gate > li > p { margin-bottom: 0; }
+.verdicts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0 0; }
+.verdicts.two { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; }
+.v { padding: 14px 16px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; font-size: 14.5px; line-height: 1.5; color: var(--soft); }
+.v b { font: 600 14px var(--mono); color: var(--ink); }
+.v em { font: normal 12.5px var(--mono); margin-top: auto; color: var(--dim); }
+.v.ok em { color: #6fcf8f; }
+.v.go { border-color: rgba(242, 156, 92, 0.45); }
+.v.go em { color: var(--accent); }
+
+.doc-end { display: flex; flex-wrap: wrap; gap: 14px 28px; margin: 72px 0 0; padding-top: 28px; border-top: 1px solid var(--line); font: 15px var(--mono); }
+.small-end { padding: 36px var(--gutter) 48px; }
+
+/* ── narrow: the table of contents becomes a sticky strip under the top of the page */
+@media (max-width: 960px) {
+  .int { grid-template-columns: minmax(0, 1fr); padding-top: 72px; gap: 0; }
+  .toc { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); background: rgba(11, 11, 12, 0.94); border-bottom: 1px solid var(--line); }
+  .toc ol { position: static; display: flex; overflow-x: auto; border-left: 0; padding: 0 var(--gutter); scrollbar-width: none; }
+  .toc ol::-webkit-scrollbar { display: none; }
+  .toc li { flex: none; }
+  .toc a { padding: 12px 12px 10px; margin: 0; border-left: 0; border-bottom: 2px solid transparent; font-size: 14px; gap: 8px; }
+  .toc a.on { border-bottom-color: var(--accent); }
+  .doc-head { padding-top: 28px; }
+  .sec { scroll-margin-top: 56px; }
+  .seq-body, .split, .verdicts, .verdicts.two { grid-template-columns: minmax(0, 1fr); }
+  .diagram { padding: 14px 12px 12px; }
+  .gate > li { padding-left: 46px; }
+}
+/* the landing page hides the small logo on phones because its hero shows the big one; this page has no hero */
+@media (max-width: 860px), (pointer: coarse) {
+  .page-internals .nav-logo { visibility: visible; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .diagram.is-down .led { animation: none; }
+}

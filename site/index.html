@@ -32,10 +32,9 @@
   <header class="nav" id="nav">
     <a class="nav-logo" href="#top" aria-label="ttym home"><img src="brand/ttym-logo-dark.svg" alt="ttym" width="92" height="33"></a>
     <nav>
-      <a href="#film">Film</a>
-      <a href="#install">Install</a>
-      <a href="https://github.com/esc5221/ttym#readme">Docs</a>
+      <a href="/internals">Internals</a>
       <a href="https://github.com/esc5221/ttym" class="gh">GitHub</a>
+      <a href="#install" class="btn">Install</a>
     </nav>
   </header>
 
@@ -51,7 +50,7 @@
           <code><span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh</code>
           <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh" aria-label="Copy the install command">copy</button>
         </div>
-        <p class="meta"><span>Node ≥ 20 · macOS and Linux · prebuilt, from GitHub Releases</span> <a href="#film">Watch the 69-second film ↓</a></p>
+        <p class="meta"><span>Node ≥ 20 · macOS and Linux · prebuilt, from GitHub Releases</span> <span class="go"><a href="#film">Watch the 69-second film ↓</a> <a href="/internals">Internals →</a></span></p>
       </div>
     </section>
 
@@ -143,12 +142,22 @@
       </ol>
       <p class="after"><code>ttym upgrade</code> swaps in the latest release while your sessions keep running; <code>ttym upgrade --rollback</code> goes back one. Building from source is in the <a href="https://github.com/esc5221/ttym#install">README</a>.</p>
     </section>
+
+    <section class="hood" id="hood">
+      <h2>Under the hood</h2>
+      <div class="hood-cards">
+        <a class="hood-card" href="/internals#holder"><span class="num">02</span><b>Sessions outlive the server</b><span>A Rust holder per terminal keeps the PTY; a restarted server catches up from a checkpoint plus the missing bytes.</span></a>
+        <a class="hood-card" href="/internals#await"><span class="num">04</span><b>Agents as functions</b><span><code>ttym await</code> ends on the agent's Stop hook and returns that turn's answer from its transcript.</span></a>
+        <a class="hood-card" href="/internals#remote"><span class="num">06</span><b>Remote access, checked</b><span>Allow-listed hosts, a login cookie, and identities verified with <code>tailscale whois</code> or an Access JWT.</span></a>
+      </div>
+      <p class="hood-more"><a href="/internals">All eight sections: processes, the wire, sleep and wake, shell integration, the repo →</a></p>
+    </section>
   </main>
 
   <footer class="end">
     <div class="end-logo"><span class="word">ttym</span><span class="caret" aria-hidden="true"></span></div>
     <p class="tagline small">Know which agent needs you. <span class="a">Get back into its terminal from anywhere.</span></p>
-    <p class="links"><a href="https://github.com/esc5221/ttym">GitHub</a> · <a href="https://github.com/esc5221/ttym#readme">README</a> · <a href="https://github.com/esc5221/ttym/blob/master/README.ko.md">한국어</a></p>
+    <p class="links"><a href="/internals">Internals</a> · <a href="https://github.com/esc5221/ttym">GitHub</a> · <a href="https://github.com/esc5221/ttym#readme">README</a> · <a href="https://github.com/esc5221/ttym/blob/master/README.ko.md">한국어</a></p>
   </footer>
 
   <script src="app.js" defer></script>

@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ttym internals — holders, the wire, agents as functions</title>
+  <meta name="description" content="How ttym works inside: a Rust holder per terminal, a seq-numbered wire protocol with snapshots and deltas, agents driven through their Stop hook, sleep and wake, and the remote access gate.">
+  <meta name="theme-color" content="#0b0b0c">
+  <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
+  <link rel="canonical" href="https://ttym.pages.dev/internals">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="ttym">
+  <meta property="og:url" content="https://ttym.pages.dev/internals">
+  <meta property="og:title" content="ttym internals">
+  <meta property="og:description" content="A Rust holder per terminal, a seq-numbered wire protocol, agents driven through their Stop hook, sleep and wake, and the remote access gate.">
+  <meta property="og:image" content="https://ttym.pages.dev/brand/og-internals.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="640">
+  <meta property="og:image:alt" content="ttym internals: viewers, server, holder, PTY">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ttym internals">
+  <meta name="twitter:description" content="A Rust holder per terminal, a seq-numbered wire protocol, agents driven through their Stop hook, sleep and wake, and the remote access gate.">
+  <meta name="twitter:image" content="https://ttym.pages.dev/brand/og-internals.png">
+  <link rel="preload" href="fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="internals.css">
+</head>
+<body class="page-internals">
+  <header class="nav on" id="nav">
+    <a class="nav-logo" href="/" aria-label="ttym home"><img src="brand/ttym-logo-dark.svg" alt="ttym" width="92" height="33"></a>
+    <nav>
+      <a href="/internals" aria-current="page">Internals</a>
+      <a href="https://github.com/esc5221/ttym" class="gh">GitHub</a>
+      <a href="/#install" class="btn">Install</a>
+    </nav>
+  </header>
+
+  <div class="int">
+    <aside class="toc" aria-label="Sections">
+      <ol id="toc">
+        <li><a href="#processes"><span class="n">01</span>Processes</a></li>
+        <li><a href="#holder"><span class="n">02</span>Surviving the server</a></li>
+        <li><a href="#wire"><span class="n">03</span>The wire</a></li>
+        <li><a href="#await"><span class="n">04</span>Agents as functions</a></li>
+        <li><a href="#sleep"><span class="n">05</span>Sleep and wake</a></li>
+        <li><a href="#remote"><span class="n">06</span>Remote access</a></li>
+        <li><a href="#shell"><span class="n">07</span>Shell integration</a></li>
+        <li><a href="#repo"><span class="n">08</span>Repo map</a></li>
+      </ol>
+    </aside>
+
+    <main class="doc">
+      <header class="doc-head">
+        <p class="num">Internals</p>
+        <h1>How ttym works inside</h1>
+        <p class="lede">ttym keeps each terminal in its own small process, outside the server. Sessions that survive a server restart, upgrades that close nothing, and agents that sleep and wake all depend on that split. Each section below summarizes a document in the repo and links to it; the documents are the reference.</p>
+      </header>
+
+      <!-- 01 -->
+      <section id="processes" class="sec">
+        <p class="num">01</p>
+        <h2><a href="#processes">One server, one holder per terminal</a></h2>
+        <p>The server is the only hub. Every viewer talks HTTP and WebSocket to it, and only the server talks to holders, over a unix socket. A holder is a Rust process of about 1 MB that owns one PTY and a ring buffer of its output. The CLI has two roles: <code>ttym attach</code> is a viewer like the browser, and the other verbs (<code>new</code>, <code>split</code>, <code>send</code>, <code>await</code>) are a control plane over plain HTTP.</p>
+
+        <figure class="diagram" id="procFig">
+          <svg viewBox="0 0 960 400" role="img" aria-labelledby="procTitle">
+            <title id="procTitle">Viewers connect to the server over HTTP and WebSocket; the server connects to one holder per terminal over a unix socket.</title>
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker>
+            </defs>
+            <text x="308" y="28" class="lbl" text-anchor="middle">HTTP + WebSocket</text>
+            <text x="640" y="28" class="lbl" text-anchor="middle">unix socket · frames</text>
+
+            <g class="edges viewer-edges">
+              <path d="M246,68 C310,68 310,170 370,170"/>
+              <path d="M246,148 C310,148 310,182 370,182"/>
+              <path d="M246,228 C310,228 310,194 370,194"/>
+              <path d="M246,328 C310,328 310,206 370,206" class="dash"/>
+            </g>
+            <g class="edges holder-edges">
+              <path d="M580,176 C640,176 640,92 700,92" marker-end="url(#ah)"/>
+              <path d="M580,190 C640,190 640,182 700,182" marker-end="url(#ah)"/>
+              <path d="M580,204 C640,204 640,272 700,272" marker-end="url(#ah)"/>
+            </g>
+
+            <g class="box viewer"><rect x="16" y="40" width="230" height="56" rx="10"/><text x="32" y="64" class="t">ttym attach</text><text x="32" y="84" class="s">terminal UI · Node</text></g>
+            <g class="box viewer"><rect x="16" y="120" width="230" height="56" rx="10"/><text x="32" y="144" class="t">browser</text><text x="32" y="164" class="s">@ttym/web</text></g>
+            <g class="box viewer"><rect x="16" y="200" width="230" height="56" rx="10"/><text x="32" y="224" class="t">desktop</text><text x="32" y="244" class="s">Tauri · same web app</text></g>
+            <g class="box ctl"><rect x="16" y="300" width="230" height="56" rx="10"/><text x="32" y="324" class="t">new · send · await</text><text x="32" y="344" class="s">control plane · HTTP only</text></g>
+            <text x="131" y="384" class="lbl" text-anchor="middle"><tspan class="up">live</tspan><tspan class="down">reconnecting…</tspan></text>
+
+            <g class="box server"><rect x="370" y="70" width="210" height="260" rx="12"/>
+              <text x="390" y="100" class="t big">server</text><text x="560" y="100" class="s" text-anchor="end"><tspan class="up">running</tspan><tspan class="down">stopped</tspan></text>
+              <g class="rows">
+                <rect x="386" y="118" width="178" height="38" rx="7"/><text x="398" y="142" class="s">headless xterm</text>
+                <rect x="386" y="164" width="178" height="38" rx="7"/><text x="398" y="188" class="s">OutputRing · seq</text>
+                <rect x="386" y="210" width="178" height="38" rx="7"/><text x="398" y="234" class="s">workspaces · meta</text>
+                <rect x="386" y="256" width="178" height="38" rx="7"/><text x="398" y="280" class="s">remote gate</text>
+              </g>
+            </g>
+
+            <g class="box holder"><rect x="700" y="60" width="244" height="64" rx="10"/><text x="716" y="86" class="t">holder #1</text><text x="716" y="108" class="s">PTY → zsh · ring</text><circle cx="924" cy="80" r="5" class="led"/></g>
+            <g class="box holder"><rect x="700" y="150" width="244" height="64" rx="10"/><text x="716" y="176" class="t">holder #2</text><text x="716" y="198" class="s">PTY → claude · ring</text><circle cx="924" cy="170" r="5" class="led"/></g>
+            <g class="box holder"><rect x="700" y="240" width="244" height="64" rx="10"/><text x="716" y="266" class="t">holder #3</text><text x="716" y="288" class="s">PTY → codex · ring</text><circle cx="924" cy="260" r="5" class="led"/></g>
+            <text x="822" y="336" class="lbl" text-anchor="middle">Rust · ~1 MB · one per terminal</text>
+            <text x="822" y="356" class="lbl" text-anchor="middle"><tspan class="up">running</tspan><tspan class="down">still running · shells untouched</tspan></text>
+          </svg>
+          <figcaption>
+            <button class="toggle" id="killServer" aria-pressed="false">Stop the server</button>
+            <span id="procNote">Everything is up. Press the button to see what a server crash or restart takes down.</span>
+          </figcaption>
+        </figure>
+
+        <ul class="points">
+          <li><b>Emulation lives in the server.</b> The holder only knows bytes; the server runs a headless xterm per session. Keeping the cell model out of the holder means a replacement server does not have to agree with the holder on screen state, and the holder stays small enough to run for weeks.</li>
+          <li><b>One protocol for every viewer.</b> The CLI's <code>attach</code>, the browser and the desktop app all speak the same HTTP + WS protocol, implemented once in <code>@ttym/protocol</code> for both ends.</li>
+          <li><b>Version checks stop early.</b> <code>API_VERSION</code> covers the whole HTTP + WS surface. The CLI reads <code>/api/version</code> and stops with exit code 5 when its version is outside the range the server supports, instead of running half-compatible.</li>
+        </ul>
+        <p class="src">Source: <a href="https://github.com/esc5221/ttym#architecture">README · Architecture</a> · <a href="https://github.com/esc5221/ttym/blob/master/docs/architecture.md">docs/architecture.md</a></p>
+      </section>
+
+      <!-- 02 -->
+      <section id="holder" class="sec">
+        <p class="num">02</p>
+        <h2><a href="#holder">Surviving the server</a></h2>
+        <p>When the server stops, holders keep their PTYs and keep recording output. A new server reconnects to each holder's socket, claims it, and catches the screen up from a checkpoint plus the bytes written since.</p>
+
+        <figure class="seq" data-lanes='["viewer","server","holder"]'>
+          <p class="seq-title">Reconnecting after a restart</p>
+          <div class="seq-body">
+            <svg class="seq-svg" aria-hidden="true"></svg>
+            <ol class="seq-steps">
+              <li data-from="1" data-to="1">seeds its xterm from the session's checkpoint on disk: rendered ANSI plus the byte offset it covers</li>
+              <li data-from="1" data-to="2">connects to the holder's unix socket</li>
+              <li data-from="2" data-to="1"><code>STATE</code>: lease capability, generation, <code>baseOffset</code>, <code>nextOffset</code></li>
+              <li data-from="1" data-to="2"><code>ACQUIRE</code> the controller lease</li>
+              <li data-from="2" data-to="1"><code>ACQUIRED</code> (another live server would get <code>DENIED</code>)</li>
+              <li data-from="1" data-to="2"><code>DUMP_SINCE(offset)</code> from the checkpoint</li>
+              <li data-from="2" data-to="1"><code>REPLAY{base, end, gap, bytes}</code>: only the delta</li>
+              <li data-from="0" data-to="1"><code>ATTACH</code> from a viewer gets one <code>SNAPSHOT</code>, then deltas</li>
+            </ol>
+          </div>
+        </figure>
+
+        <div class="cards">
+          <div class="card"><h3>Frames</h3><p>Holder and server exchange <code>[u32 len LE][u8 cmd][payload]</code>. Output frames advance a running byte offset in the holder, which is what <code>DUMP_SINCE</code> and checkpoints refer to.</p></div>
+          <div class="card"><h3>Checkpoints</h3><p>The server writes a rendered-ANSI checkpoint per session after 2 s of quiet, and at most 30 s apart. A full 3,000-row screen fits in about 571 KB, while the raw ring holds roughly a third of that history, so seeding from the checkpoint restores more screen than replaying the ring.</p></div>
+          <div class="card"><h3>Gaps are reported</h3><p>If the requested offset has already left the ring, the holder answers <code>gap=true</code>. The server reports the gap instead of presenting a partial screen as a complete one.</p></div>
+          <div class="card"><h3>One controller</h3><p>A holder accepts one controlling server. Before the lease frames existed, a new connection silently evicted the old one, and two racing servers could lose sessions. Now a second server gets <code>DENIED</code> unless it asks for takeover.</p></div>
+          <div class="card"><h3>Sockets heal</h3><p>A holder checks its socket path every 5 s and rebinds if the file is gone. Without it, a deleted socket would leave a live PTY that nothing can reach.</p></div>
+          <div class="card"><h3>Upgrades by rename</h3><p><code>ttym upgrade</code> puts the new build next to the old one and swaps them by rename. Running processes keep their open files (POSIX), only new processes load the new binaries, and a failed health check swaps back.</p></div>
+        </div>
+        <p class="src">Source: <a href="https://github.com/esc5221/ttym/blob/master/docs/architecture.md">docs/architecture.md · holder ↔ server</a> · <a href="https://github.com/esc5221/ttym/blob/master/holder/src/main.rs">holder/src/main.rs</a></p>
+      </section>
+
+      <!-- 03 -->
+      <section id="wire" class="sec">
+        <p class="num">03</p>
+        <h2><a href="#wire">The wire: seq numbers, snapshots, deltas</a></h2>
+        <p>Viewers get output as numbered frames. A viewer that reconnects says which seq it has, and the server sends either the missing deltas or one snapshot of the whole screen followed by deltas.</p>
+
+        <div class="frame" aria-label="Client frame layout">
+          <span class="f f-id"><b>u16</b> sessionId LE</span><span class="f f-cmd"><b>u8</b> cmd</span><span class="f f-seq"><b>u32</b> seq <i>server → client DATA, SNAPSHOT</i></span><span class="f f-pay">payload</span>
+        </div>
+
+        <figure class="seq" data-lanes='["viewer","server","holder","PTY"]'>
+          <div class="seq-tabs" role="tablist" aria-label="Data flow">
+            <button role="tab" data-flow="input" aria-selected="true">input</button>
+            <button role="tab" data-flow="output" aria-selected="false">output</button>
+            <button role="tab" data-flow="attach" aria-selected="false">attach</button>
+          </div>
+          <div class="seq-body">
+            <svg class="seq-svg" aria-hidden="true"></svg>
+            <ol class="seq-steps" data-flow="input">
+              <li data-from="0" data-to="1"><code>DATA(session, bytes)</code> over the WebSocket, no seq prefix</li>
+              <li data-from="1" data-to="2"><code>DATA_IN</code> over the unix socket</li>
+              <li data-from="2" data-to="3">written to the PTY</li>
+            </ol>
+            <ol class="seq-steps" data-flow="output" hidden>
+              <li data-from="3" data-to="2">bytes into the ring; the byte offset advances</li>
+              <li data-from="2" data-to="1"><code>DATA_OUT</code></li>
+              <li data-from="1" data-to="1"><code>OutputRing.append(seq)</code> and the headless xterm</li>
+              <li data-from="1" data-to="0"><code>DATA(seq)</code> to every attached viewer</li>
+              <li data-from="0" data-to="1"><code>ACK(seq)</code> after rendering</li>
+            </ol>
+            <ol class="seq-steps" data-flow="attach" hidden>
+              <li data-from="0" data-to="1"><code>ATTACH{fromSeq, cols, rows, mode}</code></li>
+              <li data-from="1" data-to="0"><code>SNAPSHOT(seq)</code>: the full screen, stamped with the seq it was rendered at</li>
+              <li data-from="1" data-to="0"><code>DATA(seq)</code>: deltas only from there on</li>
+            </ol>
+          </div>
+        </figure>
+
+        <div class="cards">
+          <div class="card"><h3>DATA has two shapes</h3><p>Server-to-client DATA carries a seq; client-to-server DATA is raw key bytes. Each direction has its own decoder (<code>decodeServerFrame</code>, <code>decodeClientFrame</code>). A single symmetric decoder once read the first 4 bytes of any input frame of 7 bytes or more as a seq, and characters vanished whenever a Korean IME committed a syllable and a space in one frame. A regression test drives a real PTY through that case.</p></div>
+          <div class="card"><h3>Snapshots in one write</h3><p>The client applies a snapshot as <code>\x1bc</code> plus the screen in a single xterm write. One write chunk is parsed atomically, so the reset and the repaint land in the same frame; calling <code>term.reset()</code> first would paint an empty frame and flicker.</p></div>
+          <div class="card"><h3>Snapshots carry a seq</h3><p>The seq on a snapshot is the watermark it was rendered at. The client moves its <code>fromSeq</code> to it, so a resync does not fall back into another snapshot.</p></div>
+        </div>
+
+<pre class="cmdtab"><code><span class="c">cmd   name          direction</span>
+0x00  DATA          both (seq prefix server → client only)
+0x01  RESIZE        client → server
+0x02  CREATE        client → server
+0x03  DESTROY       client → server
+0x06  HELLO         handshake
+0x07  LIST          sessions
+0x08  ATTACH        client → server   {fromSeq, cols, rows, mode}
+0x09  DETACH        client → server
+0x0a  SNAPSHOT      server → client   [u32 seq] + screen
+0x0b  ACK           client → server   [u32 seq]
+0x04  PAUSE · 0x05 RESUME · 0x0c PAUSE_VIEW · 0x0d RESUME_VIEW   flow control
+0x0e  WORKSPACE     server → client   full tree + generation, never a diff
+0x0f  AGENT         server → client   agent kind / active / sleep
+0x10  CONFIG        server → client   full values, never a diff
+0x11  VIEW          server → client   the pane's viewer tabs, whole set</code></pre>
+        <p class="src">Source: <a href="https://github.com/esc5221/ttym/blob/master/docs/architecture.md">docs/architecture.md · wire protocol</a> · <a href="https://github.com/esc5221/ttym/blob/master/packages/protocol/src/index.ts">packages/protocol</a></p>
+      </section>
+
+      <!-- 04 -->
+      <section id="await" class="sec">
+        <p class="num">04</p>
+        <h2><a href="#await">Agents as functions</a></h2>
+        <p><code>ttym await</code> sends a prompt to an agent's terminal and blocks until that turn ends, then returns that turn's answer. The end of a turn comes from the agent's own Stop hook, not from watching the screen, so a long pause in the output does not end the wait early.</p>
+<pre><code>ttym agent install claude          <span class="c"># SessionStart / Stop / StopFailure / SessionEnd hooks</span>
+ttym workspace add --current --name helper --role agent --cmd claude
+ttym await :helper --json -- "Why does this stack trace happen?"</code></pre>
+
+        <figure class="seq" data-lanes='["ttym await","server","agent","Stop hook"]'>
+          <div class="seq-tabs" role="tablist" aria-label="Turn outcome">
+            <button role="tab" data-flow="done" aria-selected="true">turn ends</button>
+            <button role="tab" data-flow="fail" aria-selected="false">turn fails</button>
+            <button role="tab" data-flow="timeout" aria-selected="false">timeout</button>
+          </div>
+          <div class="seq-body">
+            <svg class="seq-svg" aria-hidden="true"></svg>
+            <ol class="seq-steps" data-flow="done">
+              <li data-from="0" data-to="1">prompt over HTTP</li>
+              <li data-from="1" data-to="1">places an xterm marker at the cursor</li>
+              <li data-from="1" data-to="2">prompt + CR into the PTY</li>
+              <li data-from="2" data-to="2">the turn runs</li>
+              <li data-from="2" data-to="3">Claude Code fires <code>Stop</code></li>
+              <li data-from="3" data-to="1"><code>POST /api/internal/sessions/:id/stop</code></li>
+              <li data-from="1" data-to="1">extracts the answer: the structured transcript first, else the rendered rows from marker to cursor</li>
+              <li data-from="1" data-to="0">answer + <code>transcriptSource</code>: <code>"structured"</code> or <code>"screen"</code></li>
+            </ol>
+            <ol class="seq-steps" data-flow="fail" hidden>
+              <li data-from="0" data-to="1">prompt over HTTP</li>
+              <li data-from="1" data-to="2">prompt + CR into the PTY</li>
+              <li data-from="2" data-to="3">the turn errors or the session ends: <code>StopFailure</code> / <code>SessionEnd</code></li>
+              <li data-from="3" data-to="1"><code>POST …/stop</code> with the reason</li>
+              <li data-from="1" data-to="0">failure returned now, not at the timeout</li>
+            </ol>
+            <ol class="seq-steps" data-flow="timeout" hidden>
+              <li data-from="0" data-to="1">prompt with <code>--timeout</code></li>
+              <li data-from="1" data-to="2">prompt + CR into the PTY</li>
+              <li data-from="2" data-to="2">the turn is still running</li>
+              <li data-from="1" data-to="0"><code>202 Accepted</code> + <code>Location</code>; the interaction stays pending</li>
+              <li data-from="0" data-to="1">a later request to that id picks up the result</li>
+            </ol>
+          </div>
+        </figure>
+
+        <div class="cards">
+          <div class="card"><h3>Markers, not row numbers</h3><p>After the scrollback moves, a row number still falls inside the buffer but points at someone else's output. An xterm marker moves with its line; if it scrolls out of the buffer (<code>line = -1</code>) the result is <code>null</code> instead of the wrong rows.</p></div>
+          <div class="card"><h3>Parallel by default</h3><p>Each await is its own interaction keyed to its session, so several agents can be awaited at once and each completes on its own Stop hook.</p></div>
+          <div class="card"><h3>Codex too</h3><p>Codex CLI supports a Stop hook behind the <code>codex_hooks</code> feature flag (0.114+). With it installed, <code>await</code> works the same way.</p></div>
+        </div>
+        <p class="src">Source: <a href="https://github.com/esc5221/ttym/blob/master/docs/architecture.md">docs/architecture.md · interaction</a> · <a href="https://github.com/esc5221/ttym#agents-in-the-loop">README · Agents in the loop</a></p>
+      </section>
+
+      <!-- 05 -->
+      <section id="sleep" class="sec">
+        <p class="num">05</p>
+        <h2><a href="#sleep">Sleep and wake</a></h2>
+        <p>An idle Claude Code process holds 200 to 600 MB. After 30 minutes without input or output (configurable, or off), ttym stops the agent and keeps its screen. The next keystroke, <code>send</code> or <code>await</code> resumes the same conversation, and the input waits in a queue until the agent is ready.</p>
+
+        <figure class="seq" data-lanes='["you","server","shell","agent"]'>
+          <div class="seq-tabs" role="tablist" aria-label="Sleep or wake">
+            <button role="tab" data-flow="sleep" aria-selected="true">sleep</button>
+            <button role="tab" data-flow="wake" aria-selected="false">wake</button>
+          </div>
+          <div class="seq-body">
+            <svg class="seq-svg" aria-hidden="true"></svg>
+            <ol class="seq-steps" data-flow="sleep">
+              <li data-from="1" data-to="1">idle for the set time, and no busy signal (below)</li>
+              <li data-from="1" data-to="1">freezes the screen for viewers and saves it to disk</li>
+              <li data-from="1" data-to="3">Ctrl-C ×3: the agent's own exit path, which adds nothing to its transcript</li>
+              <li data-from="3" data-to="2">the agent exits; the shell, PTY and session stay</li>
+            </ol>
+            <ol class="seq-steps" data-flow="wake" hidden>
+              <li data-from="0" data-to="1">a keystroke, <code>send</code> or <code>await</code></li>
+              <li data-from="1" data-to="1">queues the input (up to 64 KB)</li>
+              <li data-from="1" data-to="2"><code>ttym agent resume claude &lt;original flags&gt;</code></li>
+              <li data-from="2" data-to="3"><code>claude --resume &lt;same session id&gt;</code></li>
+              <li data-from="3" data-to="1"><code>SessionStart</code> hook</li>
+              <li data-from="1" data-to="1">ready when output has been quiet for 500 ms</li>
+              <li data-from="1" data-to="0">one snapshot replaces the frozen screen</li>
+              <li data-from="1" data-to="3">the queued input, in order</li>
+            </ol>
+          </div>
+        </figure>
+
+        <div class="split">
+          <div>
+            <h3>What counts as busy</h3>
+            <p>Checked in this order, most authoritative first. Any one of them keeps the agent awake.</p>
+            <ol class="ladder">
+              <li><code>~/.claude/sessions/&lt;pid&gt;.json</code> status: <code>waiting</code> (a permission prompt or dialog, which a resumed agent could not answer) or <code>busy</code></li>
+              <li>A turn opened by a prompt and not yet stopped</li>
+              <li>In-flight work from the last Stop hook payload: background tasks, and scheduled wakeups that sleeping would lose</li>
+              <li>Fallback for older versions: a command still running under the agent</li>
+            </ol>
+          </div>
+          <div>
+            <h3>Measured</h3>
+<pre class="mini"><code>wake, Claude Code    1.7 s
+wake, in the film    2.5 s
+RAM returned (film)  374 MB
+wake, Codex          ~4 s
+sleeps per tick      3, 3 s apart</code></pre>
+            <p>Codex takes longer because it has no prompt hook and sends <code>SessionStart</code> only on its first turn, so readiness is detected from the process instead. While asleep, <code>ATTACH</code>, <code>SNAPSHOT</code> and <code>ttym screen</code> return the frozen screen, and it survives a server restart.</p>
+          </div>
+        </div>
+        <p class="src">Source: <a href="https://github.com/esc5221/ttym/blob/master/packages/server/src/agent-sleep.ts">packages/server/src/agent-sleep.ts</a> · <a href="https://github.com/esc5221/ttym/blob/master/CLAUDE.md">CLAUDE.md · agent sleep</a></p>
+      </section>
+
+      <!-- 06 -->
+      <section id="remote" class="sec">
+        <p class="num">06</p>
+        <h2><a href="#remote">Remote access, checked</a></h2>
+        <p>The server listens on <code>127.0.0.1</code>. Remote access goes through a tunnel or <code>tailscale serve</code>, and every request passes the same gate. The gate first decides whether a request came from this machine, because the CLI, agent hooks and the local web UI need no login.</p>
+
+        <ol class="gate">
+          <li>
+            <h3>Where did it come from?</h3>
+            <div class="verdicts">
+              <div class="v ok"><b>local</b><span>peer is loopback, Host is loopback, no proxy headers</span><em>no login</em></div>
+              <div class="v ok"><b>local-proxy</b><span>a proxy on this machine for a browser on this machine: Host allow-listed, no Cloudflare or Tailscale headers, every forwarded client loopback</span><em>no login</em></div>
+              <div class="v go"><b>remote</b><span>anything else: a non-loopback peer, a loopback Host with proxy headers, any other Host</span><em>continue ↓</em></div>
+            </div>
+          </li>
+          <li><h3>Is the Host on the allow-list?</h3><p>No → 403. This also blocks DNS rebinding, where a hostile site's name resolves to 127.0.0.1.</p></li>
+          <li><h3>Is there a valid login cookie?</h3><p><code>ttym_session</code>: HttpOnly, SameSite=Lax, 30 days, Secure when the request arrived over HTTPS. Yes → pass.</p></li>
+          <li>
+            <h3>Does a trusted identity check out?</h3>
+            <div class="verdicts two">
+              <div class="v"><b>Tailscale</b><span>The <code>Tailscale-User-Login</code> header is only a claim. The login must be trusted, the last forwarded hop must be a tailnet address (100.64.0.0/10 or fd7a:115c:a1e0::/48), and <code>tailscale whois</code> for that address must name the same login.</span></div>
+              <div class="v"><b>Cloudflare Access</b><span>The <code>Cf-Access-Jwt-Assertion</code> JWT is verified RS256 against the team's published keys, with issuer, app aud and expiry pinned, and the email checked against ttym's own list. A loosened Access policy still lets no other email in.</span></div>
+            </div>
+            <p>Yes → the usual 30-day cookie is issued. One login (the Tailscale account or the Access PIN) opens ttym.</p>
+          </li>
+          <li><h3>Otherwise: a one-time link</h3><p><code>ttym remote link</code> mints a link valid for 10 minutes and one use. The token sits in the URL fragment, which browsers do not send in requests. This is the way in for paths that carry no identity: the LAN, a local nginx, a device on another tailnet account.</p></li>
+        </ol>
+        <ul class="points">
+          <li>Writes and WebSocket upgrades must come from the same origin, and the server sends no CORS headers.</li>
+          <li>The allow-list, trusted identities and signed-in browsers live in <code>~/.ttym/remote.json</code> (mode 0600, tokens stored as hashes). Only local callers can change them.</li>
+          <li><code>ttym remote tailscale</code> and <code>ttym remote cloudflare</code> are non-interactive, take <code>--json</code> and are safe to re-run, so an agent can do the setup.</li>
+        </ul>
+        <p class="src">Source: <a href="https://github.com/esc5221/ttym/blob/master/docs/remote-access.md">docs/remote-access.md</a> · <a href="https://github.com/esc5221/ttym/tree/master/packages/server/src/remote">packages/server/src/remote</a></p>
+      </section>
+
+      <!-- 07 -->
+      <section id="shell" class="sec">
+        <p class="num">07</p>
+        <h2><a href="#shell">Shell integration</a></h2>
+        <p>With one line in <code>~/.zshrc</code>, the shell marks where each prompt, command and output starts (OSC 133/633) in its own output. The server indexes those marks, so plain shells become scriptable without scraping prompts.</p>
+<pre><code><span class="c"># ~/.zshrc; does nothing outside ttym panes</span>
+[[ -n "$TTYM_SESSION_ID" ]] &amp;&amp; source ~/.local/share/ttym/scripts/ttym-shell-integration.zsh
+
+ttym commands :build              <span class="c"># ✓/✗, exit code, duration, command line</span>
+ttym output :build --cmd 3        <span class="c"># one command's output, cut at the marks</span>
+ttym await :build -- "make test"  <span class="c"># send, wait for the end mark, get exit code + output</span></code></pre>
+        <p><code>await</code> picks its path from evidence: a pane that has shown integration marks gets the command path, and agent panes keep the Stop hook path. In the web terminal the same marks drive ⌘↑ / ⌘↓, which jump between command boundaries in the scrollback.</p>
+        <p class="src">Source: <a href="https://github.com/esc5221/ttym#shell-integration">README · Shell integration</a></p>
+      </section>
+
+      <!-- 08 -->
+      <section id="repo" class="sec">
+        <p class="num">08</p>
+        <h2><a href="#repo">Repo map</a></h2>
+        <p>Lower layers change least. Fixes go in from the bottom, and the surface changes last.</p>
+<pre class="layers"><code><span class="a">CONSUMER</span>  @ttym/web        browser app: dashboard, splits, agent state
+          @ttym/desktop    Tauri shell around the same contract
+          anything with a shell: the CLI is the compatibility boundary
+
+<span class="a">CONTRACT</span>  @ttym/cli        headless surface: new · split · send · await · screen
+          @ttym/protocol   wire format, one implementation for both ends
+          @ttym/api        HTTP client shared by the apps
+
+<span class="a">CORE</span>      @ttym/server     authority on terminal state: cell grid, scrollback,
+                           markers, sessions, workspaces, interactions
+          @ttym/vt         framework-free client core: WS mux, local echo, ANSI
+          @ttym/ui         React terminal host + layout views
+          @ttym/shared     domain rules both ends must agree on (layout tree)
+
+<span class="a">BASE</span>      ttym-holder      Rust, one per session, detached, owns the PTY.
+                           Talks to the server over a unix socket only.</code></pre>
+
+        <div class="split">
+          <div>
+            <h3>State on disk</h3>
+<pre class="mini"><code>~/.ttym/
+  run/workspaces.json      workspaces, atomic writes
+  run/session-N.json       one per session
+  run/snapshot-N.json      checkpoints (rendered ANSI)
+  run/meta-N.json          annotations + runtime keys
+  run/sleep-N.ansi         frozen screens of sleeping agents
+  run/viewer.json          ttym open tabs
+  remote.json              gate state, 0600, hashed tokens
+  ttym.log                 one log; copy-truncate at 64 MB</code></pre>
+          </div>
+          <div>
+            <h3>Tests</h3>
+            <p>422 tests. They spawn real holders, drive a real PTY through the WS protocol, and replay a de-identified capture of a production runtime directory (7 workspaces, 180 snapshots, 241 meta files) to pin boot, recovery and on-disk format round-trips. The CLI end-to-end tests run the built <code>dist/ttym</code>.</p>
+            <p>The runtime directory is cleaned at boot and daily: sessions that are neither live nor workspace members lose their snapshot and meta after 14 days (<code>TTYM_GC_DAYS</code>).</p>
+          </div>
+        </div>
+        <p class="src">Source: <a href="https://github.com/esc5221/ttym/blob/master/docs/architecture.md">docs/architecture.md · layers, operations, tests</a></p>
+      </section>
+
+      <nav class="doc-end">
+        <a href="https://github.com/esc5221/ttym">Read the code on GitHub →</a>
+        <a href="/#install">Install ttym →</a>
+      </nav>
+    </main>
+  </div>
+
+  <footer class="end small-end">
+    <p class="links"><a href="/">Home</a> · <a href="https://github.com/esc5221/ttym">GitHub</a> · <a href="https://github.com/esc5221/ttym#readme">README</a> · <a href="https://github.com/esc5221/ttym/blob/master/README.ko.md">한국어</a></p>
+  </footer>
+
+  <script src="internals.js" defer></script>
+</body>
+</html>
