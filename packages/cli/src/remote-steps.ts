@@ -61,7 +61,7 @@ export function rawStatus(port: number, path: string, headers: Record<string, st
   });
 }
 
-export interface TargetCheck { status: StepStatus; detail: string; fix?: string; unreachable?: boolean }
+export interface TargetCheck { status: StepStatus; detail: string; fix?: string; unreachable?: boolean; open?: boolean }
 
 /**
  * What a stranger gets at `base` with no cookie. Passing means something asks
@@ -83,9 +83,16 @@ export async function checkTarget(base: string, opts: { retryMs?: number; port?:
   if (http.unreachable && opts.port) {
     const host = new URL(base).host;
     const probe = await rawStatus(opts.port, '/api/sessions', { host, 'x-forwarded-for': '100.64.0.1', 'tailscale-user-login': 'doctor@probe' });
-    const here = `${base} is not reachable from this machine (${http.detail.replace(/^.*unreachable /, '')}) — normal when this machine does not use MagicDNS`;
+    const here = `${base} is not reachable from this machine ${http.detail.replace(/^.*unreachable /, '')} — normal when this machine does not use MagicDNS`;
     if (probe === 401) return [{ status: 'warn', detail: `${here}; the gate was checked locally with that Host → 401. Confirm by opening the URL on another device.` }];
     return [http, { status: 'fail', detail: `local gate check for ${host} → ${probe || 'no answer'} (want 401)` }];
+  }
+  // A 200 from here can be the local-proxy rule (nginx on this Mac relaying this Mac's browser —
+  // allowed without login). What matters is what another device gets: ask again as a LAN client.
+  if (http.open && opts.port) {
+    const host = new URL(base).host;
+    const probe = await rawStatus(opts.port, '/api/sessions', { host, 'x-forwarded-for': '192.0.2.1', 'x-real-ip': '192.0.2.1' });
+    if (probe === 401) return [{ status: 'warn', detail: `${base} opens without login from this machine (local proxy); another device gets 401` }];
   }
   const ws = await probeWs(base);
   return [http, ws];
@@ -111,7 +118,7 @@ async function probeHttp(base: string): Promise<TargetCheck> {
     }
     return { status: 'ok', detail: `${base} → refused without login (403)` };
   }
-  if (res.status === 200) return { status: 'fail', detail: `${base} serves the API WITHOUT a login — anyone with the URL has a shell`, fix: 'upgrade the ttym server (this build gates remote requests) and restart it' };
+  if (res.status === 200) return { status: 'fail', open: true, detail: `${base} serves the API WITHOUT a login — anyone with the URL has a shell`, fix: 'upgrade the ttym server (this build gates remote requests) and restart it' };
   return { status: 'fail', detail: `${base} answered ${res.status}${loc ? ` → ${loc.slice(0, 80)}` : ''}` };
 }
 
