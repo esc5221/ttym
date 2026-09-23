@@ -150,10 +150,10 @@ ttym agent sleep :limiter</code></pre>
       <h2>Under the hood</h2>
       <div class="hood-cards">
         <a class="hood-card" href="/internals#holder"><span class="num">02</span><b>Sessions outlive the server</b><span>A Rust holder per terminal keeps the PTY; a restarted server catches up from a checkpoint plus the missing bytes.</span></a>
-        <a class="hood-card" href="/internals#await"><span class="num">04</span><b>Agents as functions</b><span><code>ttym await</code> ends on the agent's Stop hook and returns that turn's answer from its transcript.</span></a>
+        <a class="hood-card" href="/internals#await"><span class="num">04</span><b>Agents as functions</b><span><code>ttym await</code> returns when the program says it is done: an agent's Stop hook, or a shell's end-of-command mark.</span></a>
         <a class="hood-card" href="/internals#remote"><span class="num">06</span><b>Remote access, checked</b><span>Allow-listed hosts, a login cookie, and identities verified with <code>tailscale whois</code> or an Access JWT.</span></a>
       </div>
-      <p class="hood-more"><a href="/internals">All eight sections: processes, the wire, sleep and wake, shell integration, the repo →</a></p>
+      <p class="hood-more"><a href="/internals">All seven: holder and server, recovery, the seq, waiting for done, sleep, the remote gate, the repo →</a></p>
     </section>
   </main>
 
