@@ -31,8 +31,6 @@ export interface Caller {
   hostname: string | null;
   /** Why it counted as remote — logged on refusals. */
   reason: 'local' | 'peer' | 'host' | 'proxy';
-  /** Peer is loopback: a local proxy (tunnel, serve) terminated TLS for us. */
-  viaLocalProxy: boolean;
 }
 
 export function hostnameOf(hostHeader: string | undefined): string | null {
@@ -58,7 +56,7 @@ export const isLoopbackHostname = (h: string | null) => !!h && LOOPBACK_HOSTNAME
 export function classify(req: IncomingMessage): Caller {
   const peerLoopback = isLoopbackAddress(req.socket.remoteAddress);
   const hostname = hostnameOf(req.headers.host);
-  const base = { hostname, viaLocalProxy: peerLoopback };
+  const base = { hostname };
   if (!peerLoopback) return { ...base, remote: true, reason: 'peer' };
   if (!isLoopbackHostname(hostname)) return { ...base, remote: true, reason: 'host' };
   if (PROXY_HEADERS.some((h) => req.headers[h] !== undefined)) return { ...base, remote: true, reason: 'proxy' };
@@ -74,20 +72,33 @@ export function hostAllowed(caller: Caller, allowHosts: ReadonlySet<string>): bo
 /**
  * No Origin: not a browser (CLI, curl, hooks) — pass.
  * `null`: sandboxed viewer iframe — refuse.
- * Otherwise the page must be ours: same host as the request, an allow-listed
- * name, or (for local requests only) a loopback page such as the Vite dev
- * server, which proxies with Host rewritten to 127.0.0.1.
+ * Otherwise the page must be ours: its origin names the same host the request
+ * was sent to. Every way the UI is served (the server, a tunnel, `tailscale
+ * serve`, nginx, the Vite dev proxy) keeps the two equal, so another local
+ * port — some other dev server — gets no exemption.
  */
-export function originAllowed(req: IncomingMessage, caller: Caller, allowHosts: ReadonlySet<string>): boolean {
+export function originAllowed(req: IncomingMessage): boolean {
   const origin = req.headers.origin;
   if (origin === undefined) return true;
   if (origin === 'null') return false;
   let url: URL;
   try { url = new URL(origin); } catch { return false; }
-  if (req.headers.host && url.host.toLowerCase() === req.headers.host.toLowerCase()) return true;
-  const name = hostnameOf(url.host);
-  if (!caller.remote && isLoopbackHostname(name)) return true;
-  return !!name && allowHosts.has(name);
+  return !!req.headers.host && url.host.toLowerCase() === req.headers.host.toLowerCase();
+}
+
+/**
+ * Did the browser reach us over HTTPS? Only a proxy can say. cloudflared sets
+ * X-Forwarded-Proto (and cf-visitor); `tailscale serve` on 443 is HTTPS by
+ * construction but sends no proto header (measured, 1.102), so a port-less
+ * *.ts.net Host counts. A local nginx on :80 sets neither — its cookie must
+ * not be Secure or the browser drops it.
+ */
+export function viaHttps(req: IncomingMessage): boolean {
+  const proto = String(req.headers['x-forwarded-proto'] ?? '').split(',')[0]!.trim().toLowerCase();
+  if (proto === 'https') return true;
+  if (/"scheme"\s*:\s*"https"/.test(String(req.headers['cf-visitor'] ?? ''))) return true;
+  const host = (req.headers.host ?? '').toLowerCase();
+  return host.endsWith('.ts.net');
 }
 
 export function parseCookies(header: string | undefined): Map<string, string> {

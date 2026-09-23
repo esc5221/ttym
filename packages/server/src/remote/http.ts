@@ -11,7 +11,7 @@
  * /api/remote/* configures all of this and answers local callers only.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { classify, hostAllowed, originAllowed, parseCookies, normalizeHost, type Caller } from './access.js';
+import { classify, hostAllowed, originAllowed, parseCookies, normalizeHost, viaHttps } from './access.js';
 import type { RemoteStore } from './store.js';
 import { SESSION_TTL_MS } from './store.js';
 
@@ -46,13 +46,9 @@ function readBody(req: IncomingMessage, limit = 64 * 1024): Promise<string> {
 
 const isWrite = (method: string | undefined) => !!method && !['GET', 'HEAD', 'OPTIONS'].includes(method);
 
-/**
- * A cookie set through a local proxy (tunnel, `tailscale serve`) travels over
- * HTTPS on the outside, so it can be Secure. A LAN request is plain HTTP end
- * to end — a Secure cookie would never come back.
- */
-function cookieHeader(value: string, caller: Caller, maxAgeSec: number): string {
-  const secure = caller.viaLocalProxy ? '; Secure' : '';
+/** Secure only when the browser side is HTTPS (see viaHttps); over plain HTTP a Secure cookie is dropped. */
+function cookieHeader(value: string, req: IncomingMessage, maxAgeSec: number): string {
+  const secure = viaHttps(req) ? '; Secure' : '';
   return `${COOKIE}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}${secure}`;
 }
 
@@ -75,7 +71,7 @@ export function gate(req: IncomingMessage, res: ServerResponse, ctx: RemoteConte
     res.end(`host not allowed: ${caller.hostname ?? '(none)'}\non the ttym machine: ttym remote allow-host ${caller.hostname ?? '<host>'}\n`);
     return true;
   }
-  if (isWrite(req.method) && !originAllowed(req, caller, allow)) {
+  if (isWrite(req.method) && !originAllowed(req)) {
     ctx.log(`REMOTE refuse origin=${req.headers.origin} ${req.method} ${path}`);
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('forbidden origin\n');
@@ -87,7 +83,7 @@ export function gate(req: IncomingMessage, res: ServerResponse, ctx: RemoteConte
   if (path === '/api/auth/logout' && req.method === 'POST') {
     const t = parseCookies(req.headers.cookie).get(COOKIE);
     if (t) ctx.store.revokeToken(t);
-    sendJson(res)(200, { ok: true }, { 'Set-Cookie': cookieHeader('', caller, 0) });
+    sendJson(res)(200, { ok: true }, { 'Set-Cookie': cookieHeader('', req, 0) });
     return true;
   }
 
@@ -115,7 +111,7 @@ export function gateUpgrade(req: IncomingMessage, ctx: RemoteContext): [number, 
   const allow = ctx.store.allowHosts;
   if (!hostAllowed(caller, allow)) return [403, 'host not allowed'];
   // Browsers always send Origin on a WebSocket handshake; a cross-site page is refused here.
-  if (!originAllowed(req, caller, allow)) {
+  if (!originAllowed(req)) {
     ctx.log(`REMOTE refuse ws origin=${req.headers.origin}`);
     return [403, 'forbidden origin'];
   }
@@ -124,7 +120,7 @@ export function gateUpgrade(req: IncomingMessage, ctx: RemoteContext): [number, 
   return [401, 'login required'];
 }
 
-function login(req: IncomingMessage, res: ServerResponse, caller: Caller, ctx: RemoteContext) {
+function login(req: IncomingMessage, res: ServerResponse, caller: ReturnType<typeof classify>, ctx: RemoteContext) {
   const json = sendJson(res);
   readBody(req).then((body) => {
     let linkToken: unknown;
@@ -137,7 +133,7 @@ function login(req: IncomingMessage, res: ServerResponse, caller: Caller, ctx: R
       return;
     }
     ctx.log(`REMOTE login session=${out.session.id} host=${caller.hostname}`);
-    json(200, { ok: true, session: out.session.id }, { 'Set-Cookie': cookieHeader(out.token, caller, SESSION_TTL_MS / 1000) });
+    json(200, { ok: true, session: out.session.id }, { 'Set-Cookie': cookieHeader(out.token, req, SESSION_TTL_MS / 1000) });
   }).catch(() => json(400, { error: 'invalid body' }));
 }
 

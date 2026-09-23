@@ -158,19 +158,15 @@ export function writeLocalEchoEnabled(value: boolean) {
   } catch {}
 }
 
-/** Derive ttym server host from current page URL */
+/**
+ * The ttym server is always this page's own origin. Every way the UI is
+ * served already puts the API beside it: the server itself, a tunnel or
+ * `tailscale serve`, nginx/Caddy in front, the Vite dev proxy (/api, /ws).
+ * The server refuses cross-origin writes and WebSockets (remote/http.ts), so
+ * the old "ttym-ui.* → ttym.*" and "<host>:7690" guesses would only fail now.
+ */
 export function getTtymHost(): string {
-  const h = window.location.hostname;
-  // ttym-ui.lullu.lan → ttym.lullu.lan (Caddy proxy, port 80)
-  if (h.startsWith('ttym-ui.')) return `ttym.${h.slice(8)}`;
-  // https = 터널/프록시 뒤라는 뜻이다 — 원 서버(7690)는 TLS를 말하지 않으니
-  // 프리픽스가 뭐든 same-origin이 유일한 정답. (ttym-pro.mainpy.dev가
-  // 프리픽스 매칭에 안 걸려 :7690 직결을 시도하던 구멍의 원칙적 폐쇄)
-  if (window.location.protocol === 'https:') return window.location.host;
-  // tunnel or same-origin proxy → use current host (Vite proxies /api and /ws)
-  if (h.startsWith('ttym.') || h === 'localhost' || h === '127.0.0.1') return window.location.host;
-  // fallback: same host, port 7690
-  return `${h}:7690`;
+  return window.location.host;
 }
 /** 입력 성격: 터치가 주 입력 수단인가 — 키바·상시 액션·webgl off의 기준.
  *  공간 성격(useNarrow)과 분리: 아이패드+키보드는 coarse지만 넓다. */

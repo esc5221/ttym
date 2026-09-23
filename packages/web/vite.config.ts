@@ -22,7 +22,9 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: true,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:7690', changeOrigin: true },
+      // Host passes through untouched: the server's Origin check wants the
+      // page's own host (localhost:3300) on both headers.
+      '/api': { target: 'http://127.0.0.1:7690' },
       '/ws': { target: 'ws://127.0.0.1:7690', ws: true },
     },
   },

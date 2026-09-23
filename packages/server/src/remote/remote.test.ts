@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { mkdirSync, rmSync, statSync } from 'node:fs';
 import WebSocket from 'ws';
 import { createServer, type TtymServer } from '../server.js';
-import { classify, hostnameOf, normalizeHost, originAllowed } from './access.js';
+import { hostnameOf, normalizeHost, originAllowed, viaHttps, classify } from './access.js';
 import { RemoteStore } from './store.js';
 
 // Raw http so Host / Origin / proxy headers can be set freely (fetch forbids Host).
@@ -53,16 +53,22 @@ describe('access rules', () => {
     expect(classify(fakeReq({ host: 'localhost' }, '192.168.0.9')).reason).toBe('peer');
   });
 
-  it('accepts same-origin and loopback dev pages, refuses other sites', () => {
-    const allow = new Set(['box.ts.net']);
-    const local = (h: Record<string, string>) => originAllowed(fakeReq(h), classify(fakeReq(h)), allow);
-    expect(local({ host: '127.0.0.1:7690' })).toBe(true); // CLI: no Origin
-    expect(local({ host: '127.0.0.1:7690', origin: 'http://127.0.0.1:7690' })).toBe(true);
-    expect(local({ host: '127.0.0.1:7690', origin: 'http://localhost:3300' })).toBe(true); // Vite dev
-    expect(local({ host: '127.0.0.1:7690', origin: 'https://evil.example' })).toBe(false);
-    expect(local({ host: '127.0.0.1:7690', origin: 'null' })).toBe(false);
-    const remoteH = { host: 'box.ts.net', origin: 'http://localhost:3300' };
-    expect(originAllowed(fakeReq(remoteH), classify(fakeReq(remoteH)), allow)).toBe(false);
+  it('accepts only same-origin pages', () => {
+    const ok = (h: Record<string, string>) => originAllowed(fakeReq(h));
+    expect(ok({ host: '127.0.0.1:7690' })).toBe(true); // CLI: no Origin
+    expect(ok({ host: '127.0.0.1:7690', origin: 'http://127.0.0.1:7690' })).toBe(true);
+    expect(ok({ host: 'localhost:3300', origin: 'http://localhost:3300' })).toBe(true); // Vite dev proxy keeps Host
+    expect(ok({ host: 'box.ts.net', origin: 'https://box.ts.net' })).toBe(true);
+    expect(ok({ host: '127.0.0.1:7690', origin: 'http://localhost:3300' })).toBe(false); // another local port
+    expect(ok({ host: '127.0.0.1:7690', origin: 'https://evil.example' })).toBe(false);
+    expect(ok({ host: '127.0.0.1:7690', origin: 'null' })).toBe(false);
+  });
+
+  it('marks cookies Secure only when the browser side is HTTPS', () => {
+    expect(viaHttps(fakeReq({ host: 't.example.com', 'x-forwarded-proto': 'https' }))).toBe(true); // cloudflared
+    expect(viaHttps(fakeReq({ host: 'box.tail1.ts.net' }))).toBe(true); // tailscale serve :443 (no proto header, measured)
+    expect(viaHttps(fakeReq({ host: 'ttym.lullu.lan', 'x-forwarded-for': '10.0.0.2' }))).toBe(false); // nginx on :80
+    expect(viaHttps(fakeReq({ host: '192.168.0.10:7690' }))).toBe(false); // LAN bind
   });
 });
 
@@ -134,7 +140,7 @@ describe('server gate', () => {
   });
 
   it('remote: allow-host, login required, link → cookie → access, revoke', async () => {
-    const tunnel = { host: 'ttym.example.com', 'x-forwarded-for': '203.0.113.9' };
+    const tunnel = { host: 'ttym.example.com', 'x-forwarded-for': '203.0.113.9', 'x-forwarded-proto': 'https' };
     // /api/remote answers local callers only
     expect((await call(port, '/api/remote', { headers: tunnel })).status).toBe(403);
     const add = await call(port, '/api/remote/hosts', { method: 'POST', headers: { host: `127.0.0.1:${port}`, ...JSON_H }, body: '{"host":"https://TTYM.example.com/"}' });
