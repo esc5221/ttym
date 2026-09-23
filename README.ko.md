@@ -2,14 +2,14 @@
   <a href="https://ttym.pages.dev">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
-      <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="300">
+      <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="180">
     </picture>
   </a>
 </p>
 
 <h3 align="center">어떤 에이전트가 나를 기다리는지 알고,<br>어디서든 그 터미널로 돌아간다.</h3>
 
-<p align="center">코딩 에이전트를 위한 웹 터미널 멀티플렉서 · macOS, Linux · Node ≥ 20</p>
+<p align="center">코딩 에이전트를 위한 웹 터미널 멀티플렉서</p>
 
 <p align="center"><a href="https://ttym.pages.dev"><b>웹사이트</b></a> · <a href="#설치">설치</a> · <a href="#빠른-시작">빠른 시작</a> · <a href="https://ttym.pages.dev/#film">영상 (69초)</a> · <a href="docs/remote-access.md">원격 접속</a> · <a href="#아키텍처">아키텍처</a> · <a href="README.md">English</a></p>
 
@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh
 스크립트는 이 기기에 맞는 빌드(macOS·Linux, arm64·x86_64)를
 [GitHub Releases](https://github.com/esc5221/ttym/releases)에서 받아 sha256을
 확인한 뒤 `~/.local/share/ttym`에 설치하고, `~/.local/bin`에 `ttym` 링크를 만든다.
-필요한 것은 Node ≥ 20 하나다. 스크립트가 짧으니 `sh`로 넘기기 전에
+Node 20 이상이 필요하다. 스크립트가 짧으니 `sh`로 넘기기 전에
 [읽어 보기](install.sh)를 권한다. 버전을 고정하려면 `TTYM_VERSION=v0.3.0`.
 
 그다음 기기마다 한 번:

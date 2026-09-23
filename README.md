@@ -2,14 +2,14 @@
   <a href="https://ttym.pages.dev">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
-      <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="300">
+      <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="180">
     </picture>
   </a>
 </p>
 
 <h3 align="center">Know which agent needs you.<br>Get back into its terminal from anywhere.</h3>
 
-<p align="center">A web terminal multiplexer for coding agents · macOS and Linux · Node ≥ 20</p>
+<p align="center">A web terminal multiplexer for coding agents</p>
 
 <p align="center"><a href="https://ttym.pages.dev"><b>Website</b></a> · <a href="#install">Install</a> · <a href="#quick-start">Quick start</a> · <a href="https://ttym.pages.dev/#film">Film (69 s)</a> · <a href="docs/remote-access.md">Remote access</a> · <a href="#architecture">Architecture</a> · <a href="README.ko.md">한국어</a></p>
 
@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh
 The script downloads the build for your machine (macOS or Linux, arm64 or
 x86_64) from [GitHub Releases](https://github.com/esc5221/ttym/releases),
 checks its sha256, installs it to `~/.local/share/ttym` and links `ttym` into
-`~/.local/bin`. Node ≥ 20 is the only prerequisite. It is short;
+`~/.local/bin`. Needs Node 20 or newer. It is short;
 [read it](install.sh) before piping it to `sh`. `TTYM_VERSION=v0.3.0` pins a
 version.
 

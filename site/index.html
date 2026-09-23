@@ -50,7 +50,7 @@
           <code><span class="p">$</span> curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh</code>
           <button class="copy" data-copy="curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh" aria-label="Copy the install command">copy</button>
         </div>
-        <p class="meta"><span>Node ≥ 20 · macOS and Linux · prebuilt, from GitHub Releases</span> <span class="go"><a href="#film">Watch the 69-second film ↓</a> <a href="/internals">Internals →</a></span></p>
+        <p class="meta"><span class="go"><a href="#film">Watch the 69-second film ↓</a> <a href="/internals">Internals →</a></span></p>
       </div>
     </section>
 
@@ -137,7 +137,7 @@ ttym agent sleep :limiter</code></pre>
     <section class="install" id="install">
       <h2>Five commands. <span class="a">Then it's yours.</span></h2>
       <ol class="steps">
-        <li class="long"><code>curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh</code><span>Downloads the build for your machine from <a href="https://github.com/esc5221/ttym/releases">GitHub Releases</a>, checks its sha256 and installs it to <code>~/.local/share/ttym</code>, with <code>ttym</code> linked in <code>~/.local/bin</code>. Needs Node ≥ 20. <a href="https://github.com/esc5221/ttym/blob/master/install.sh">Read the script first</a>.</span></li>
+        <li class="long"><code>curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh</code><span>Downloads the build for your machine from <a href="https://github.com/esc5221/ttym/releases">GitHub Releases</a>, checks its sha256 and installs it to <code>~/.local/share/ttym</code>, with <code>ttym</code> linked in <code>~/.local/bin</code>. Needs Node 20 or newer. <a href="https://github.com/esc5221/ttym/blob/master/install.sh">Read the script first</a>.</span></li>
         <li><code>ttym service install</code><span>Keeps the server running: it starts at login and restarts after a crash (launchd on macOS, systemd on Linux). Terminals live in their own processes, so a restart does not close them.</span></li>
         <li><code>ttym agent install claude</code><span>Hooks for Claude Code (Codex too): which agent needs you, <code>await</code>, sleep and wake.</span></li>
         <li><code>ttym</code><span>Opens a workspace in this terminal. The same sessions are in the browser at <code>http://localhost:7690</code>.</span></li>
