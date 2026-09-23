@@ -1366,6 +1366,28 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
     return () => { document.title = 'ttym'; };
   }, [ws?.name, sessionIds.length]);
 
+  // viewer 탭 스트립이 우측 absolute 액션 클러스터(☾ sleep · zen · split · detach · × …) 밑으로
+  // 깔려서, 마지막 탭의 ×를 누르려 하면 hover로 살아난 그 버튼들이 클릭을 가로채던 문제.
+  // 클러스터의 실제 폭을 재서 헤더에 --pane-actions-w로 싣고, PaneTabs가 그만큼 오른쪽을 비운다.
+  // reveal 버튼은 opacity만 바뀌고 폭은 그대로라(=클러스터 폭 불변) hover에도 탭이 재배치되지 않는다.
+  const actionsRo = useRef<ResizeObserver | null>(null);
+  if (actionsRo.current === null && typeof ResizeObserver !== 'undefined') {
+    actionsRo.current = new ResizeObserver((entries) => {
+      for (const e of entries) {
+        const el = e.target as HTMLElement;
+        const parent = el.parentElement;
+        if (parent) parent.style.setProperty('--pane-actions-w', `${Math.ceil(el.getBoundingClientRect().width) + 16}px`);
+      }
+    });
+  }
+  useEffect(() => () => actionsRo.current?.disconnect(), []);
+  const actionsRef = useCallback((el: HTMLSpanElement | null) => {
+    if (!el || !actionsRo.current) return;
+    actionsRo.current.observe(el);
+    const parent = el.parentElement;
+    if (parent) parent.style.setProperty('--pane-actions-w', `${Math.ceil(el.getBoundingClientRect().width) + 16}px`);
+  }, []);
+
   const renderPane = useCallback((sid: number, _path: number[]) => {
     if (sid <= 0) {
       return (
@@ -1545,11 +1567,12 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
               activeId={paneTab === 'term' ? null : paneTab}
               onSelect={(vid) => viewer.setActive(sid, vid)}
               onClose={(vid) => void viewer.close(sid, vid)}
-              // 항상 보이는 우측 버튼(⟳ ↗ full · ×)이 absolute라 그만큼 스트립 오른쪽을 비운다.
-              reserveRight={paneItem ? 124 : 8}
+              // 우측 액션 클러스터가 absolute라, 측정된 그 폭(--pane-actions-w)만큼 스트립 오른쪽을
+              // 비운다 — 마지막 탭의 ×가 클러스터 밑에 깔리지 않게. 측정 전 첫 프레임은 8px 폴백.
+              reserveRight="var(--pane-actions-w, 8px)"
             />
           ) : null}
-          <span style={{
+          <span ref={actionsRef} style={{
             position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
             display: 'inline-flex', alignItems: 'center', gap: 6, zIndex: 2,
             // hover로 펼쳐지는 버튼들은 탭 끝을 잠깐 덮는다 — cwd를 덮던 것과 같은 규칙. 바탕은 깔지

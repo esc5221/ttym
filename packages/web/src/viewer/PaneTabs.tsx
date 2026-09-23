@@ -27,8 +27,10 @@ export function PaneTabs({ items, activeId, onSelect, onClose, reserveRight = 8 
   activeId: string | null;
   onSelect: (vid: string) => void;
   onClose: (vid: string) => void;
-  /** Pixels kept clear on the right for the header's always-visible action buttons (they are absolute). */
-  reserveRight?: number;
+  /** Space kept clear on the right for the header's action cluster (absolute). A CSS length —
+   *  a number (px) or a string like `var(--pane-actions-w, 8px)` so the strip yields exactly the
+   *  cluster's measured width and a tab's × never sits under it. */
+  reserveRight?: number | string;
 }) {
   const stripRef = useRef<HTMLSpanElement | null>(null);
   const [compact, setCompact] = useState(false);
