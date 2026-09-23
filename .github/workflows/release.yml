@@ -7,6 +7,9 @@ name: release
 on:
   push:
     tags: ['v*.*.*']
+  # Manual run = rehearsal: builds all four holders, assembles, smoke-tests the
+  # install — and stops before publishing anything.
+  workflow_dispatch:
 
 jobs:
   holder:
@@ -49,6 +52,7 @@ jobs:
         with: { node-version: 22, registry-url: 'https://registry.npmjs.org' }
       - uses: dtolnay/rust-toolchain@stable
       - name: tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           V=$(node -p "require('./package.json').version")
           [ "v$V" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != package.json v$V"; exit 1; }
@@ -75,6 +79,7 @@ jobs:
           test -x $P/lib/node_modules/ttym/scripts/ttym-claude-stop-hook.sh
           $P/bin/ttym stop
       - name: publish holders, then the main package
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
             (cd npm-staging/holder-$p && npm publish --provenance --access public)
@@ -82,6 +87,7 @@ jobs:
           cd npm-staging/ttym && npm publish --provenance --access public
         env: { NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}' }
       - name: tarballs for the release page
+        if: startsWith(github.ref, 'refs/tags/')
         run: |
           for p in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
             # Same layout as the npm package: the server finds dist/../packages/web/dist, hooks dist/../scripts.
@@ -94,6 +100,7 @@ jobs:
             shasum -a 256 ttym-${GITHUB_REF_NAME}-$p.tar.gz > ttym-${GITHUB_REF_NAME}-$p.tar.gz.sha256
           done
       - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             ttym-*.tar.gz
