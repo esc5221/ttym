@@ -1076,13 +1076,16 @@ function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, ag
   const exitFull = useCallback(() => {
     navigate({ page: 'workspace', id: workspaceId }, { replace: true });
   }, [workspaceId]);
+  /** zen에서 뷰어를 옆에 펼쳐 두는지 — 탭이 있을 때만 의미가 있다. 기본은 접힘: 이 화면에서
+   *  펼친 적이 없는데 예전 `ttym open` 탭이 터미널 옆을 차지하고 있으면 안 된다. */
+  const [zenSideOpen, setZenSideOpen] = useState<boolean>(() => { try { return window.localStorage.getItem('ttym-zen-side') === '1'; } catch { return false; } });
   const viewer = useViewerState(mux, sessionIds, (sid, vid, presentation) => {
     if (presentation === 'full') openFull(sid, vid);
     else if (open?.sid === sid) exitFull();
+    // 방금 연 파일은 보여야 한다 — 접어 둔 zen 패널도 이번엔 펼친다(기억은 안 바꾼다).
+    if (presentation !== 'full' && zenSid === sid) setZenSideOpen(true);
   });
   const fullState = open !== null ? viewer.states[open.sid] ?? null : null;
-  /** zen에서 뷰어를 옆에 펼쳐 두는지 — 탭이 있을 때만 의미가 있고, 기본은 펼침. */
-  const [zenSideOpen, setZenSideOpen] = useState<boolean>(() => { try { return window.localStorage.getItem('ttym-zen-side') !== '0'; } catch { return true; } });
   const toggleZenSide = useCallback(() => setZenSideOpen((v) => { try { window.localStorage.setItem('ttym-zen-side', v ? '0' : '1'); } catch {} return !v; }), []);
   const zenViewer = zenSid !== null ? viewer.states[zenSid] ?? null : null;
   // full로 보던 탭이 닫혔거나 pane이 빠졌으면 빈 오버레이에 갇힌다 — 주소를 되돌린다.

@@ -66,16 +66,22 @@ export function useViewerState(
       presentRef.current(sid, req.itemId, req.presentation);
     } else {
       // Keep the active tab valid. First choice is what this browser was
-      // looking at last time (a reload must land on the same tab), then the
-      // last tab — a closed tab hands over to its neighbour that way too.
+      // looking at last time (a reload must land on the same tab). A screen
+      // that never chose — another browser, a phone, a private window — gets
+      // the terminal: tabs `ttym open` left behind days ago used to cover it
+      // there. Only a tab closed under this page hands over to its neighbour.
       setActiveMap((prev) => {
         const cur = prev[sid];
         if (cur && incoming.items.some((item) => item.id === cur)) return prev;
-        const remembered = readActive(sid);
-        // 'term' is a tab too — the terminal itself. Remembered as such, it stays in front.
-        if (cur === 'term' || (cur === undefined && remembered === 'term')) return cur === 'term' ? prev : { ...prev, [sid]: 'term' };
-        const fallback = incoming.items.find((item) => item.id === remembered) ?? incoming.items[incoming.items.length - 1];
-        return fallback ? { ...prev, [sid]: fallback.id } : prev;
+        // 'term' is a tab too — the terminal itself.
+        if (cur === 'term') return prev;
+        if (cur === undefined) {
+          const remembered = readActive(sid);
+          const back = incoming.items.find((item) => item.id === remembered)?.id ?? 'term';
+          return { ...prev, [sid]: back };
+        }
+        const neighbour = incoming.items[incoming.items.length - 1];
+        return { ...prev, [sid]: neighbour ? neighbour.id : 'term' };
       });
     }
   }, []);
