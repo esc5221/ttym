@@ -35,11 +35,33 @@ UI on `localhost`) need no login. Every request that did not originate on this
 machine — through a tunnel, `tailscale serve`, or the LAN — must:
 
 - name a host in the allow-list (`ttym remote allow-host <host>`), and
-- carry a login cookie, which a browser gets by opening a one-time link from
-  `ttym remote link`.
+- carry a login cookie. A browser gets one in either of two ways:
+  - **its identity is verified** (`ttym remote trust`): a Tailscale login
+    confirmed with `tailscale whois`, or a Cloudflare Access JWT whose
+    signature, team, app (aud) and email check out. One login — the
+    Tailscale account or the Access PIN — and ttym opens.
+  - **a one-time link** from `ttym remote link` (10 minutes, one use). This
+    is the way in for paths that carry no identity: the LAN, a local nginx,
+    a device signed in to another tailnet account.
 
-The allow-list and signed-in browsers live in `~/.ttym/remote.json` (0600,
-tokens stored as hashes). Only local callers can change them. Signed-in
+The allow-list, trusted identities and signed-in browsers live in
+`~/.ttym/remote.json` (0600, tokens stored as hashes). Only local callers can
+change them.
+
+```sh
+ttym remote trust                                   # what is trusted now
+ttym remote trust tailscale                         # this machine's tailnet login (auto: ttym remote tailscale)
+ttym remote trust cloudflare --host <h> --email <e> # team + aud read from the Access redirect (auto: ttym remote cloudflare)
+ttym remote untrust tailscale|cloudflare|all
+```
+
+Why the identity is not simply believed: `tailscale serve` overwrites a forged
+`Tailscale-User-Login` and `X-Forwarded-For` (measured), but the same headers
+could arrive another way, e.g. through a local nginx. ttym therefore requires
+the last forwarded hop to be a tailnet address and asks `tailscale whois` who
+owns it. For Access, a policy loosened by mistake still lets no other email
+in, because ttym checks the email against its own list; with Access removed
+there is no JWT at all and the link is the only way in. Signed-in
 browsers last 30 days; `ttym remote sessions` lists them and
 `ttym remote revoke <id>|--all` signs them out.
 
@@ -58,8 +80,11 @@ ttym remote tailscale
 
 What it does: finds the `tailscale` CLI, checks that this machine is signed in,
 runs `tailscale serve --bg --https=443 http://127.0.0.1:7690`, allows
-`<machine>.<tailnet>.ts.net`, verifies the URL asks for a login, and prints a
-login link with a QR code.
+`<machine>.<tailnet>.ts.net`, trusts this machine's tailnet login, verifies
+the URL asks strangers for a login, and prints the URL (plus a one-time link
+for devices signed in to another account).
+
+Devices signed in to your Tailscale account then open the URL directly.
 
 What you do, once:
 
