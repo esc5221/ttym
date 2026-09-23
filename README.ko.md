@@ -11,16 +11,14 @@
 
 <p align="center">코딩 에이전트를 위한 웹 터미널 멀티플렉서</p>
 
-<p align="center"><a href="https://ttym.pages.dev"><b>웹사이트</b></a> · <a href="#설치">설치</a> · <a href="#빠른-시작">빠른 시작</a> · <a href="https://ttym.pages.dev/#film">영상 (69초)</a> · <a href="docs/remote-access.md">원격 접속</a> · <a href="#cli-레퍼런스">CLI</a> · <a href="#아키텍처">아키텍처</a> · <a href="README.md">English</a></p>
+<p align="center"><a href="https://ttym.pages.dev"><b>웹사이트</b></a> · <a href="#설치">설치</a> · <a href="#빠른-시작">빠른 시작</a> · <a href="https://ttym.pages.dev/#film">영상 (69초)</a> · <a href="docs/remote-access.md">원격 접속</a> · <a href="#cli-레퍼런스">CLI</a> · <a href="#작동-방식">작동 방식</a> · <a href="README.md">English</a></p>
 
 <p align="center">
   <a href="https://ttym.pages.dev/#film"><img src="docs/assets/film.jpg" alt="69초 영상 보기: ttym 위의 실제 Claude Code 세션" width="880"></a>
 </p>
 
 코딩 에이전트를 여러 개 돌리다 보면 하나는 내 입력을 기다리고 나머지는
-아직 작업 중인데, 어느 쪽인지 찾으려고 터미널 탭을 돌아다니게 된다. ttym은
-웹 터미널 멀티플렉서다. 서버 하나가 모든 PTY를 들고 있고, 브라우저·CLI·휴대폰은
-같은 live 터미널을 보는 창이다.
+아직 작업 중인데, 어느 쪽인지 찾으려고 터미널 탭을 돌아다니게 된다.
 
 ## 설치
 
@@ -90,6 +88,36 @@ open http://localhost:7690     # 같은 세션을 브라우저에서
 ```
 
 `C-b d`로 나와도 전부 계속 돈다.
+
+## 작동 방식
+
+터미널마다 PTY는 holder에 산다. holder는 PTY와 그 출력의 raw ring을 쥐고 있는 작은
+Rust 프로세스다. 서버는 세션마다 headless xterm을 돌려서 화면과 스크롤백을 안다.
+뷰어는 서버하고만, holder는 서버하고만 이야기한다. 그래서 서버를 재시작하거나
+업그레이드해도 터미널이 닫히지 않는다.
+
+<p align="center">
+  <img src="docs/assets/architecture.png" alt="ttym attach, 브라우저, 데스크톱 앱, CLI 컨트롤 플레인이 HTTP와 WebSocket으로 서버에 붙고, 서버는 unix socket으로 터미널마다 하나인 holder에 붙는다" width="880">
+</p>
+
+패키지 계층 (아래일수록 바닥):
+
+| 계층 | 패키지 | 역할 |
+| --- | --- | --- |
+| Consumer | [`@ttym/web`](packages/web) | 브라우저 앱 |
+| | [`@ttym/desktop`](packages/desktop) | 같은 웹 앱을 감싼 Tauri 앱 |
+| Contract | [`@ttym/cli`](packages/cli) | new · split · send · await · screen |
+| | [`@ttym/protocol`](packages/protocol) | wire 포맷, 서버와 클라이언트가 같이 씀 |
+| | [`@ttym/api`](packages/api) | 앱용 HTTP 클라이언트 |
+| Core | [`@ttym/server`](packages/server) | 세션, 화면, workspace, 원격 관문 |
+| | [`@ttym/vt`](packages/vt) | 클라이언트 코어: WebSocket mux, 로컬 에코 |
+| | [`@ttym/ui`](packages/ui) | React 터미널과 레이아웃 뷰 |
+| | [`@ttym/shared`](packages/shared) | 양쪽이 같이 지키는 규칙 (레이아웃 트리) |
+| Base | [`holder`](holder) | Rust, 터미널마다 하나, PTY를 소유 |
+
+복구, seq 프로토콜, `await`, 절전, 원격 관문을 도식과 함께:
+[ttym.pages.dev/internals](https://ttym.pages.dev/internals). 계층과 운영:
+[docs/architecture.md](docs/architecture.md).
 
 ## 하는 일
 
@@ -166,13 +194,6 @@ ttym remote tailscale
 이 기기 밖에서 오는 요청은 허용된 호스트와 로그인이 필요하다. Cloudflare Tunnel,
 SSH와 세부 동작은 [docs/remote-access.md](docs/remote-access.md). 에이전트는
 `ttym remote doctor --json`부터 실행한다.
-
-## 아키텍처
-
-서버 하나가 모든 세션의 화면을 들고 있고, 터미널마다 PTY는 별도의 작은 Rust
-프로세스에 산다. 그래서 서버를 재시작하거나 업그레이드해도 터미널이 닫히지 않는다.
-구성과 도식: [ttym.pages.dev/internals](https://ttym.pages.dev/internals).
-패키지 계층과 운영: [docs/architecture.md](docs/architecture.md).
 
 ## CLI 레퍼런스
 

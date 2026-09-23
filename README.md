@@ -11,16 +11,14 @@
 
 <p align="center">A web terminal multiplexer for coding agents</p>
 
-<p align="center"><a href="https://ttym.pages.dev"><b>Website</b></a> · <a href="#install">Install</a> · <a href="#quick-start">Quick start</a> · <a href="https://ttym.pages.dev/#film">Film (69 s)</a> · <a href="docs/remote-access.md">Remote access</a> · <a href="#cli-reference">CLI</a> · <a href="#architecture">Architecture</a> · <a href="README.ko.md">한국어</a></p>
+<p align="center"><a href="https://ttym.pages.dev"><b>Website</b></a> · <a href="#install">Install</a> · <a href="#quick-start">Quick start</a> · <a href="https://ttym.pages.dev/#film">Film (69 s)</a> · <a href="docs/remote-access.md">Remote access</a> · <a href="#cli-reference">CLI</a> · <a href="#how-it-works">How it works</a> · <a href="README.ko.md">한국어</a></p>
 
 <p align="center">
   <a href="https://ttym.pages.dev/#film"><img src="docs/assets/film.jpg" alt="Watch the 69-second film: one real Claude Code session on ttym" width="880"></a>
 </p>
 
 You're running a dozen coding agents. One is blocked on you, the rest are still
-working, and you're cycling through terminal tabs to find which. ttym is a web
-terminal multiplexer: one server holds every PTY, and the browser, the CLI and
-your phone are views of the same live terminals.
+working, and you're cycling through terminal tabs to find which.
 
 ## Install
 
@@ -91,6 +89,37 @@ open http://localhost:7690     # the same session in the browser
 ```
 
 `C-b d` detaches; everything keeps running.
+
+## How it works
+
+Each terminal's PTY lives in a holder: a small Rust process that keeps it and a
+ring of its raw output. The server runs a headless xterm per session, so it
+knows the screen and the scrollback. Viewers talk only to the server and only
+the server talks to holders, which is why a server restart or upgrade does not
+close a terminal.
+
+<p align="center">
+  <img src="docs/assets/architecture.png" alt="ttym attach, the browser, the desktop app and the CLI control plane connect to the server over HTTP and WebSocket; the server connects to one holder per terminal over a unix socket" width="880">
+</p>
+
+The packages, lowest layer last:
+
+| Layer | Package | Role |
+| --- | --- | --- |
+| Consumer | [`@ttym/web`](packages/web) | browser app |
+| | [`@ttym/desktop`](packages/desktop) | Tauri shell around the same web app |
+| Contract | [`@ttym/cli`](packages/cli) | new · split · send · await · screen |
+| | [`@ttym/protocol`](packages/protocol) | wire format, shared by server and clients |
+| | [`@ttym/api`](packages/api) | HTTP client for the apps |
+| Core | [`@ttym/server`](packages/server) | sessions, screens, workspaces, the remote gate |
+| | [`@ttym/vt`](packages/vt) | client core: WebSocket mux, local echo |
+| | [`@ttym/ui`](packages/ui) | React terminal and layout views |
+| | [`@ttym/shared`](packages/shared) | rules both ends share (the layout tree) |
+| Base | [`holder`](holder) | Rust, one per terminal, owns the PTY |
+
+Recovery, the seq protocol, `await`, sleep and the remote gate, with diagrams:
+[ttym.pages.dev/internals](https://ttym.pages.dev/internals). Layers and
+operations: [docs/architecture.md](docs/architecture.md).
 
 ## What it does
 
@@ -170,13 +199,6 @@ Off this machine, every request needs an allowed host and a login.
 Cloudflare Tunnel, SSH and the details are in
 [docs/remote-access.md](docs/remote-access.md). Agents can start with
 `ttym remote doctor --json`.
-
-## Architecture
-
-One server holds every session's screen; each terminal's PTY lives in its own
-small Rust process, so a server restart or upgrade does not close it. How the
-pieces fit, with diagrams: [ttym.pages.dev/internals](https://ttym.pages.dev/internals).
-Package layers and operations: [docs/architecture.md](docs/architecture.md).
 
 ## CLI reference
 
