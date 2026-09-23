@@ -5,6 +5,7 @@ import { ensureServerRunning } from './lifecycle.js';
 import { Steps, rawStatus, checkTarget } from './remote-steps.js';
 import { cmdRemoteTailscale } from './remote-tailscale.js';
 import { cmdRemoteCloudflare } from './remote-cloudflare.js';
+import { cmdRemoteTrust, cmdRemoteUntrust } from './remote-trust.js';
 
 /**
  * ttym remote — reach this machine's ttym from another device.
@@ -22,7 +23,10 @@ const HELP = `usage: ttym remote <command> [--json]
                                      --ip: http://<100.x>:<port>, no MagicDNS name or HTTPS certificate needed
   cloudflare --host <h> --email <e>  Cloudflare Tunnel + Access via the API (token: CLOUDFLARE_API_TOKEN,
              [--token-env NAME] [--replace-dns]   ~/.ttym/cloudflare-token, or --token-env)
-  link [--host <h>]                  One-time login URL (10 min) + QR for a browser elsewhere
+  trust [tailscale | cloudflare --host <h> --email <e>]
+                                     Let a verified Tailscale login / Access email open ttym without a link
+  untrust tailscale|cloudflare|all
+  link [--host <h>]                  One-time login URL (10 min) + QR — for paths without an identity (LAN, nginx)
   doctor [url...]                    Check local guards, bind, and that each remote URL demands a login
   status                             Bind address, allowed hosts, logged-in browsers
   allow-host <host> / disallow-host <host>
@@ -49,6 +53,8 @@ export async function cmdRemote() {
     case 'doctor': return doctor(port, args.filter((a) => !a.startsWith('--')), json);
     case 'off': return off(port, json);
     case 'tailscale': return cmdRemoteTailscale(port, args, json);
+    case 'trust': return cmdRemoteTrust(port, args, json);
+    case 'untrust': return cmdRemoteUntrust(port, args, json);
     case 'cloudflare': return cmdRemoteCloudflare(port, args, json);
     default:
       console.error(HELP);
@@ -56,7 +62,7 @@ export async function cmdRemote() {
   }
 }
 
-interface RemoteStatus { bindHost: string; port: number; allowHosts: string[]; sessions: number }
+interface RemoteStatus { bindHost: string; port: number; allowHosts: string[]; sessions: number; trust?: { tailscale?: { logins: string[] }; cloudflare?: Array<{ team: string; emails: string[] }> } }
 
 export async function remoteStatus(port: number): Promise<RemoteStatus> {
   const st = await fetchJson(port, '/api/remote');
@@ -78,6 +84,7 @@ async function status(port: number, json: boolean) {
     `bind:          ${st.bindHost}${loopback ? '' : '  (LAN — plain HTTP)'}`,
     `allowed hosts: ${st.allowHosts.length ? st.allowHosts.join(', ') : '(none — remote access off)'}`,
     `browsers:      ${st.sessions} signed in`,
+    `trusted:       ${[...(st.trust?.tailscale?.logins ?? []).map((l) => `tailscale ${l}`), ...(st.trust?.cloudflare ?? []).map((c) => `access ${c.team} ${c.emails.join(',')}`)].join(' · ') || '(none — every new browser needs a link)'}`,
   ].join('\n'));
 }
 

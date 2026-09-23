@@ -6,6 +6,7 @@ import process from 'node:process';
 import { HOME_DIR, readOption } from './common.js';
 import { Steps, checkTarget } from './remote-steps.js';
 import { addAllowHost, mintLink, printQr, remoteStatus } from './remote.js';
+import { discoverAccess, trustCloudflare } from './remote-trust.js';
 
 /**
  * ttym remote cloudflare — Cloudflare Tunnel + Access through the API.
@@ -219,9 +220,18 @@ export async function cmdRemoteCloudflare(port: number, args: string[], json: bo
   for (const c of await checkTarget(`https://${host}`, { retryMs: 60_000, port })) steps.add('doctor', c.status, c.detail, c.fix ? { fix: c.fix } : {});
   if (steps.blocked) done();
 
+  // Access already proved the email; let its signed JWT stand in for ttym's link.
+  if (email) {
+    const d = await discoverAccess(host!);
+    if ('error' in d) steps.add('trust', 'warn', `${d.error} — browsers will need a link`);
+    else { const r = await trustCloudflare(port, d.team, d.aud, [email]); steps.add('trust', r?.changed ? 'changed' : 'ok', `Access ${d.team} → ${email} opens ttym after the Access login`); }
+  }
+
   const l = await mintLink(port, host!);
   steps.add('link', 'ok', 'login link minted (one use, 10 min)');
-  const next = `Open the link on the phone: Cloudflare Access asks for ${email ?? 'the allowed email'} and mails a one-time PIN, then ttym signs the browser in.`;
+  const next = email
+    ? `Open https://${host} on the phone: Cloudflare Access mails ${email} a one-time PIN, and that is the only login.`
+    : `Open the link on the phone: Cloudflare Access asks for the allowed email, then ttym signs the browser in.`;
   if (!json) { console.log(`\n${next}\n\n  ${l.url}\n`); await printQr(l.url); }
   done({ url: `https://${host}`, link: l.url, linkExpiresAt: l.expiresAt, next });
 }

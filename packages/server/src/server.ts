@@ -1398,7 +1398,16 @@ export async function createServer(port: number): Promise<TtymServer> {
   let sleeper: AgentSleeper | null = null;
 
   const httpServer = createHttpServer((req, res) => {
-    if (gate(req, res, remote)) return;
+    const g = gate(req, res, remote);
+    if (g === 'handled') return;
+    if (g !== 'pass') {
+      g.then((r) => { if (r === 'pass') route(req, res); })
+        .catch((e) => { log('REMOTE gate error', e); if (!res.headersSent) { res.writeHead(500); res.end(); } });
+      return;
+    }
+    route(req, res);
+  });
+  function route(req: IncomingMessage, res: ServerResponse) {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
     // /view/<cap>/… before the SPA catch-all, which would otherwise answer with index.html.
     if (handleViewContent(req, res, (req.url || '/').split('?')[0]!, { store: viewerStore })) return;
@@ -1406,12 +1415,14 @@ export async function createServer(port: number): Promise<TtymServer> {
     if (handleDemoApp(req, res)) return;
     res.writeHead(404);
     res.end('not found');
-  });
+  }
   const wss = new WebSocketServer({
     server: httpServer, path: '/ws',
     verifyClient: (info, done) => {
-      const refused = gateUpgrade(info.req, remote);
-      if (refused) done(false, refused[0], refused[1]); else done(true);
+      gateUpgrade(info.req, remote).then(
+        (refused) => { if (refused) done(false, refused[0], refused[1]); else done(true); },
+        () => done(false, 500, 'gate error'),
+      );
     },
   });
 

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import process from 'node:process';
 import { Steps, checkTarget, rawStatus } from './remote-steps.js';
 import { addAllowHost, mintLink, printQr, remoteStatus } from './remote.js';
+import { tailscaleOwnerLogin, trustTailscale } from './remote-trust.js';
 
 /**
  * ttym remote tailscale — the recommended path.
@@ -103,6 +104,14 @@ export async function cmdRemoteTailscale(port: number, args: string[], json: boo
   else if (dryRun) steps.add('allow-host', 'planned', name);
   else { await addAllowHost(port, name); steps.add('allow-host', 'changed', name); }
 
+  // The machine owner's devices open it directly: serve's identity header, confirmed by whois.
+  const owner = tailscaleOwnerLogin(bin!);
+  const trusted = (await remoteStatus(port)).trust?.tailscale?.logins ?? [];
+  if (!owner) steps.add('trust', 'warn', 'could not read this machine\'s tailnet login — devices will need a link (ttym remote trust tailscale --login …)');
+  else if (trusted.includes(owner.toLowerCase())) steps.add('trust', 'ok', `devices signed in as ${owner} open ttym without a link`);
+  else if (dryRun) steps.add('trust', 'planned', `trust tailnet login ${owner}`);
+  else { await trustTailscale(port, owner); steps.add('trust', 'changed', `devices signed in as ${owner} open ttym without a link`); }
+
   if (dryRun) done({ host: name });
 
   // The first request on a fresh name waits for the certificate; give it time.
@@ -111,10 +120,12 @@ export async function cmdRemoteTailscale(port: number, args: string[], json: boo
 
   const l = await mintLink(port, name);
   steps.add('link', 'ok', `login link minted (one use, 10 min)`);
-  const next = 'On the phone: install Tailscale, sign in with the same account, then open the link.';
+  const next = owner
+    ? `On the phone: install Tailscale, sign in as ${owner}, then open https://${name} — no link needed. (For a device signed in as someone else, use the one-time link.)`
+    : 'On the phone: install Tailscale, sign in with the same account, then open the link.';
   if (!json) {
-    console.log(`\n${next}\n\n  ${l.url}\n`);
-    await printQr(l.url);
+    console.log(`\n${next}\n\n  https://${name}\n\n  one-time link: ${l.url}\n`);
+    await printQr(owner ? `https://${name}` : l.url);
   }
   done({ host: name, url: `https://${name}`, link: l.url, linkExpiresAt: l.expiresAt, next });
 }

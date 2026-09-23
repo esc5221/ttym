@@ -14,6 +14,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { classify, hostAllowed, originAllowed, parseCookies, normalizeHost, viaHttps } from './access.js';
 import type { RemoteStore } from './store.js';
 import { SESSION_TTL_MS } from './store.js';
+import { resolveIdentity, mayCarryIdentity, defaultIdentityDeps, type IdentityDeps } from './identity.js';
 
 export const COOKIE = 'ttym_session';
 
@@ -23,7 +24,25 @@ export interface RemoteContext {
   bindHost: string;
   port: number;
   log: (...args: unknown[]) => void;
+  /** Tests swap in fakes for tailscale whois and the Access key fetch. */
+  identity?: IdentityDeps;
 }
+
+export type GateResult = 'pass' | 'handled';
+
+/** 401s are logged, but one line per host and reason per minute — a reconnecting tab retries every second. */
+const lastDenyLog = new Map<string, { at: number; count: number }>();
+function logDenied(ctx: RemoteContext, key: string, line: string) {
+  const now = Date.now();
+  const e = lastDenyLog.get(key);
+  if (e && now - e.at < 60_000) { e.count++; return; }
+  const extra = e && e.count ? ` (+${e.count} more in the last minute)` : '';
+  lastDenyLog.set(key, { at: now, count: 0 });
+  ctx.log(`${line}${extra}`);
+}
+
+const identityDetail = (req: IncomingMessage) =>
+  req.headers['cf-access-jwt-assertion'] ? 'access-jwt' : req.headers['tailscale-user-login'] ? `tailscale:${req.headers['tailscale-user-login']}` : 'no-identity';
 
 type Json = (status: number, body: unknown, headers?: Record<string, string>) => void;
 
@@ -57,10 +76,16 @@ function wantsHtml(req: IncomingMessage): boolean {
 }
 
 /**
- * Returns true when the request was answered (refused, or an auth/remote
- * route); false when the normal handlers should take it.
+ * 'handled' when the request was answered (refused, or an auth/remote route);
+ * 'pass' when the normal handlers should take it. A promise only when a remote
+ * request without a cookie carries an identity worth checking.
  */
-export function gate(req: IncomingMessage, res: ServerResponse, ctx: RemoteContext): boolean {
+export function gate(req: IncomingMessage, res: ServerResponse, ctx: RemoteContext): GateResult | Promise<GateResult> {
+  const r = gateInner(req, res, ctx);
+  return typeof r === 'boolean' ? (r ? 'handled' : 'pass') : r;
+}
+
+function gateInner(req: IncomingMessage, res: ServerResponse, ctx: RemoteContext): boolean | Promise<GateResult> {
   const caller = classify(req, ctx.store.allowHosts);
   const path = (req.url || '/').split('?')[0]!;
   const allow = ctx.store.allowHosts;
@@ -100,13 +125,24 @@ export function gate(req: IncomingMessage, res: ServerResponse, ctx: RemoteConte
   const session = ctx.store.verify(parseCookies(req.headers.cookie).get(COOKIE));
   if (session) return false;
 
-  if (wantsHtml(req)) { loginRequiredPage(res); return true; }
-  sendJson(res)(401, { error: 'login required', hint: 'on the ttym machine: ttym remote link' });
-  return true;
+  const deny = (): GateResult => {
+    logDenied(ctx, `${caller.hostname}|${identityDetail(req)}`, `REMOTE login required host=${caller.hostname} ${identityDetail(req)} ${req.method} ${path}`);
+    if (wantsHtml(req)) loginRequiredPage(res);
+    else sendJson(res)(401, { error: 'login required', hint: 'on the ttym machine: ttym remote link' });
+    return 'handled';
+  };
+  if (!mayCarryIdentity(req, ctx.store.trust)) { deny(); return true; }
+  return resolveIdentity(req, ctx.store.trust, ctx.identity ?? defaultIdentityDeps).then((id) => {
+    if (!id) return deny();
+    const out = ctx.store.issueSession({ host: caller.hostname, userAgent: req.headers['user-agent'] ?? null, via: `${id.via}:${id.who}` });
+    ctx.log(`REMOTE login session=${out.session.id} host=${caller.hostname} via=${id.via}:${id.who}`);
+    res.setHeader('Set-Cookie', cookieHeader(out.token, req, SESSION_TTL_MS / 1000));
+    return 'pass' as GateResult;
+  }, () => deny());
 }
 
-/** Same decision for a WebSocket upgrade. Returns null to accept, or [code, message]. */
-export function gateUpgrade(req: IncomingMessage, ctx: RemoteContext): [number, string] | null {
+/** Same decision for a WebSocket upgrade. Resolves null to accept, or [code, message]. */
+export async function gateUpgrade(req: IncomingMessage, ctx: RemoteContext): Promise<[number, string] | null> {
   const caller = classify(req, ctx.store.allowHosts);
   const allow = ctx.store.allowHosts;
   if (!hostAllowed(caller, allow)) return [403, 'host not allowed'];
@@ -117,6 +153,9 @@ export function gateUpgrade(req: IncomingMessage, ctx: RemoteContext): [number, 
   }
   if (!caller.remote) return null;
   if (ctx.store.verify(parseCookies(req.headers.cookie).get(COOKIE))) return null;
+  // The page load before it normally set the cookie already; this covers a socket opened without one.
+  if (mayCarryIdentity(req, ctx.store.trust) && await resolveIdentity(req, ctx.store.trust, ctx.identity ?? defaultIdentityDeps).catch(() => null)) return null;
+  logDenied(ctx, `${caller.hostname}|ws|${identityDetail(req)}`, `REMOTE login required host=${caller.hostname} ${identityDetail(req)} WS`);
   return [401, 'login required'];
 }
 
@@ -141,7 +180,34 @@ function remoteApi(req: IncomingMessage, res: ServerResponse, path: string, ctx:
   const json = sendJson(res);
   const { store } = ctx;
   if (path === '/api/remote' && req.method === 'GET') {
-    json(200, { bindHost: ctx.bindHost, port: ctx.port, allowHosts: [...store.allowHosts].sort(), sessions: store.list().length });
+    json(200, { bindHost: ctx.bindHost, port: ctx.port, allowHosts: [...store.allowHosts].sort(), sessions: store.list().length, trust: store.trust });
+    return;
+  }
+  if (path === '/api/remote/trust' && req.method === 'POST') {
+    readBody(req).then((body) => {
+      let b: { kind?: string; login?: string; team?: string; aud?: string; emails?: unknown };
+      try { b = JSON.parse(body); } catch { json(400, { error: 'invalid body' }); return; }
+      if (b.kind === 'tailscale' && typeof b.login === 'string' && b.login.includes('@')) {
+        const changed = store.trustTailscale(b.login);
+        ctx.log(`REMOTE trust tailscale ${b.login}`);
+        json(200, { changed, trust: store.trust });
+        return;
+      }
+      const emails = Array.isArray(b.emails) ? b.emails.filter((e): e is string => typeof e === 'string' && e.includes('@')) : [];
+      if (b.kind === 'cloudflare' && typeof b.team === 'string' && /^[a-z0-9-]+$/i.test(b.team) && typeof b.aud === 'string' && /^[a-f0-9]{16,}$/i.test(b.aud) && emails.length) {
+        const changed = store.trustCloudflare({ team: b.team.toLowerCase(), aud: b.aud.toLowerCase(), emails });
+        ctx.log(`REMOTE trust cloudflare team=${b.team} aud=${b.aud.slice(0, 8)} ${emails.join(',')}`);
+        json(200, { changed, trust: store.trust });
+        return;
+      }
+      json(400, { error: 'want {kind:"tailscale", login} or {kind:"cloudflare", team, aud, emails:[…]}' });
+    }).catch(() => json(400, { error: 'invalid body' }));
+    return;
+  }
+  const trustMatch = path.match(/^\/api\/remote\/trust\/(tailscale|cloudflare|all)$/);
+  if (trustMatch && req.method === 'DELETE') {
+    store.untrust(trustMatch[1] as 'tailscale' | 'cloudflare' | 'all');
+    json(200, { trust: store.trust });
     return;
   }
   if (path === '/api/remote/hosts' && req.method === 'POST') {

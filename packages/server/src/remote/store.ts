@@ -10,6 +10,7 @@
  */
 import { readFileSync, writeFileSync, renameSync, chmodSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
+import type { TrustConfig, CloudflareTrust } from './identity.js';
 
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export const LINK_TTL_MS = 10 * 60 * 1000;
@@ -24,12 +25,15 @@ export interface RemoteSession {
   createdAt: number;
   expiresAt: number;
   lastSeenAt: number;
+  /** How the browser got in: 'link', or 'tailscale:<login>' / 'cloudflare:<email>'. */
+  via?: string;
 }
 
 interface RemoteFile {
   version: 1;
   allowHosts: string[];
   sessions: RemoteSession[];
+  trust?: TrustConfig;
 }
 
 export type PublicSession = Omit<RemoteSession, 'hash'>;
@@ -41,6 +45,7 @@ export class RemoteStore {
   private hosts = new Set<string>();
   private sessions: RemoteSession[] = [];
   private links = new Map<string, { expiresAt: number; host: string | null }>();
+  private trustCfg: TrustConfig = {};
   private lastPersist = 0;
 
   constructor(private readonly file: string, private readonly now = () => Date.now()) {
@@ -48,6 +53,7 @@ export class RemoteStore {
       const data = JSON.parse(readFileSync(file, 'utf8')) as Partial<RemoteFile>;
       for (const h of data.allowHosts ?? []) if (typeof h === 'string') this.hosts.add(h);
       this.sessions = (data.sessions ?? []).filter((s) => s && typeof s.hash === 'string');
+      if (data.trust && typeof data.trust === 'object') this.trustCfg = data.trust;
     } catch {}
     this.prune();
   }
@@ -62,6 +68,51 @@ export class RemoteStore {
   removeHost(host: string): boolean {
     if (!this.hosts.delete(host)) return false;
     this.save(); return true;
+  }
+
+  get trust(): TrustConfig { return this.trustCfg; }
+
+  trustTailscale(login: string): boolean {
+    const logins = this.trustCfg.tailscale?.logins ?? [];
+    const l = login.toLowerCase();
+    if (logins.includes(l)) return false;
+    this.trustCfg = { ...this.trustCfg, tailscale: { logins: [...logins, l] } };
+    this.save(); return true;
+  }
+
+  /** One entry per (team, aud); emails merge. */
+  trustCloudflare(entry: CloudflareTrust): boolean {
+    const list = this.trustCfg.cloudflare ?? [];
+    const emails = entry.emails.map((e) => e.toLowerCase());
+    const same = list.find((c) => c.team === entry.team && c.aud === entry.aud);
+    if (same && emails.every((e) => same.emails.includes(e))) return false;
+    const next = same
+      ? list.map((c) => c === same ? { ...c, emails: [...new Set([...c.emails, ...emails])] } : c)
+      : [...list, { team: entry.team, aud: entry.aud, emails }];
+    this.trustCfg = { ...this.trustCfg, cloudflare: next };
+    this.save(); return true;
+  }
+
+  untrust(kind: 'tailscale' | 'cloudflare' | 'all'): void {
+    const next = { ...this.trustCfg };
+    if (kind === 'tailscale' || kind === 'all') delete next.tailscale;
+    if (kind === 'cloudflare' || kind === 'all') delete next.cloudflare;
+    this.trustCfg = next;
+    this.save();
+  }
+
+  /** A session for a browser whose identity the proxy vouched for (no link). */
+  issueSession(meta: { host: string | null; userAgent: string | null; via: string }): { token: string; session: PublicSession } {
+    const t = token();
+    const now = this.now();
+    const session: RemoteSession = {
+      id: randomBytes(4).toString('hex'), hash: sha256(t),
+      host: meta.host, userAgent: meta.userAgent?.slice(0, 200) ?? null,
+      createdAt: now, expiresAt: now + SESSION_TTL_MS, lastSeenAt: now, via: meta.via,
+    };
+    this.sessions.push(session);
+    this.save();
+    return { token: t, session: toPublic(session) };
   }
 
   mintLink(host: string | null): { token: string; expiresAt: number } {
@@ -83,7 +134,7 @@ export class RemoteStore {
     const session: RemoteSession = {
       id: randomBytes(4).toString('hex'), hash: sha256(t),
       host: meta.host, userAgent: meta.userAgent?.slice(0, 200) ?? null,
-      createdAt: now, expiresAt: now + SESSION_TTL_MS, lastSeenAt: now,
+      createdAt: now, expiresAt: now + SESSION_TTL_MS, lastSeenAt: now, via: 'link',
     };
     this.sessions.push(session);
     this.save();
@@ -135,7 +186,7 @@ export class RemoteStore {
 
   private save() {
     this.lastPersist = this.now();
-    const body: RemoteFile = { version: 1, allowHosts: [...this.hosts].sort(), sessions: this.sessions };
+    const body: RemoteFile = { version: 1, allowHosts: [...this.hosts].sort(), sessions: this.sessions, trust: this.trustCfg };
     const tmp = `${this.file}.tmp`;
     writeFileSync(tmp, JSON.stringify(body, null, 2) + '\n', { mode: 0o600 });
     chmodSync(tmp, 0o600);
