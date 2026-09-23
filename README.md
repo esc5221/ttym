@@ -94,70 +94,22 @@ open http://localhost:7690     # the same session in the browser
 
 ## What it does
 
-### 01 · 10 agents running. One is waiting on you.
+Each of these is a chapter of the film, with the real screen, on
+[ttym.pages.dev](https://ttym.pages.dev).
 
-<img src="docs/assets/section-s1.jpg" alt="The work map: the rate limiter session is waiting on a Redis or in-memory decision" width="760">
-
-The work map lists every session with a one-line summary of what it is doing
-and what it waits on. Click one to open its terminal.
-
-```bash
-ttym map refresh
-```
-
-### 02 · Jump in. Answer right where it stopped.
-
-<img src="docs/assets/section-s2.jpg" alt="Answering Claude Code's question card inside the browser pane" width="760">
-
-The pane in the browser is the terminal itself. Answer the agent there, or
-attach to the same session from the CLI.
-
-```bash
-ttym attach auth-service/limiter
-```
-
-### 03 · Same terminal, on your phone.
-
-<img src="docs/assets/section-s3.jpg" alt="The same session on a laptop and a phone" width="760">
-
-The laptop and the phone show the same terminal. On your tailnet, a device
-signed in to your Tailscale account opens it without another login.
-
-```bash
-ttym remote tailscale
-```
-
-### 04 · The agent runs ttym open. The plan opens in its pane.
-
-<img src="docs/assets/section-s4.jpg" alt="Claude Code runs ttym open PLAN.md" width="760">
-
-Markdown, HTML, CSV, images and URLs open as tabs on the pane that made them.
-
-```bash
-ttym open PLAN.md rollout.html
-```
-
-### 05 · Idle agents sleep. Same conversation when they wake.
-
-<img src="docs/assets/section-s5.jpg" alt="A sleeping agent waking: input, claude --resume, back" width="760">
-
-After 30 idle minutes the agent process is stopped to free its memory, and the
-screen stays. The next keystroke resumes the same conversation.
-
-```bash
-ttym agent sleep :limiter
-```
-
-### 06 · Rebooted? One command brings it back.
-
-<img src="docs/assets/section-s6.jpg" alt="After a reboot: the restored screen, then ttym agent resume" width="760">
-
-After a reboot every pane comes back with its last screen. The agent resumes
-in the same conversation with one command.
-
-```bash
-ttym agent resume
-```
+- **Which agent needs you.** The work map lists every session with a one-line
+  summary of what it is doing and what it waits on. `ttym map refresh`
+- **Answer where it stopped.** The pane in the browser is the terminal itself;
+  the same session opens in the CLI. `ttym attach auth-service/limiter`
+- **Same terminal on your phone.** On your tailnet, a device signed in to your
+  Tailscale account opens it without another login. `ttym remote tailscale`
+- **Plans open in the pane.** Markdown, HTML, CSV, images and URLs open as tabs
+  on the pane that made them. `ttym open PLAN.md`
+- **Idle agents sleep.** After 30 idle minutes the agent process is stopped and
+  the screen stays; the next keystroke resumes the same conversation.
+  `ttym agent sleep :limiter`
+- **Back after a reboot.** Every pane returns with its last screen, and the
+  agent resumes in the same conversation. `ttym agent resume`
 
 ## Agents in the loop
 

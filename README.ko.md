@@ -93,70 +93,21 @@ open http://localhost:7690     # 같은 세션을 브라우저에서
 
 ## 하는 일
 
-### 01 · 에이전트 10개가 도는 중. 하나가 나를 기다린다.
+각 항목은 영상의 한 장면이고, 실제 화면은
+[ttym.pages.dev](https://ttym.pages.dev)에서 볼 수 있다.
 
-<img src="docs/assets/section-s1.jpg" alt="작업 지도: rate limiter 세션이 Redis냐 in-memory냐 결정을 기다린다" width="760">
-
-작업 지도는 모든 세션을 지금 하는 일과 기다리는 것 한 줄씩으로 보여 준다. 누르면
-그 터미널이 열린다.
-
-```bash
-ttym map refresh
-```
-
-### 02 · 들어가서, 멈춘 자리에서 답한다.
-
-<img src="docs/assets/section-s2.jpg" alt="브라우저 pane 안에서 Claude Code의 질문 카드에 답하기" width="760">
-
-브라우저의 pane이 곧 터미널이다. 거기서 에이전트에게 답하거나, 같은 세션에 CLI로
-붙는다.
-
-```bash
-ttym attach auth-service/limiter
-```
-
-### 03 · 같은 터미널을 휴대폰에서.
-
-<img src="docs/assets/section-s3.jpg" alt="노트북과 휴대폰에 같은 세션" width="760">
-
-노트북과 폰이 같은 터미널을 보여 준다. tailnet에서는 내 Tailscale 계정으로
-로그인된 기기가 별도 로그인 없이 연다.
-
-```bash
-ttym remote tailscale
-```
-
-### 04 · 에이전트가 ttym open을 실행하면 계획서가 그 pane에 열린다.
-
-<img src="docs/assets/section-s4.jpg" alt="Claude Code가 ttym open PLAN.md를 실행" width="760">
-
-Markdown, HTML, CSV, 이미지, URL이 그걸 만든 pane의 탭으로 열린다.
-
-```bash
-ttym open PLAN.md rollout.html
-```
-
-### 05 · 쉬는 에이전트는 잠든다. 깨우면 같은 대화.
-
-<img src="docs/assets/section-s5.jpg" alt="잠든 에이전트가 깨어나는 과정: 입력, claude --resume, 복귀" width="760">
-
-30분 동안 아무 일이 없으면 에이전트 프로세스를 내려 메모리를 돌려받고, 화면은
-남긴다. 다음 키 입력이 같은 대화를 이어 연다.
-
-```bash
-ttym agent sleep :limiter
-```
-
-### 06 · 재부팅했다면 명령 하나로 돌아온다.
-
-<img src="docs/assets/section-s6.jpg" alt="재부팅 뒤: 복원된 화면, 그리고 ttym agent resume" width="760">
-
-재부팅 뒤 모든 pane이 마지막 화면으로 돌아온다. 에이전트는 명령 하나로 같은
-대화에서 이어진다.
-
-```bash
-ttym agent resume
-```
+- **누가 나를 기다리는지.** 작업 지도가 모든 세션을 지금 하는 일과 기다리는 것
+  한 줄씩으로 보여 준다. `ttym map refresh`
+- **멈춘 자리에서 답하기.** 브라우저의 pane이 곧 터미널이고, 같은 세션을 CLI로도
+  연다. `ttym attach auth-service/limiter`
+- **같은 터미널을 폰에서.** tailnet에서는 내 Tailscale 계정으로 로그인된 기기가
+  별도 로그인 없이 연다. `ttym remote tailscale`
+- **계획서가 pane에 열린다.** Markdown, HTML, CSV, 이미지, URL이 그걸 만든 pane의
+  탭으로 열린다. `ttym open PLAN.md`
+- **쉬는 에이전트는 잔다.** 30분 동안 아무 일이 없으면 에이전트 프로세스를 내리고
+  화면은 남긴다. 다음 키 입력이 같은 대화를 이어 연다. `ttym agent sleep :limiter`
+- **재부팅 뒤에도.** 모든 pane이 마지막 화면으로 돌아오고, 에이전트는 같은 대화에서
+  이어진다. `ttym agent resume`
 
 ## 에이전트를 함수처럼
 
