@@ -790,7 +790,7 @@ fn main() {
                             cols = nc;
                             rows = nr;
                             let ws = Winsize { ws_col: nc, ws_row: nr, ws_xpixel: 0, ws_ypixel: 0 };
-                            unsafe { libc::ioctl(master_fd, libc::TIOCSWINSZ as libc::c_ulong, &ws); }
+                            unsafe { libc::ioctl(master_fd, libc::TIOCSWINSZ as _, &ws); }
                         }
                     }
                 }
