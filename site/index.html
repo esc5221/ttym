@@ -29,7 +29,7 @@
   </header>
 
   <main id="top">
-    <!-- the film's opening: the word centred, the caret blinks, then it makes room for the sentence -->
+    <!-- the film's opening frame: the word, the sentence, the install line -->
     <section class="hero" id="hero">
       <h1 class="hero-logo" id="heroLogo" aria-label="ttym">
         <span class="word">ttym</span><span class="caret" aria-hidden="true"></span>
@@ -40,7 +40,7 @@
           <code><span class="p">$</span> npm i -g ttym</code>
           <button class="copy" data-copy="npm i -g ttym" aria-label="Copy the install command">copy</button>
         </div>
-        <p class="meta">Node ≥ 20 · macOS and Linux · <a href="#film">watch the 69-second film</a></p>
+        <p class="meta"><span>Node ≥ 20 · macOS and Linux</span> <a href="#film">Watch the 69-second film ↓</a></p>
       </div>
     </section>
 
@@ -55,7 +55,7 @@
         <li data-t="52.7" data-end="64.5"><span class="rail"><span class="bar"></span></span><span class="n">06</span><span class="l">Back after a reboot</span></li>
       </ol>
       <div class="player">
-        <video id="filmVideo" src="media/film.mp4" poster="media/film.jpg" controls playsinline preload="metadata"></video>
+        <video id="filmVideo" src="media/film.mp4" poster="media/film.jpg" controls muted playsinline preload="metadata"></video>
         <p class="caption">Real footage: one Claude Code session on an isolated ttym server, recorded end to end. Nothing is mocked.</p>
       </div>
     </section>

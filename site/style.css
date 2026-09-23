@@ -41,17 +41,10 @@ code, pre { font-family: var(--mono); }
 .nav nav a { text-decoration: none; color: var(--soft); }
 .nav nav a:hover { color: var(--ink); }
 
-/* ── hero: the opening shot */
-.hero { min-height: 100svh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 var(--gutter); text-align: center; }
-.hero-logo, .end-logo { margin: 0; font: 640 clamp(72px, 15vw, 168px)/1 var(--mono); letter-spacing: -0.05em; display: inline-flex; align-items: center; }
+/* ── hero: the opening frame, still */
+.hero { min-height: min(88svh, 820px); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 96px var(--gutter) 56px; text-align: center; }
+.hero-logo, .end-logo { margin: 0 0 34px; font: 640 clamp(64px, 12vw, 132px)/1 var(--mono); letter-spacing: -0.05em; display: inline-flex; align-items: center; }
 .caret { display: inline-block; width: 0.464em; height: 0.893em; margin-left: 0.083em; background: var(--accent); }
-.hero-logo { transition: transform 0.9s cubic-bezier(0.65, 0, 0.35, 1); }
-.hero-logo .caret { animation: blink 0.36s steps(1) 0.35s 4; }
-.hero.settled .hero-logo { transform: translateY(-4vh) scale(0.72); }
-@keyframes blink { 50% { opacity: 0; } }
-
-.hero-body { opacity: 0; transform: translateY(14px); transition: opacity 0.7s ease 0.25s, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.25s; }
-.hero.settled .hero-body { opacity: 1; transform: none; }
 .tagline { font-size: clamp(22px, 3.2vw, 38px); font-weight: 520; letter-spacing: -0.02em; line-height: 1.25; margin: 0 auto 30px; max-width: 22em; color: var(--soft); }
 .tagline .a { display: block; }
 .tagline.small { font-size: clamp(18px, 2.2vw, 26px); margin-bottom: 18px; }
@@ -60,8 +53,8 @@ code, pre { font-family: var(--mono); }
 .install-line .p { color: var(--accent); margin-right: 6px; }
 .copy { font: 500 14px var(--mono); color: var(--soft); background: #222226; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
 .copy:hover { color: var(--ink); border-color: rgba(242, 156, 92, 0.5); }
-.meta { margin-top: 18px; font: 14px var(--mono); color: var(--dim); }
-.meta a { color: var(--dim); }
+.meta { margin-top: 18px; font: 14px var(--mono); color: var(--dim); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; }
+.meta a { color: var(--soft); white-space: nowrap; }
 
 /* ── film: the table of contents is the chapter list */
 .film { display: grid; grid-template-columns: 250px 1fr; gap: 40px; max-width: 1440px; margin: 0 auto; padding: 48px var(--gutter) 96px; align-items: start; }
@@ -118,10 +111,12 @@ pre .c { color: var(--dim); }
   .steps li { grid-template-columns: 30px 1fr; }
   .steps li > span { grid-column: 2; }
   .nav nav a:not(.gh) { display: none; }
+  pre .c { display: none; }                        /* the command fits; its comment is in the text above */
+  .clip video { cursor: zoom-in; }
+  .meta { flex-direction: column; align-items: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .hero-logo, .hero-body, .nav { transition: none; }
-  .hero-logo .caret { animation: none; }
+  .nav { transition: none; }
 }

@@ -1,11 +1,8 @@
 // ttym site: the opening shot, live chapters for the film, loops that play only on screen.
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// Opening: the word blinks (CSS), then makes room for the sentence — the film's first 1.5 s.
-const hero = document.getElementById('hero');
-setTimeout(() => hero.classList.add('settled'), reduced ? 0 : 1500);
-
 // The nav shows once the hero is out of view.
+const hero = document.getElementById('hero');
 const nav = document.getElementById('nav');
 new IntersectionObserver(([e]) => nav.classList.toggle('on', !e.isIntersecting), { threshold: 0.15 }).observe(hero);
 
@@ -56,6 +53,18 @@ function makeSeekable() {
 }
 new IntersectionObserver(([e], io) => { if (e.isIntersecting) { makeSeekable(); io.disconnect(); } }, { rootMargin: '600px' }).observe(film);
 
+// The film plays as soon as it is on screen (it has no sound, so autoplay is allowed) and pauses
+// when scrolled away. Once the viewer pauses it themselves, scrolling no longer restarts it.
+let userPaused = false;
+film.addEventListener('pause', () => { if (filmVisible) userPaused = true; });
+film.addEventListener('play', () => { userPaused = false; });
+let filmVisible = false;
+new IntersectionObserver(([e]) => {
+  filmVisible = e.isIntersecting;
+  if (e.isIntersecting) { if (!userPaused && !reduced) film.play().catch(() => {}); }
+  else if (!film.paused) { film.pause(); userPaused = false; }
+}, { threshold: 0.5 }).observe(film);
+
 for (const c of items) {
   c.li.addEventListener('click', async () => {
     c.li.classList.add('on');
@@ -78,4 +87,16 @@ if (reduced) {
     }
   }, { threshold: 0.35 });
   for (const v of loops) io.observe(v);
+}
+
+// On a phone the terminal text in a clip is small: a tap opens it full screen.
+if (matchMedia('(pointer: coarse)').matches) {
+  for (const v of loops) {
+    v.addEventListener('click', () => {
+      load(v);
+      if (v.requestFullscreen) v.requestFullscreen().catch(() => {});
+      else if (v.webkitEnterFullscreen) v.webkitEnterFullscreen(); // iOS Safari
+      v.play().catch(() => {});
+    });
+  }
 }
