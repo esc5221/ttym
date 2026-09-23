@@ -38,9 +38,10 @@ version.
 Then, once per machine:
 
 ```bash
-ttym service install          # keep the server running: starts at login, restarts after a crash
-                              # (launchd on macOS, systemd on Linux)
-ttym agent install claude     # hooks for Claude Code: who needs you, await, sleep/wake (codex too)
+ttym service install        # starts at login, restarts after a crash
+                            # (launchd on macOS, systemd on Linux)
+ttym agent install claude   # Claude Code hooks: who needs you, await,
+                            # sleep/wake (codex too)
 ```
 
 Without the service, the first `ttym` command starts the server in the
@@ -49,8 +50,8 @@ lives in its own holder process, so restarting or upgrading the server does not
 close it.
 
 ```bash
-ttym upgrade                  # swap in the latest release; sessions keep running
-ttym upgrade --rollback       # back to the previous install
+ttym upgrade                # swap in the latest release; sessions keep running
+ttym upgrade --rollback     # back to the previous install
 ```
 
 <details>
@@ -98,11 +99,11 @@ exit them.
 ## Quick start
 
 ```bash
-ttym work                        # the server starts if needed, workspace "work" + a shell
-                                 # are created (one [Y/n]), and you're attached
-ttym split :main ai -- claude    # a real split beside it — nesting and ratios survive
-open http://localhost:7690       # the same session, live in the browser
-ttym remote tailscale            # and on your phone (see "From another device")
+ttym work                      # starts the server if needed, creates workspace
+                               # "work" + a shell (one [Y/n]) and attaches
+ttym split :main ai -- claude  # a real split beside it
+open http://localhost:7690     # the same session, live in the browser
+ttym remote tailscale          # and on your phone ("From another device")
 ```
 
 `C-b d` detaches; everything keeps running.

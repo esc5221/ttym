@@ -37,9 +37,10 @@ curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh
 그다음 기기마다 한 번:
 
 ```bash
-ttym service install          # 서버 상주: 로그인하면 뜨고, 죽으면 다시 뜬다
-                              # (macOS는 launchd, Linux는 systemd)
-ttym agent install claude     # Claude Code 훅: 누가 나를 기다리는지, await, 절전·깨우기 (codex도)
+ttym service install        # 서버 상주: 로그인하면 뜨고, 죽으면 다시 뜬다
+                            # (macOS는 launchd, Linux는 systemd)
+ttym agent install claude   # Claude Code 훅: 누가 나를 기다리는지, await,
+                            # 절전·깨우기 (codex도)
 ```
 
 서비스를 설치하지 않으면 첫 `ttym` 명령이 서버를 백그라운드로 띄우고, 재부팅 뒤에는
@@ -47,8 +48,8 @@ ttym agent install claude     # Claude Code 훅: 누가 나를 기다리는지, 
 서버를 재시작하거나 업그레이드해도 닫히지 않는다.
 
 ```bash
-ttym upgrade                  # 최신 Release로 교체. 세션은 그대로 돈다
-ttym upgrade --rollback       # 직전 설치로 되돌리기
+ttym upgrade                # 최신 Release로 교체. 세션은 그대로 돈다
+ttym upgrade --rollback     # 직전 설치로 되돌리기
 ```
 
 <details>
@@ -94,11 +95,11 @@ rm -rf ~/.ttym                               # 상태: 세션, 설정, 원격 �
 ## 빠른 시작
 
 ```bash
-ttym work                        # 서버가 없으면 띄우고, workspace "work" + 셸을 만들고
-                                 # ([Y/n] 한 번), 그대로 진입한다
-ttym split :main ai -- claude    # 옆에 분할 — 중첩과 비율이 유지된다
-open http://localhost:7690       # 같은 세션이 브라우저에 살아있다
-ttym remote tailscale            # 폰에서도 (아래 "다른 기기에서")
+ttym work                      # 서버가 없으면 띄우고, workspace "work" + 셸을
+                               # 만들고([Y/n] 한 번) 그대로 진입한다
+ttym split :main ai -- claude  # 옆에 분할
+open http://localhost:7690     # 같은 세션이 브라우저에 살아있다
+ttym remote tailscale          # 폰에서도 (아래 "다른 기기에서")
 ```
 
 `C-b d` 로 나와도 전부 계속 돈다.
