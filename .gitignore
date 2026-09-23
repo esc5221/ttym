@@ -27,3 +27,4 @@ CLAUDE.local.md
 
 # branch worktrees for scripts/dev.sh:  git worktree add .worktrees/<branch> <branch>
 .worktrees/
+site/media/

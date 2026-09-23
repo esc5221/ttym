@@ -1,28 +1,101 @@
-# ttym
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
+    <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="280">
+  </picture>
+</p>
 
-> 🇬🇧 English: [README.md](README.md)
+<p align="center"><b>어떤 에이전트가 나를 기다리는지 알고, 어디서든 그 터미널로 돌아간다.</b></p>
 
-수십 개의 코딩 에이전트를 동시에 돌리다 보면, 어느 에이전트가 내 입력을 기다리고 어느 에이전트가 아직 작업 중인지 몰라 터미널 탭을 일일이 순회하게 된다. ttym은 이 모든 세션을 하나의 보드에 띄워 어떤 에이전트가 나를 필요로 하는지 보여준다. 휴대폰, 브라우저, CLI 등 접속 환경에 구애받지 않고 해당 터미널로 곧바로 진입한다.
+<p align="center">
+  <code>npm i -g ttym</code> · Node ≥ 20 · macOS, Linux<br>
+  <a href="https://ttym.pages.dev">사이트</a> · <a href="#설치">설치</a> · <a href="docs/remote-access.md">원격 접속</a> · <a href="README.md">English</a>
+</p>
 
-![작업 지도 — 어떤 세션이 나를 필요로 하나](docs/assets/s1-hero.png)
+[![69초 영상: ttym 위에서 실제 Claude Code 세션 하나를 처음부터 끝까지](docs/assets/film.jpg)](https://ttym.pages.dev/#film)
 
-하나의 서버가 PTY를 소유하므로 탭을 닫거나 서버를 재시작할 때, 혹은 새 빌드로 교체할 때도 에이전트는 계속 실행된다. 유휴 상태의 에이전트는 수면 모드로 들어가 RAM을 반환하고, 다시 깨어날 때 이전 대화 상태를 그대로 복원한다. 에이전트가 작성한 계획 문서는 길 잃은 브라우저 탭으로 분리되는 일 없이 해당 에이전트 패널 내부의 탭으로 열린다.
+코딩 에이전트를 여러 개 돌리다 보면 하나는 내 입력을 기다리고 나머지는
+아직 작업 중인데, 어느 쪽인지 찾으려고 터미널 탭을 돌아다니게 된다. ttym은
+웹 터미널 멀티플렉서다. 서버 하나가 모든 PTY를 들고 있고, 브라우저·CLI·휴대폰은
+같은 live 터미널을 보는 창이다.
 
-![같은 세션을 두 창에서 — 한쪽에 입력하면 다른 쪽에도 나타난다](docs/assets/s2-mirror.png)
+## 하는 일
 
-*하나의 PTY, 여러 클라이언트: CLI, 브라우저 탭, 휴대폰이 모두 같은 live 터미널에 붙는다. 한 창에서 입력하면 다른 창에도 그대로 뜬다.*
+위 영상의 6개 장면과, 각 장면 뒤에 있는 명령.
 
-## 왜
+### 01 · 에이전트 10개가 도는 중. 하나가 나를 기다린다.
 
-- **어떤 에이전트가 나를 기다리는지 파악.** 모든 세션이 무엇을 작업 중이고 무엇을 대기하는지 AI가 한 줄로 요약한 실시간 지도를 통해 필요한 터미널로 즉시 진입한다.
-- **모든 환경을 뛰어넘는 세션 지속성.** 하나의 서버가 PTY를 소유하며 CLI, 브라우저, 데스크톱 앱은 뷰어 역할만 수행한다. 클라이언트를 종료하거나 서버를 재시작 및 업그레이드해도 프로세스와 스크롤백 내역은 남는다.
-- **작업 손실 없는 RAM 확보.** 각각 수백 MB의 RAM을 점유하는 유휴 상태의 Claude Code나 Codex 창은 수면 모드로 전환되고, 다음 키 입력 시 이전 대화로 정확히 깨어난다.
-- **함수처럼 다루는 에이전트.** 여러 터미널을 하나의 `workspace`로 묶고 `send`와 `await`를 사용해 스크립트로 제어한다.
-- **모바일을 포함한 모든 기기에서 동일한 세션 공유.** 브라우저는 상태 확인용 대시보드를 넘어 실제 상호작용이 가능한 온전한 터미널로 동작한다.
+<img src="docs/assets/section-s1.jpg" alt="작업 지도: rate limiter 세션이 Redis냐 in-memory냐 결정을 기다린다" width="760">
 
-![잠든 유휴 에이전트 — 프로세스는 사라졌지만 대화는 그대로, 키 한 번이면 깨어난다](docs/assets/s3-sleep.png)
+작업 지도는 세션마다 지금 무엇을 하고 무엇을 기다리는지 한 줄 요약을 보여
+준다. 나를 기다리는 세션은 그렇게 표시되고, 누르면 그 터미널로 들어간다.
 
-*유휴 에이전트를 꺼서 RAM을 돌려받는다. 화면과 대화는 디스크에 그대로 얼려 두고, 다음 키 입력이 멈췄던 그 자리에서 다시 이어 준다.*
+```bash
+ttym map refresh          # 바뀐 세션을 다시 요약
+```
+
+### 02 · 들어가서, 멈춘 자리에서 답한다.
+
+<img src="docs/assets/section-s2.jpg" alt="브라우저 pane 안에서 Claude Code의 질문 카드에 답하기" width="760">
+
+브라우저의 pane은 대시보드가 아니라 터미널 그 자체다. 에이전트의 질문 카드에서
+선택지를 고르고 답을 쓰면 다시 작업을 이어 간다. 같은 세션을 CLI에서도 연다.
+
+```bash
+ttym attach auth-service/limiter
+```
+
+### 03 · 같은 터미널을 휴대폰에서.
+
+<img src="docs/assets/section-s3.jpg" alt="노트북과 휴대폰에 같은 세션" width="760">
+
+터미널은 프로세스 하나가 들고 있고, 노트북과 휴대폰은 둘 다 그 화면을 보는
+창이다. tailnet에 올리면 내 Tailscale 계정으로 로그인한 기기는 추가 로그인 없이
+연다([다른 접속 방법](docs/remote-access.md)).
+
+```bash
+ttym remote tailscale
+```
+
+### 04 · 에이전트가 ttym open을 실행하면 계획서가 그 pane에 열린다.
+
+<img src="docs/assets/section-s4.jpg" alt="Claude Code가 ttym open PLAN.md를 실행" width="760">
+
+Markdown, HTML, CSV, 이미지, URL은 그것을 만든 pane의 탭으로 열린다. 터미널에서
+경로를 선택해서 같은 방식으로 열 수도 있다.
+
+```bash
+ttym open PLAN.md rollout.html
+```
+
+### 05 · 쉬는 에이전트는 잠든다. 깨우면 같은 대화.
+
+<img src="docs/assets/section-s5.jpg" alt="잠든 에이전트가 깨어나는 과정: 입력, claude --resume, 복귀" width="760">
+
+30분 동안 입력·출력이 없는 에이전트는 종료되고 RAM을 돌려준다(영상에서 374MB).
+화면은 남아 있고, 다음 키 입력이 같은 세션 id로 `claude --resume`을 실행한다.
+영상에서는 2.5초 만에 돌아왔다.
+
+```bash
+ttym agent sleep :limiter # 또는 30분 타이머에 맡긴다
+```
+
+### 06 · 재부팅했다면 명령 하나로 돌아온다.
+
+<img src="docs/assets/section-s6.jpg" alt="재부팅 뒤: 복원된 화면, 그리고 ttym agent resume" width="760">
+
+머신을 껐다 켜면 모든 pane이 마지막 화면과 스크롤백을 새 셸 위에 되살린다.
+에이전트는 명령 하나로, 같은 대화로 돌아온다.
+
+```bash
+ttym agent resume
+```
+
+### 그 밖에
+
+- **세션은 모든 것보다 오래 산다.** 클라이언트를 닫거나 서버를 재시작·업그레이드해도
+  프로세스와 스크롤백은 남는다.
+- **에이전트를 함수처럼.** 터미널들을 `workspace`로 묶고 `send` / `await`로 스크립트를 짠다.
 
 ## 아키텍처
 

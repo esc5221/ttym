@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ttym — know which agent needs you</title>
+  <meta name="description" content="A web terminal multiplexer for coding agents. See which session is waiting on you, answer it in its own terminal, from your laptop or your phone.">
+  <meta name="theme-color" content="#0b0b0c">
+  <link rel="icon" href="brand/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="brand/apple-touch-icon.png">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="ttym — know which agent needs you">
+  <meta property="og:description" content="Get back into its terminal from anywhere. Sessions outlive the server; idle agents sleep and wake into the same conversation.">
+  <meta property="og:image" content="brand/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preload" href="fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="nav" id="nav">
+    <a class="nav-logo" href="#top" aria-label="ttym home"><img src="brand/ttym-logo-dark.svg" alt="ttym" width="92" height="33"></a>
+    <nav>
+      <a href="#film">Film</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/esc5221/ttym#readme">Docs</a>
+      <a href="https://github.com/esc5221/ttym" class="gh">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <!-- the film's opening: the word centred, the caret blinks, then it makes room for the sentence -->
+    <section class="hero" id="hero">
+      <h1 class="hero-logo" id="heroLogo" aria-label="ttym">
+        <span class="word">ttym</span><span class="caret" aria-hidden="true"></span>
+      </h1>
+      <div class="hero-body">
+        <p class="tagline">Know which agent needs you. <span class="a">Get back into its terminal from anywhere.</span></p>
+        <div class="install-line">
+          <code><span class="p">$</span> npm i -g ttym</code>
+          <button class="copy" data-copy="npm i -g ttym" aria-label="Copy the install command">copy</button>
+        </div>
+        <p class="meta">Node ≥ 20 · macOS and Linux · <a href="#film">watch the 69-second film</a></p>
+      </div>
+    </section>
+
+    <!-- the film, with its table of contents as live chapters -->
+    <section class="film" id="film">
+      <ol class="chapters" id="chapters">
+        <li data-t="1.6" data-end="6.2"><span class="rail"><span class="bar"></span></span><span class="n">01</span><span class="l">Which one needs you</span></li>
+        <li data-t="6.2" data-end="16.9"><span class="rail"><span class="bar"></span></span><span class="n">02</span><span class="l">Answer in place</span></li>
+        <li data-t="16.9" data-end="25.7"><span class="rail"><span class="bar"></span></span><span class="n">03</span><span class="l">Same terminal, any device</span></li>
+        <li data-t="25.7" data-end="39.7"><span class="rail"><span class="bar"></span></span><span class="n">04</span><span class="l">Plans open in the pane</span></li>
+        <li data-t="39.7" data-end="52.7"><span class="rail"><span class="bar"></span></span><span class="n">05</span><span class="l">Sleep and wake</span></li>
+        <li data-t="52.7" data-end="64.5"><span class="rail"><span class="bar"></span></span><span class="n">06</span><span class="l">Back after a reboot</span></li>
+      </ol>
+      <div class="player">
+        <video id="filmVideo" src="media/film.mp4" poster="media/film.jpg" controls playsinline preload="metadata"></video>
+        <p class="caption">Real footage: one Claude Code session on an isolated ttym server, recorded end to end. Nothing is mocked.</p>
+      </div>
+    </section>
+
+    <!-- one section per chapter; headlines are the film's -->
+    <section class="chapter" id="c1">
+      <div class="text">
+        <p class="num">01</p>
+        <h2>10 agents running. <span class="a">One is waiting on you.</span></h2>
+        <p>The work map lists every session with a one-line summary of what it is doing and what it waits on. The one that needs you says so. Click it and you are in its terminal.</p>
+        <pre><code>ttym map refresh      <span class="c"># summarize every session that changed</span></code></pre>
+      </div>
+      <figure class="clip"><video data-src="media/s1.mp4" poster="media/s1.jpg" muted loop playsinline preload="none"></video></figure>
+    </section>
+
+    <section class="chapter" id="c2">
+      <div class="text">
+        <p class="num">02</p>
+        <h2>Jump in. <span class="a">Answer right where it stopped.</span></h2>
+        <p>The pane in the browser is the terminal itself, not a dashboard. Pick an option on the agent's question card with the arrow keys, type your answer, and it goes back to work. The same session opens in the CLI too.</p>
+        <pre><code>ttym attach auth-service/limiter</code></pre>
+      </div>
+      <figure class="clip"><video data-src="media/s2.mp4" poster="media/s2.jpg" muted loop playsinline preload="none"></video></figure>
+    </section>
+
+    <section class="chapter" id="c3">
+      <div class="text">
+        <p class="num">03</p>
+        <h2>Same terminal, <span class="a">on your phone.</span></h2>
+        <p>One process holds the terminal; the laptop and the phone are both views of it. Type on either and it shows on both. Put ttym on your tailnet and devices signed in to your Tailscale account open it with no extra login.</p>
+        <pre><code>ttym remote tailscale   <span class="c"># or Cloudflare Tunnel + Access</span></code></pre>
+      </div>
+      <figure class="clip wide"><video data-src="media/s3.mp4" poster="media/s3.jpg" muted loop playsinline preload="none"></video></figure>
+    </section>
+
+    <section class="chapter" id="c4">
+      <div class="text">
+        <p class="num">04</p>
+        <h2>The agent runs ttym open. <span class="a">The plan opens in its pane.</span></h2>
+        <p>Markdown, HTML, CSV, images and URLs open as tabs on the pane that produced them, not in a browser tab you will lose. Select a path in the terminal and open it the same way.</p>
+        <pre><code>ttym open PLAN.md rollout.html</code></pre>
+      </div>
+      <figure class="clip"><video data-src="media/s4.mp4" poster="media/s4.jpg" muted loop playsinline preload="none"></video></figure>
+    </section>
+
+    <section class="chapter" id="c5">
+      <div class="text">
+        <p class="num">05</p>
+        <h2>Idle agents sleep. <span class="a">Same conversation when they wake.</span></h2>
+        <p>An agent left alone for 30 minutes is stopped and its RAM returned (374 MB in the film). The screen stays. The next keystroke runs <code>claude --resume</code> with the same session id; in the film it was back in 2.5 s.</p>
+        <pre><code>ttym agent sleep :limiter   <span class="c"># or let the 30-minute timer do it</span></code></pre>
+      </div>
+      <figure class="clip"><video data-src="media/s5.mp4" poster="media/s5.jpg" muted loop playsinline preload="none"></video></figure>
+    </section>
+
+    <section class="chapter" id="c6">
+      <div class="text">
+        <p class="num">06</p>
+        <h2>Rebooted? <span class="a">One command brings it back.</span></h2>
+        <p>After a shutdown every pane comes back with its last screen and scrollback, over a fresh shell. The agent itself is one command away, in the same conversation.</p>
+        <pre><code>ttym agent resume</code></pre>
+      </div>
+      <figure class="clip"><video data-src="media/s6.mp4" poster="media/s6.jpg" muted loop playsinline preload="none"></video></figure>
+    </section>
+
+    <section class="install" id="install">
+      <h2>Four commands. <span class="a">Then it's yours.</span></h2>
+      <ol class="steps">
+        <li><code>npm i -g ttym</code><span>Node ≥ 20. The PTY holder ships as a prebuilt package per platform.</span></li>
+        <li><code>ttym</code><span>Starts the server and drops you into a workspace. The same sessions are in the browser at <code>http://localhost:7690</code>.</span></li>
+        <li><code>ttym agent install claude</code><span>Hooks for Claude Code (Codex too): which agent needs you, <code>await</code>, sleep and wake.</span></li>
+        <li><code>ttym remote tailscale</code><span>Your phone, one login. <a href="https://github.com/esc5221/ttym/blob/master/docs/remote-access.md">Other ways in</a>.</span></li>
+      </ol>
+    </section>
+  </main>
+
+  <footer class="end">
+    <div class="end-logo"><span class="word">ttym</span><span class="caret" aria-hidden="true"></span></div>
+    <p class="tagline small">Know which agent needs you. <span class="a">Get back into its terminal from anywhere.</span></p>
+    <p class="links"><a href="https://github.com/esc5221/ttym">GitHub</a> · <a href="https://github.com/esc5221/ttym#readme">README</a> · <a href="https://github.com/esc5221/ttym/blob/master/README.ko.md">한국어</a></p>
+  </footer>
+
+  <script src="app.js" defer></script>
+</body>
+</html>

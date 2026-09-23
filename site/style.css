@@ -1,0 +1,127 @@
+/* ttym — the film's system: one dark room, one accent, Geist for sentences, Geist Mono for the machine. */
+@font-face { font-family: "Geist"; src: url("fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Geist Mono"; src: url("fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+
+:root {
+  --bg: #0b0b0c;
+  --panel: #141416;
+  --ink: #f3f3f4;
+  --soft: #cfcfd4;
+  --dim: #8d8d93;
+  --line: rgba(255, 255, 255, 0.09);
+  --accent: #f29c5c;
+  --mono: "Geist Mono", ui-monospace, Menlo, monospace;
+  --sans: "Geist", -apple-system, system-ui, sans-serif;
+  --gutter: clamp(16px, 4vw, 56px);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font: 17px/1.6 var(--sans); letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
+  background-image:
+    radial-gradient(1200px 520px at 58% -8%, rgba(242, 156, 92, 0.10), transparent 70%),
+    radial-gradient(900px 600px at 100% 40%, rgba(140, 120, 255, 0.04), transparent 70%);
+  background-repeat: no-repeat;
+}
+a { color: var(--ink); text-decoration-color: rgba(255, 255, 255, 0.3); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--accent); }
+.a { color: var(--accent); }
+code, pre { font-family: var(--mono); }
+
+/* ── nav: appears once the hero's word has done its job */
+.nav { position: fixed; inset: 0 0 auto 0; z-index: 10; display: flex; align-items: center; justify-content: space-between;
+  padding: 14px var(--gutter); background: rgba(11, 11, 12, 0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line); transform: translateY(-100%); transition: transform 0.35s ease; }
+.nav.on { transform: none; }
+.nav-logo img { display: block; height: 22px; width: auto; }
+.nav nav { display: flex; gap: clamp(14px, 3vw, 28px); font-size: 15px; }
+.nav nav a { text-decoration: none; color: var(--soft); }
+.nav nav a:hover { color: var(--ink); }
+
+/* ── hero: the opening shot */
+.hero { min-height: 100svh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 var(--gutter); text-align: center; }
+.hero-logo, .end-logo { margin: 0; font: 640 clamp(72px, 15vw, 168px)/1 var(--mono); letter-spacing: -0.05em; display: inline-flex; align-items: center; }
+.caret { display: inline-block; width: 0.464em; height: 0.893em; margin-left: 0.083em; background: var(--accent); }
+.hero-logo { transition: transform 0.9s cubic-bezier(0.65, 0, 0.35, 1); }
+.hero-logo .caret { animation: blink 0.36s steps(1) 0.35s 4; }
+.hero.settled .hero-logo { transform: translateY(-4vh) scale(0.72); }
+@keyframes blink { 50% { opacity: 0; } }
+
+.hero-body { opacity: 0; transform: translateY(14px); transition: opacity 0.7s ease 0.25s, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.25s; }
+.hero.settled .hero-body { opacity: 1; transform: none; }
+.tagline { font-size: clamp(22px, 3.2vw, 38px); font-weight: 520; letter-spacing: -0.02em; line-height: 1.25; margin: 0 auto 30px; max-width: 22em; color: var(--soft); }
+.tagline .a { display: block; }
+.tagline.small { font-size: clamp(18px, 2.2vw, 26px); margin-bottom: 18px; }
+.install-line { display: inline-flex; align-items: center; gap: 10px; padding: 8px 8px 8px 22px; border-radius: 12px; background: #161618; border: 1px solid var(--line); }
+.install-line code { font-size: clamp(18px, 2vw, 24px); }
+.install-line .p { color: var(--accent); margin-right: 6px; }
+.copy { font: 500 14px var(--mono); color: var(--soft); background: #222226; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+.copy:hover { color: var(--ink); border-color: rgba(242, 156, 92, 0.5); }
+.meta { margin-top: 18px; font: 14px var(--mono); color: var(--dim); }
+.meta a { color: var(--dim); }
+
+/* ── film: the table of contents is the chapter list */
+.film { display: grid; grid-template-columns: 250px 1fr; gap: 40px; max-width: 1440px; margin: 0 auto; padding: 48px var(--gutter) 96px; align-items: start; }
+.chapters { list-style: none; margin: 0; padding: 0; position: sticky; top: 90px; }
+.chapters li { position: relative; padding: 11px 0 13px 18px; cursor: pointer; opacity: 0.45; transition: opacity 0.25s; }
+.chapters li:hover, .chapters li.on { opacity: 1; }
+.chapters li.done { opacity: 0.7; }
+.chapters .rail { position: absolute; left: 0; top: 12px; bottom: 14px; width: 2px; background: rgba(255, 255, 255, 0.10); border-radius: 2px; overflow: hidden; }
+.chapters .bar { position: absolute; inset: 0; background: var(--accent); transform-origin: 0 0; transform: scaleY(0); }
+.chapters .n { display: block; font: 13px var(--mono); color: var(--dim); letter-spacing: 0.06em; }
+.chapters .l { display: block; font-size: 18px; font-weight: 560; letter-spacing: -0.012em; line-height: 1.3; margin-top: 2px; }
+.player video { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; background: #000; border: 1px solid var(--line); box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6); }
+.caption { margin: 14px 2px 0; font-size: 14px; color: var(--dim); }
+
+/* ── chapters as sections: sentence on one side, the real footage on the other */
+.chapter { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(28px, 5vw, 72px); align-items: center;
+  max-width: 1440px; margin: 0 auto; padding: 72px var(--gutter); border-top: 1px solid var(--line); }
+.chapter:nth-of-type(even) .text { order: 2; }
+.num { font: 14px var(--mono); color: var(--accent); letter-spacing: 0.08em; margin: 0 0 10px; }
+.chapter h2, .install h2 { font-size: clamp(28px, 3.4vw, 44px); font-weight: 620; letter-spacing: -0.025em; line-height: 1.12; margin: 0 0 18px; }
+.chapter h2 .a, .install h2 .a { display: block; }
+.chapter p { color: var(--soft); margin: 0 0 20px; max-width: 34em; }
+.chapter p code, .steps span code { font-size: 0.9em; background: rgba(255, 255, 255, 0.07); padding: 1px 6px; border-radius: 5px; }
+pre { margin: 0; padding: 14px 18px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); overflow-x: auto; font-size: 15px; }
+pre .c { color: var(--dim); }
+.clip { margin: 0; }
+.clip video { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--line); background: #1e1e1e; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55); }
+
+/* ── install */
+.install { max-width: 1000px; margin: 0 auto; padding: 96px var(--gutter); border-top: 1px solid var(--line); }
+.steps { list-style: none; counter-reset: s; margin: 32px 0 0; padding: 0; display: grid; gap: 14px; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 38px minmax(0, 330px) 1fr; gap: 18px; align-items: baseline;
+  padding: 16px 20px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); }
+.steps li::before { content: counter(s, decimal-leading-zero); font: 13px var(--mono); color: var(--accent); }
+.steps li > code { font-size: 16px; }
+.steps li > span { color: var(--soft); font-size: 15px; }
+
+/* ── the closing shot */
+.end { text-align: center; padding: 110px var(--gutter) 90px; border-top: 1px solid var(--line); }
+.end-logo { font-size: clamp(56px, 9vw, 110px); margin-bottom: 26px; }
+.links { font: 14px var(--mono); color: var(--dim); }
+.links a { color: var(--soft); }
+
+/* ── narrow screens: one column, chapters become a scrolling strip above the film */
+@media (max-width: 860px) {
+  .film { grid-template-columns: minmax(0, 1fr); gap: 18px; padding-top: 24px; }
+  .chapters { position: static; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: none; }
+  .chapters li { flex: none; padding: 8px 12px 10px; border-radius: 10px; background: var(--panel); }
+  .chapters .rail { left: 10px; right: 10px; top: auto; bottom: 4px; width: auto; height: 2px; }
+  .chapters .bar { transform: scaleX(0); }
+  .chapters .l { font-size: 14px; }
+  .chapter { grid-template-columns: minmax(0, 1fr); padding: 56px var(--gutter); }
+  .chapter:nth-of-type(even) .text { order: 0; }
+  .steps li { grid-template-columns: 30px 1fr; }
+  .steps li > span { grid-column: 2; }
+  .nav nav a:not(.gh) { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .hero-logo, .hero-body, .nav { transition: none; }
+  .hero-logo .caret { animation: none; }
+}

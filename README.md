@@ -1,42 +1,104 @@
-# ttym
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="site/brand/ttym-logo-dark.svg">
+    <img src="site/brand/ttym-logo-light.svg" alt="ttym" width="280">
+  </picture>
+</p>
 
-> 🇰🇷 한국어: [README.ko.md](README.ko.md)
+<p align="center"><b>Know which agent needs you. Get back into its terminal from anywhere.</b></p>
 
-You're running a dozen coding agents. Right now one is blocked on you and the
-rest are still working — and you're cycling through terminal tabs to find which.
-ttym puts them on one board, tells you which needs you, and drops you into that
-exact terminal from your phone, the browser, or the CLI.
+<p align="center">
+  <code>npm i -g ttym</code> · Node ≥ 20 · macOS and Linux<br>
+  <a href="https://ttym.pages.dev">Site</a> · <a href="#install">Install</a> · <a href="docs/remote-access.md">Remote access</a> · <a href="README.ko.md">한국어</a>
+</p>
 
-![The work map — which of your sessions needs you, on one board](docs/assets/s1-hero.png)
+[![The 69-second film: one real Claude Code session on ttym, end to end](docs/assets/film.jpg)](https://ttym.pages.dev/#film)
 
-One server owns the PTYs, so the agents keep running when you close the tab,
-restart the server, or swap in a new build. Idle agents sleep to give your RAM
-back and wake into the same conversation. Ask an agent to write a plan and it
-opens as a tab on that agent's pane — not a lost Chrome tab.
+You're running a dozen coding agents. One is blocked on you, the rest are still
+working, and you're cycling through terminal tabs to find which. ttym is a web
+terminal multiplexer: one server holds every PTY, and the browser, the CLI and
+your phone are views of the same live terminals.
 
-![The same live session in two windows — type in one, it shows in the other](docs/assets/s2-mirror.png)
+## What it does
 
-*One PTY, many clients: the CLI, a browser tab, your phone — all attached to the
-same live terminal. Type in one, it's in the others.*
+The six chapters of the film above, each with the command behind it.
 
-## Why
+### 01 · 10 agents running. One is waiting on you.
 
-- **Know which agent needs you.** A live map of every session with an AI
-  one-liner of what it's doing and what it waits on — jump straight in.
-- **Sessions outlive everything.** One server holds the PTYs; the CLI, browser,
-  and desktop are just viewers. Close a client, restart or upgrade the server —
-  the processes and scrollback stay.
-- **Reclaim RAM without losing work.** Idle Claude/Codex panes sleep (hundreds
-  of MB each) and wake into the exact conversation on your next keystroke.
+<img src="docs/assets/section-s1.jpg" alt="The work map: the rate limiter session is waiting on a Redis or in-memory decision" width="760">
+
+The work map lists every session with a one-line summary of what it is doing
+and what it waits on. The one that needs you says so; click it and you are in
+its terminal.
+
+```bash
+ttym map refresh          # summarize every session that changed
+```
+
+### 02 · Jump in. Answer right where it stopped.
+
+<img src="docs/assets/section-s2.jpg" alt="Answering Claude Code's question card inside the browser pane" width="760">
+
+The pane in the browser is the terminal itself, not a dashboard: pick an
+option on the agent's question card, type your answer, and it goes back to
+work. The same session opens in the CLI.
+
+```bash
+ttym attach auth-service/limiter
+```
+
+### 03 · Same terminal, on your phone.
+
+<img src="docs/assets/section-s3.jpg" alt="The same session on a laptop and a phone" width="760">
+
+One process holds the terminal; the laptop and the phone are both views of it.
+On your tailnet, devices signed in to your Tailscale account open ttym with no
+extra login ([other ways in](docs/remote-access.md)).
+
+```bash
+ttym remote tailscale
+```
+
+### 04 · The agent runs ttym open. The plan opens in its pane.
+
+<img src="docs/assets/section-s4.jpg" alt="Claude Code runs ttym open PLAN.md" width="760">
+
+Markdown, HTML, CSV, images and URLs open as tabs on the pane that produced
+them. Select a path in the terminal and open it the same way.
+
+```bash
+ttym open PLAN.md rollout.html
+```
+
+### 05 · Idle agents sleep. Same conversation when they wake.
+
+<img src="docs/assets/section-s5.jpg" alt="A sleeping agent waking: input, claude --resume, back" width="760">
+
+An agent left alone for 30 minutes is stopped and its RAM returned (374 MB in
+the film). The screen stays; the next keystroke runs `claude --resume` with the
+same session id — back in 2.5 s in the film.
+
+```bash
+ttym agent sleep :limiter # or let the 30-minute timer do it
+```
+
+### 06 · Rebooted? One command brings it back.
+
+<img src="docs/assets/section-s6.jpg" alt="After a reboot: the restored screen, then ttym agent resume" width="760">
+
+After a shutdown every pane comes back with its last screen and scrollback over
+a fresh shell. The agent is one command away, in the same conversation.
+
+```bash
+ttym agent resume
+```
+
+### Also
+
+- **Sessions outlive everything.** Close a client, restart or upgrade the
+  server: the processes and scrollback stay.
 - **Drive agents like functions.** Group terminals into a `workspace` and script
   them with `send` / `await`.
-- **Same session, any screen — including your phone.** The browser is the real
-  interactive terminal, not a dashboard.
-
-![An idle agent asleep — the process is gone, the conversation stays, a keystroke wakes it](docs/assets/s3-sleep.png)
-
-*Turn an idle agent off to get its RAM back; the screen and the conversation
-stay frozen on disk, and the next keystroke resumes it right where it left off.*
 
 ## Architecture
 
