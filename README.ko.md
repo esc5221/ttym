@@ -28,34 +28,35 @@
 curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh
 ```
 
-스크립트는 이 기기에 맞는 빌드(macOS·Linux, arm64·x86_64)를
-[GitHub Releases](https://github.com/esc5221/ttym/releases)에서 받아 sha256을
-확인한 뒤 `~/.local/share/ttym`에 설치하고, `~/.local/bin`에 `ttym` 링크를 만든다.
-Node 20 이상이 필요하다. 스크립트가 짧으니 `sh`로 넘기기 전에
-[읽어 보기](install.sh)를 권한다. 버전을 고정하려면 `TTYM_VERSION=v0.3.0`.
+Node 20 이상이 필요하다. 스크립트가 짧으니 먼저 [읽어 보기](install.sh)를 권한다.
+
+<details>
+<summary>스크립트가 하는 일</summary>
+
+이 기기에 맞는 빌드를 [GitHub Releases](https://github.com/esc5221/ttym/releases)에서
+받아 sha256을 확인하고, `~/.local/share/ttym`에 설치한 뒤 `~/.local/bin`에 `ttym`
+링크를 만든다. 특정 릴리스를 설치하려면 `TTYM_VERSION=v0.3.0`.
+
+</details>
 
 그다음 기기마다 한 번:
 
 ```bash
-ttym service install        # 서버 상주: 로그인하면 뜨고, 죽으면 다시 뜬다
-                            # (macOS는 launchd, Linux는 systemd)
-ttym agent install claude   # Claude Code 훅: 누가 나를 기다리는지, await,
-                            # 절전·깨우기 (codex도)
+ttym service install        # 로그인하면 뜨고, 죽으면 다시 뜬다
+ttym agent install claude   # Claude Code 훅 (codex도)
 ```
 
-서비스를 설치하지 않으면 첫 `ttym` 명령이 서버를 백그라운드로 띄우고, 재부팅 뒤에는
-다시 띄워 주는 것이 없다. 어느 쪽이든 터미널은 각자의 holder 프로세스에 살기 때문에
-서버를 재시작하거나 업그레이드해도 닫히지 않는다.
+나중에:
 
 ```bash
-ttym upgrade                # 최신 Release로 교체. 세션은 그대로 돈다
+ttym upgrade                # 최신 릴리스로. 세션은 그대로 돈다
 ttym upgrade --rollback     # 직전 설치로 되돌리기
 ```
 
 <details>
-<summary>소스에서 (개발)</summary>
+<summary>소스에서</summary>
 
-전제: Node.js ≥ 20, Rust, pnpm.
+Node 20 이상, Rust, pnpm이 필요하다.
 
 ```bash
 git clone https://github.com/esc5221/ttym && cd ttym
@@ -64,17 +65,7 @@ pnpm install
 ln -s "$PWD/dist/ttym" ~/.local/bin/ttym
 ```
 
-빌드 산출물:
-
-```
-dist/
-├── ttym              # CLI (esbuild 번들)
-├── ttym-server.js    # 번들된 서버
-└── ttym-holder       # Rust 바이너리 (세션당 하나)
-packages/web/dist/    # 서버가 서빙하는 웹 앱
-```
-
-체크아웃에서는 `ttym upgrade`가 `dist.next`로 빌드해 rename으로 스왑한다 — 돌아가는 세션의 프로세스는 그대로다.
+체크아웃에서는 `ttym upgrade`가 다시 빌드해서 rename으로 교체한다.
 
 </details>
 
@@ -82,49 +73,43 @@ packages/web/dist/    # 서버가 서빙하는 웹 앱
 <summary>제거</summary>
 
 ```bash
-ttym service uninstall                       # 서비스를 설치했다면
+ttym service uninstall
 ttym stop
 rm -rf ~/.local/share/ttym ~/.local/share/ttym.prev ~/.local/bin/ttym
-rm -rf ~/.ttym                               # 상태: 세션, 설정, 원격 로그인
+rm -rf ~/.ttym              # 세션, 설정, 원격 로그인
 ```
-
-아직 열려 있는 터미널은 직접 종료할 때까지 holder 프로세스에서 계속 돈다.
 
 </details>
 
 ## 빠른 시작
 
 ```bash
-ttym work                      # 서버가 없으면 띄우고, workspace "work" + 셸을
-                               # 만들고([Y/n] 한 번) 그대로 진입한다
-ttym split :main ai -- claude  # 옆에 분할
-open http://localhost:7690     # 같은 세션이 브라우저에 살아있다
-ttym remote tailscale          # 폰에서도 (아래 "다른 기기에서")
+ttym work                      # workspace "work"와 셸을 만들고 진입
+ttym split :main ai -- claude  # 옆에 분할해서 Claude Code 실행
+open http://localhost:7690     # 같은 세션을 브라우저에서
 ```
 
-`C-b d` 로 나와도 전부 계속 돈다.
+`C-b d`로 나와도 전부 계속 돈다.
 
 ## 하는 일
-
-위 영상의 6개 장면과, 각 장면 뒤에 있는 명령.
 
 ### 01 · 에이전트 10개가 도는 중. 하나가 나를 기다린다.
 
 <img src="docs/assets/section-s1.jpg" alt="작업 지도: rate limiter 세션이 Redis냐 in-memory냐 결정을 기다린다" width="760">
 
-작업 지도는 세션마다 지금 무엇을 하고 무엇을 기다리는지 한 줄 요약을 보여
-준다. 나를 기다리는 세션은 그렇게 표시되고, 누르면 그 터미널로 들어간다.
+작업 지도는 모든 세션을 지금 하는 일과 기다리는 것 한 줄씩으로 보여 준다. 누르면
+그 터미널이 열린다.
 
 ```bash
-ttym map refresh          # 바뀐 세션을 다시 요약
+ttym map refresh
 ```
 
 ### 02 · 들어가서, 멈춘 자리에서 답한다.
 
 <img src="docs/assets/section-s2.jpg" alt="브라우저 pane 안에서 Claude Code의 질문 카드에 답하기" width="760">
 
-브라우저의 pane은 대시보드가 아니라 터미널 그 자체다. 에이전트의 질문 카드에서
-선택지를 고르고 답을 쓰면 다시 작업을 이어 간다. 같은 세션을 CLI에서도 연다.
+브라우저의 pane이 곧 터미널이다. 거기서 에이전트에게 답하거나, 같은 세션에 CLI로
+붙는다.
 
 ```bash
 ttym attach auth-service/limiter
@@ -134,9 +119,8 @@ ttym attach auth-service/limiter
 
 <img src="docs/assets/section-s3.jpg" alt="노트북과 휴대폰에 같은 세션" width="760">
 
-터미널은 프로세스 하나가 들고 있고, 노트북과 휴대폰은 둘 다 그 화면을 보는
-창이다. tailnet에 올리면 내 Tailscale 계정으로 로그인한 기기는 추가 로그인 없이
-연다([다른 접속 방법](docs/remote-access.md)).
+노트북과 폰이 같은 터미널을 보여 준다. tailnet에서는 내 Tailscale 계정으로
+로그인된 기기가 별도 로그인 없이 연다.
 
 ```bash
 ttym remote tailscale
@@ -146,8 +130,7 @@ ttym remote tailscale
 
 <img src="docs/assets/section-s4.jpg" alt="Claude Code가 ttym open PLAN.md를 실행" width="760">
 
-Markdown, HTML, CSV, 이미지, URL은 그것을 만든 pane의 탭으로 열린다. 터미널에서
-경로를 선택해서 같은 방식으로 열 수도 있다.
+Markdown, HTML, CSV, 이미지, URL이 그걸 만든 pane의 탭으로 열린다.
 
 ```bash
 ttym open PLAN.md rollout.html
@@ -157,162 +140,88 @@ ttym open PLAN.md rollout.html
 
 <img src="docs/assets/section-s5.jpg" alt="잠든 에이전트가 깨어나는 과정: 입력, claude --resume, 복귀" width="760">
 
-30분 동안 입력·출력이 없는 에이전트는 종료되고 RAM을 돌려준다(영상에서 374MB).
-화면은 남아 있고, 다음 키 입력이 같은 세션 id로 `claude --resume`을 실행한다.
-영상에서는 2.5초 만에 돌아왔다.
+30분 동안 아무 일이 없으면 에이전트 프로세스를 내려 메모리를 돌려받고, 화면은
+남긴다. 다음 키 입력이 같은 대화를 이어 연다.
 
 ```bash
-ttym agent sleep :limiter # 또는 30분 타이머에 맡긴다
+ttym agent sleep :limiter
 ```
 
 ### 06 · 재부팅했다면 명령 하나로 돌아온다.
 
 <img src="docs/assets/section-s6.jpg" alt="재부팅 뒤: 복원된 화면, 그리고 ttym agent resume" width="760">
 
-머신을 껐다 켜면 모든 pane이 마지막 화면과 스크롤백을 새 셸 위에 되살린다.
-에이전트는 명령 하나로, 같은 대화로 돌아온다.
+재부팅 뒤 모든 pane이 마지막 화면으로 돌아온다. 에이전트는 명령 하나로 같은
+대화에서 이어진다.
 
 ```bash
 ttym agent resume
 ```
 
-### 그 밖에
-
-- **세션은 모든 것보다 오래 산다.** 클라이언트를 닫거나 서버를 재시작·업그레이드해도
-  프로세스와 스크롤백은 남는다.
-- **에이전트를 함수처럼.** 터미널들을 `workspace`로 묶고 `send` / `await`로 스크립트를 짠다.
-
 ## 에이전트를 함수처럼
 
-훅을 한 번 깔면 에이전트 세션이 호출 가능한 함수가 된다:
-
 ```bash
-ttym agent install claude     # ~/.claude/settings.json 에 SessionStart/Stop 훅 주입
 ttym workspace add --current --name helper --role agent --cmd claude
 ttym await :helper --json -- "이 스택트레이스 원인 뭐야?"
 ```
 
-`await` 는 화면 폴링이 아니라 Stop 훅을 신호로 에이전트의 턴이 실제로 끝날 때까지 기다리고, **그 턴의 답변만** 돌려준다 — 가능하면 에이전트의 구조화된 transcript 에서 추출하고(`transcriptSource: "structured"`), 아니면 렌더된 화면에서 잘라낸다. 여러 멤버에 동시에 걸어도 각자 독립적으로 완료된다. `ttym agent resume` 은 연결된 Claude/Codex 세션을 나중에 다시 열고, `ttym agent info` 는 연결 관계를 보여준다.
+`await`은 프롬프트를 보내고, 에이전트의 턴이 끝나면 그 턴의 답을 돌려준다. 여러
+에이전트를 동시에 기다릴 수 있다.
+[턴이 끝난 걸 어떻게 아는지](https://ttym.pages.dev/internals#await).
 
 ## 셸 통합
 
-`~/.zshrc` 에 한 줄 (ttym pane 밖에서는 아무 일도 안 한다):
+`~/.zshrc`에 한 줄:
 
 ```bash
 [[ -n "$TTYM_SESSION_ID" ]] && source ~/.local/share/ttym/scripts/ttym-shell-integration.zsh
-# Release 설치 기준. 소스 체크아웃이면 <repo>/scripts/…
 ```
 
-그러면 셸이 자기 출력 스트림에 명령 경계를 표시하고(OSC 133/633), 서버가 그걸 인덱싱해서, 평범한 셸이 스크립트 가능해진다:
+그러면 일반 셸도 명령 단위로 다룰 수 있다:
 
 ```bash
-ttym commands :build          # 장부: ✓/✗ + exit code, 소요시간, 명령줄
-ttym output :build --cmd 3    # 그 명령의 출력만 정확히 — 프롬프트 긁기 없음
-ttym await :build -- "make test"   # 보내고, 완료까지 막고, exit code + 출력 받기
+ttym commands :build              # 실행한 명령과 exit code
+ttym output :build --cmd 3        # 명령 하나의 출력
+ttym await :build -- "make test"  # 실행하고 기다려서 exit code + 출력
 ```
 
-`await` 는 증거로 라우팅한다: 통합 신호를 보인 pane 은 명령 경로, 에이전트 pane 은 훅 경로. 웹 터미널에서는 같은 표시가 **⌘↑ / ⌘↓** 를 움직인다 — 스크롤백의 명령 경계 사이를 점프한다.
+웹 터미널에서는 ⌘↑ / ⌘↓로 명령 사이를 이동한다.
 
 ## 작업 지도
 
-메인 화면에는 두 번째 얼굴이 있다(settings → main view → **map**): 모든 workspace 와 세션이 하나의 트리에 오르고, 각 행에는 그 작업이 무엇이고 무엇을 기다리는지 AI 가 쓴 한 줄이 붙는다 — 이 README 의 저자가 손으로 그리던 바로 그 지도다.
+설정 → main view → **map**에서 모든 workspace와 세션을 트리로, 각각 한 줄 요약과
+함께 본다.
 
 ```bash
-ttym map refresh              # 출력이 움직인 세션만 요약 — 신선한 세션은 비용 0
+ttym map refresh    # 출력이 바뀐 세션만 요약
 ```
 
-모델 백엔드 규칙은 하나다: `~/.ttym/config` 에 `map-base-url` 을 넣으면 OpenAI 호환 HTTP(로컬이든 원격이든 아무 게이트웨이), 비워두면 `claude -p`(기본 모델 `haiku`). 프롬프트는 settings 에서 편집할 수 있고 — 데이터 블록(화면 꼬리, workspace 목록)은 자동으로 뒤에 붙는다 — 일회성 지시 한 줄로 저장 없이 이번 정리만 조종할 수도 있다. 상시 주기는 settings(또는 config)의 `map-interval = 10m` — 서버가 직접 돌리며, **기본은 꺼짐**이다: 화면이 기계 밖으로 나가는 건 명시적 선택이어야 한다. 연속 5회 실패하면 타이머가 스스로 멈춘다(interval 재저장으로 재개). 요약은 정직하게 낡는다: 요약 이후 출력이 흐른 세션은 다음 갱신까지 나이와 함께 stale 로 표시된다.
+기본은 `claude -p`이고, OpenAI 호환 엔드포인트도 쓸 수 있다([설정](#레퍼런스)).
+주기 요약은 화면 내용을 모델로 보내기 때문에 기본으로 꺼져 있다.
 
 ## 웹 터미널
 
-- **⌘F** — 스크롤백 문자열 검색, VS Code 방식, 매치 하이라이트.
-- **⌘↑ / ⌘↓** — 명령 경계 점프 (셸 통합 필요).
-- **URL 클릭 가능**, 세션 안의 프로그램(vim, 원격 ssh)이 OSC 52 로 클립보드에 복사할 수 있다.
-- **파일 드롭**: 네이티브 표면은 실경로를 꽂고, 브라우저는 내용을 업로드해 서버 쪽 경로를 꽂는다 — Finder 식 이름, uuid 없음.
-- **폰트**: macOS 는 네이티브 스택 그대로, 그 외 플랫폼은 동봉된 D2Coding 웹폰트 — 한글이 어디서나 고정폭이다.
-- 목록에서 세션에 호버하면 라이브 미리보기, 클릭하면 전체 — 둘 다 스크린샷이 아니라 진짜 터미널이다.
+- **⌘F**로 스크롤백을 검색한다.
+- **⌘↑ / ⌘↓**로 명령 사이를 이동한다 (셸 통합 필요).
+- **URL**을 누를 수 있고, 세션 안의 프로그램이 클립보드를 쓸 수 있다 (OSC 52).
+- 파일을 pane에 **끌어다 놓으면** 경로가 입력된다.
 
 ## 다른 기기에서
 
-ttym은 `127.0.0.1`에서만 듣는다. 폰에서 쓰려면 tailnet에 올린다:
-
 ```bash
-ttym remote tailscale            # tailscale serve → 호스트 허용 → 로그인 링크 + QR
+ttym remote tailscale
 ```
 
-이 머신 밖에서 오는 요청은 허용된 호스트여야 하고, 1회용 링크(`ttym remote link`)로 받은
-로그인 쿠키가 있어야 한다. Cloudflare Tunnel + Access(`ttym remote cloudflare --host … --email …`),
-SSH 포워딩과 세부 동작은 [docs/remote-access.md](docs/remote-access.md). 에이전트는
+이 기기 밖에서 오는 요청은 허용된 호스트와 로그인이 필요하다. Cloudflare Tunnel,
+SSH와 세부 동작은 [docs/remote-access.md](docs/remote-access.md). 에이전트는
 `ttym remote doctor --json`부터 실행한다.
 
 ## 아키텍처
 
-### 프로세스 구성
-
-```
-Clients (viewers)                     Server                  PTY backend
-─────────────────                    ────────                ───────────────
-
-ttym attach        (Node TUI)       ┌──────────┐             ┌─ Holder #1 ─► zsh
-                                    │          │         UDS │
-@ttym/web          (browser)   ───► │  server  │ ──────────► ├─ Holder #2 ─► claude
-                                    │  (Node)  │  frame      │
-@ttym/desktop      (Tauri)          │          │  protocol   └─ Holder #N ─► codex
-                                    └──────────┘
-                                         ▲                   Rust · ~1MB · 세션당 1개
-ttym new/split/send/await  ────────────┘                    서버가 죽어도 생존
-ttym start/stop/status       HTTP only
-(CLI control-plane)
-```
-
-핵심:
-
-- **Server 가 유일한 허브.** Holder 와 직접 통신하는 건 Server 뿐이다.
-- **Viewer 가 3종.** 셋 다 동일한 `HTTP + WebSocket` 프로토콜을 쓴다.
-- **CLI 는 이중 역할.** `attach` 는 viewer 고, 나머지는 컨트롤 플레인이자 호환 경계다.
-- **Holder 는 세션당 1프로세스.** 서버가 죽어도 PTY 와 ring buffer 가 그대로 살아 있다.
-
-### 컴포넌트
-
-```
-Component        Lang         Role                                      Source
-───────────────────────────────────────────────────────────────────────────────────────
-@ttym/cli        TS → Node    서버 수명 · attach TUI ·                  packages/cli
-                              new/split/send/await/map 컨트롤 플레인
-@ttym/server     TS → Node    HTTP + WS 허브, xterm headless 미러,       packages/server
-                              OutputRing(seq 기반 delta), workspace
-                              store, 명령 인덱스, interaction
-holder           Rust         PTY fd + ring buffer. 영속성 담당.         holder/src
-@ttym/vt         TS           프레임워크 무관 클라이언트 코어: WS mux,     packages/vt
-                              local echo, ANSI 유틸, 패널 상태
-@ttym/protocol   TS           WS wire 포맷 — 서버·클라 같은 구현          packages/protocol
-@ttym/api        TS           HTTP 클라이언트 — 앱 3종이 공유             packages/api
-@ttym/ui         React/TS     xterm.js 터미널 호스트 + 레이아웃 뷰        packages/ui
-@ttym/web        React/Vite   브라우저 앱                               packages/web
-@ttym/desktop    Tauri        서빙되는 웹 앱을 감싸는 데스크톱 셸          packages/desktop
-@ttym/shared     TS           layout 트리 등 도메인 규칙                 packages/shared
-```
-
-### 데이터 플로우 (한 세션 기준)
-
-```
-입력 (keystroke):
-  viewer → CMD.DATA(sessionId, bytes) → WS → server → unix socket → holder → PTY
-
-출력 (PTY byte):
-  PTY → holder ring → unix socket → server.OutputRing.append(seq)
-                                      ├─► 모든 attached viewer 에 CMD.DATA(seq) 전송
-                                      └─► headless xterm 미러 갱신 (ATTACH 시 SNAPSHOT 용)
-  viewer → 화면 렌더 → CMD.ACK(seq) 회신
-
-신규 attach:
-  viewer → CMD.ATTACH{ fromSeq, cols, rows, mode }
-  server → CMD.SNAPSHOT(전체 화면) → 이후 CMD.DATA delta 만
-
-서버 재시작:
-  server → 세션별 체크포인트(렌더된 ANSI + offset) 를 xterm 에 seed
-         → holder 에 DUMP_SINCE(offset) → 그 이후 delta 만 REPLAY
-```
+서버 하나가 모든 세션의 화면을 들고 있고, 터미널마다 PTY는 별도의 작은 Rust
+프로세스에 산다. 그래서 서버를 재시작하거나 업그레이드해도 터미널이 닫히지 않는다.
+구성과 도식: [ttym.pages.dev/internals](https://ttym.pages.dev/internals).
+패키지 계층과 운영: [docs/architecture.md](docs/architecture.md).
 
 ## 레퍼런스
 

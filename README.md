@@ -28,36 +28,36 @@ your phone are views of the same live terminals.
 curl -fsSL https://raw.githubusercontent.com/esc5221/ttym/master/install.sh | sh
 ```
 
-The script downloads the build for your machine (macOS or Linux, arm64 or
-x86_64) from [GitHub Releases](https://github.com/esc5221/ttym/releases),
-checks its sha256, installs it to `~/.local/share/ttym` and links `ttym` into
-`~/.local/bin`. Needs Node 20 or newer. It is short;
-[read it](install.sh) before piping it to `sh`. `TTYM_VERSION=v0.3.0` pins a
-version.
+Needs Node 20 or newer. The script is short; [read it](install.sh) first.
+
+<details>
+<summary>What the script does</summary>
+
+It downloads the build for your machine from
+[GitHub Releases](https://github.com/esc5221/ttym/releases), checks its sha256,
+installs it to `~/.local/share/ttym` and links `ttym` into `~/.local/bin`.
+`TTYM_VERSION=v0.3.0` installs a specific release.
+
+</details>
 
 Then, once per machine:
 
 ```bash
-ttym service install        # starts at login, restarts after a crash
-                            # (launchd on macOS, systemd on Linux)
-ttym agent install claude   # Claude Code hooks: who needs you, await,
-                            # sleep/wake (codex too)
+ttym service install        # start at login, restart after a crash
+ttym agent install claude   # hooks for Claude Code (codex too)
 ```
 
-Without the service, the first `ttym` command starts the server in the
-background and nothing brings it back after a reboot. Either way each terminal
-lives in its own holder process, so restarting or upgrading the server does not
-close it.
+Later:
 
 ```bash
-ttym upgrade                # swap in the latest release; sessions keep running
+ttym upgrade                # latest release; sessions keep running
 ttym upgrade --rollback     # back to the previous install
 ```
 
 <details>
-<summary>From source (development)</summary>
+<summary>From source</summary>
 
-Prerequisites: Node.js ≥ 20, Rust, pnpm.
+Needs Node 20 or newer, Rust and pnpm.
 
 ```bash
 git clone https://github.com/esc5221/ttym && cd ttym
@@ -66,18 +66,7 @@ pnpm install
 ln -s "$PWD/dist/ttym" ~/.local/bin/ttym
 ```
 
-Build outputs:
-
-```
-dist/
-├── ttym              # CLI (esbuild bundle)
-├── ttym-server.js    # bundled server
-└── ttym-holder       # Rust binary (one per session)
-packages/web/dist/    # the web app the server serves
-```
-
-In a checkout, `ttym upgrade` rebuilds into `dist.next` and swaps by rename —
-running sessions keep their processes.
+In a checkout, `ttym upgrade` rebuilds and swaps the build by rename.
 
 </details>
 
@@ -85,52 +74,43 @@ running sessions keep their processes.
 <summary>Uninstall</summary>
 
 ```bash
-ttym service uninstall                       # if you installed the service
+ttym service uninstall
 ttym stop
 rm -rf ~/.local/share/ttym ~/.local/share/ttym.prev ~/.local/bin/ttym
-rm -rf ~/.ttym                               # state: sessions, config, remote logins
+rm -rf ~/.ttym              # sessions, config, remote logins
 ```
-
-Terminals that are still open keep running in their holder processes until you
-exit them.
 
 </details>
 
 ## Quick start
 
 ```bash
-ttym work                      # starts the server if needed, creates workspace
-                               # "work" + a shell (one [Y/n]) and attaches
-ttym split :main ai -- claude  # a real split beside it
-open http://localhost:7690     # the same session, live in the browser
-ttym remote tailscale          # and on your phone ("From another device")
+ttym work                      # create workspace "work" with a shell and attach
+ttym split :main ai -- claude  # a split beside it, running Claude Code
+open http://localhost:7690     # the same session in the browser
 ```
 
 `C-b d` detaches; everything keeps running.
 
 ## What it does
 
-The six chapters of the film above, each with the command behind it.
-
 ### 01 · 10 agents running. One is waiting on you.
 
 <img src="docs/assets/section-s1.jpg" alt="The work map: the rate limiter session is waiting on a Redis or in-memory decision" width="760">
 
 The work map lists every session with a one-line summary of what it is doing
-and what it waits on. The one that needs you says so; click it and you are in
-its terminal.
+and what it waits on. Click one to open its terminal.
 
 ```bash
-ttym map refresh          # summarize every session that changed
+ttym map refresh
 ```
 
 ### 02 · Jump in. Answer right where it stopped.
 
 <img src="docs/assets/section-s2.jpg" alt="Answering Claude Code's question card inside the browser pane" width="760">
 
-The pane in the browser is the terminal itself, not a dashboard: pick an
-option on the agent's question card, type your answer, and it goes back to
-work. The same session opens in the CLI.
+The pane in the browser is the terminal itself. Answer the agent there, or
+attach to the same session from the CLI.
 
 ```bash
 ttym attach auth-service/limiter
@@ -140,9 +120,8 @@ ttym attach auth-service/limiter
 
 <img src="docs/assets/section-s3.jpg" alt="The same session on a laptop and a phone" width="760">
 
-One process holds the terminal; the laptop and the phone are both views of it.
-On your tailnet, devices signed in to your Tailscale account open ttym with no
-extra login ([other ways in](docs/remote-access.md)).
+The laptop and the phone show the same terminal. On your tailnet, a device
+signed in to your Tailscale account opens it without another login.
 
 ```bash
 ttym remote tailscale
@@ -152,8 +131,7 @@ ttym remote tailscale
 
 <img src="docs/assets/section-s4.jpg" alt="Claude Code runs ttym open PLAN.md" width="760">
 
-Markdown, HTML, CSV, images and URLs open as tabs on the pane that produced
-them. Select a path in the terminal and open it the same way.
+Markdown, HTML, CSV, images and URLs open as tabs on the pane that made them.
 
 ```bash
 ttym open PLAN.md rollout.html
@@ -163,191 +141,90 @@ ttym open PLAN.md rollout.html
 
 <img src="docs/assets/section-s5.jpg" alt="A sleeping agent waking: input, claude --resume, back" width="760">
 
-An agent left alone for 30 minutes is stopped and its RAM returned (374 MB in
-the film). The screen stays; the next keystroke runs `claude --resume` with the
-same session id — back in 2.5 s in the film.
+After 30 idle minutes the agent process is stopped to free its memory, and the
+screen stays. The next keystroke resumes the same conversation.
 
 ```bash
-ttym agent sleep :limiter # or let the 30-minute timer do it
+ttym agent sleep :limiter
 ```
 
 ### 06 · Rebooted? One command brings it back.
 
 <img src="docs/assets/section-s6.jpg" alt="After a reboot: the restored screen, then ttym agent resume" width="760">
 
-After a shutdown every pane comes back with its last screen and scrollback over
-a fresh shell. The agent is one command away, in the same conversation.
+After a reboot every pane comes back with its last screen. The agent resumes
+in the same conversation with one command.
 
 ```bash
 ttym agent resume
 ```
 
-### Also
-
-- **Sessions outlive everything.** Close a client, restart or upgrade the
-  server: the processes and scrollback stay.
-- **Drive agents like functions.** Group terminals into a `workspace` and script
-  them with `send` / `await`.
-
 ## Agents in the loop
 
-Install the hook once and agent sessions become callable functions:
-
 ```bash
-ttym agent install claude     # SessionStart/Stop hooks into ~/.claude/settings.json
 ttym workspace add --current --name helper --role agent --cmd claude
-ttym await :helper --json -- "이 스택트레이스 원인 뭐야?"
+ttym await :helper --json -- "Why does this stack trace happen?"
 ```
 
-`await` blocks until the agent's turn actually completes (the Stop hook is the
-signal, not screen polling) and returns **that turn's answer only** — extracted
-from the agent's structured transcript when available (`transcriptSource:
-"structured"`), from the rendered screen otherwise. Several members can be
-awaited in parallel; each completes independently. `ttym agent resume` reopens
-the linked Claude/Codex session later, `ttym agent info` shows the linkage.
+`await` sends the prompt and returns that turn's answer when the agent's turn
+ends. Several agents can be awaited at once.
+[How it knows the turn ended](https://ttym.pages.dev/internals#await).
 
 ## Shell integration
 
-One line in `~/.zshrc` (inert outside ttym panes):
+Add one line to `~/.zshrc`:
 
 ```bash
 [[ -n "$TTYM_SESSION_ID" ]] && source ~/.local/share/ttym/scripts/ttym-shell-integration.zsh
-# release install; from a checkout: <repo>/scripts/…
 ```
 
-The shell then marks command boundaries (OSC 133/633) in its own output
-stream, the server indexes them, and plain shells become scriptable:
+Then plain shells can be scripted by command:
 
 ```bash
-ttym commands :build          # the ledger: ✓/✗ + exit code, duration, command line
-ttym output :build --cmd 3    # one command's output, sliced exactly — no prompt scraping
-ttym await :build -- "make test"   # send, block on completion, get exit code + output
+ttym commands :build              # commands run, with exit codes
+ttym output :build --cmd 3        # the output of one command
+ttym await :build -- "make test"  # run, wait, get exit code + output
 ```
 
-`await` routes by evidence: a pane that has shown integration signals gets the
-command path; agent panes keep the hook path. In the web terminal the same
-marks power **⌘↑ / ⌘↓** — jump between command boundaries in the scrollback.
+In the web terminal, ⌘↑ / ⌘↓ jump between commands.
 
 ## The work map
 
-The home page has a second face (settings → main view → **map**): every
-workspace and session on one tree, each row carrying an AI-written one-liner
-of what that work is and what it waits on — the map this README's author used
-to draw by hand.
+Settings → main view → **map** shows every workspace and session as a tree,
+each with a one-line summary.
 
 ```bash
-ttym map refresh              # summarize sessions whose output moved; fresh ones cost nothing
+ttym map refresh    # summarize sessions whose output changed
 ```
 
-One rule for the model backend: set `map-base-url` in `~/.ttym/config` and the
-summarizer speaks OpenAI-compatible HTTP (any gateway, local or remote);
-leave it unset and it shells out to `claude -p` (default model `haiku`). The
-prompt is editable in settings — data blocks (screen tails, workspace lists)
-are appended automatically, and a one-off instruction line steers a single
-refresh without being saved. For a standing cadence set `map-interval = 10m`
-in settings (or the config file) — the server runs the summarizer itself,
-**off by default**: your screens leaving the machine is an explicit choice.
-Five consecutive failures suspend the timer until you re-save the interval.
-Summaries age honestly: once a session outputs past its summary, the row is
-marked stale with its age until the next refresh.
+It uses `claude -p` by default, or any OpenAI-compatible endpoint
+([config](#reference)). Periodic refresh is off by default, because it sends
+screen text to the model.
 
 ## The web terminal
 
-- **⌘F** — search the scrollback, VS Code-style, with match highlights.
-- **⌘↑ / ⌘↓** — walk command boundaries (needs shell integration).
-- **URLs are clickable**, and programs inside the session (vim, remote ssh)
-  can reach your clipboard via OSC 52.
-- **Drop a file** on a pane: native surfaces insert the real path; the browser
-  uploads the content and inserts the server-side path — Finder-style names,
-  no uuids.
-- **Fonts**: macOS keeps its native stack; every other platform gets a bundled
-  D2Coding webfont, so Korean stays fixed-width everywhere.
-- Hover a session in the list for a live preview; click for a full one — both
-  are real terminals, not screenshots.
+- **⌘F** searches the scrollback.
+- **⌘↑ / ⌘↓** jump between commands (with shell integration).
+- **URLs** are clickable; programs in the session can use your clipboard (OSC 52).
+- **Drop a file** on a pane to insert its path.
 
 ## From another device
 
-ttym listens on `127.0.0.1`. To reach it from a phone, put it on your tailnet:
-
 ```bash
-ttym remote tailscale            # tailscale serve → allow the name → login link + QR
+ttym remote tailscale
 ```
 
-Every request from off the machine needs an allow-listed host and a login
-cookie from a one-time link (`ttym remote link`). Cloudflare Tunnel + Access
-(`ttym remote cloudflare --host … --email …`), SSH forwarding and the details
-are in [docs/remote-access.md](docs/remote-access.md). Agents: start with
+Off this machine, every request needs an allowed host and a login.
+Cloudflare Tunnel, SSH and the details are in
+[docs/remote-access.md](docs/remote-access.md). Agents can start with
 `ttym remote doctor --json`.
 
 ## Architecture
 
-### Processes
-
-```
-Clients (viewers)                     Server                  PTY backend
-─────────────────                    ────────                ───────────────
-
-ttym attach        (Node TUI)       ┌──────────┐             ┌─ Holder #1 ─► zsh
-                                    │          │         UDS │
-@ttym/web          (browser)   ───► │  server  │ ──────────► ├─ Holder #2 ─► claude
-                                    │  (Node)  │  frame      │
-@ttym/desktop      (Tauri)          │          │  protocol   └─ Holder #N ─► codex
-                                    └──────────┘
-                                         ▲                   Rust · ~1MB · one per session
-ttym new/split/send/await  ────────────┘                    outlives the server
-ttym start/stop/status       HTTP only
-(CLI control-plane)
-```
-
-Key points:
-
-- **The server is the only hub.** Nothing but the server talks to holders.
-- **Three viewers.** All speak the same `HTTP + WebSocket` protocol.
-- **The CLI plays two roles.** `attach` is a viewer; everything else is the
-  control plane — and the compatibility boundary.
-- **One holder per session.** The server can die; the PTY and its ring buffer stay.
-
-### Components
-
-```
-Component        Lang         Role                                      Source
-───────────────────────────────────────────────────────────────────────────────────────
-@ttym/cli        TS → Node    server lifecycle · attach TUI ·           packages/cli
-                              new/split/send/await/map control plane
-@ttym/server     TS → Node    HTTP + WS hub, headless xterm mirror,     packages/server
-                              OutputRing (seq-based delta), workspace
-                              store, command index, interactions
-holder           Rust         PTY fd + ring buffer. The persistence.    holder/src
-@ttym/vt         TS           framework-free client core: the WS mux,   packages/vt
-                              local echo, ANSI utilities, panel state
-@ttym/protocol   TS           WS wire format — one impl for both ends   packages/protocol
-@ttym/api        TS           HTTP client shared by all three apps      packages/api
-@ttym/ui         React/TS     xterm.js terminal host + layout views     packages/ui
-@ttym/web        React/Vite   browser app                               packages/web
-@ttym/desktop    Tauri        desktop shell around the served web app   packages/desktop
-@ttym/shared     TS           domain rules, e.g. the layout tree        packages/shared
-```
-
-### Data flow (one session)
-
-```
-input (keystroke):
-  viewer → CMD.DATA(sessionId, bytes) → WS → server → unix socket → holder → PTY
-
-output (PTY byte):
-  PTY → holder ring → unix socket → server.OutputRing.append(seq)
-                                      ├─► CMD.DATA(seq) to every attached viewer
-                                      └─► headless xterm mirror (feeds SNAPSHOT on ATTACH)
-  viewer → renders → replies CMD.ACK(seq)
-
-fresh attach:
-  viewer → CMD.ATTACH{ fromSeq, cols, rows, mode }
-  server → CMD.SNAPSHOT (full screen) → then CMD.DATA deltas only
-
-server restart:
-  server → seeds xterm from the per-session checkpoint (rendered ANSI + offset)
-         → DUMP_SINCE(offset) to the holder → REPLAY of the delta only
-```
+One server holds every session's screen; each terminal's PTY lives in its own
+small Rust process, so a server restart or upgrade does not close it. How the
+pieces fit, with diagrams: [ttym.pages.dev/internals](https://ttym.pages.dev/internals).
+Package layers and operations: [docs/architecture.md](docs/architecture.md).
 
 ## Reference
 
