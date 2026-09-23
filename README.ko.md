@@ -198,7 +198,8 @@ ttym await :helper --json -- "이 스택트레이스 원인 뭐야?"
 `~/.zshrc` 에 한 줄 (ttym pane 밖에서는 아무 일도 안 한다):
 
 ```bash
-[[ -n "$TTYM_SESSION_ID" ]] && source /path/to/ttym/scripts/ttym-shell-integration.zsh
+[[ -n "$TTYM_SESSION_ID" ]] && source ~/.local/share/ttym/scripts/ttym-shell-integration.zsh
+# Release 설치 기준. 소스 체크아웃이면 <repo>/scripts/…
 ```
 
 그러면 셸이 자기 출력 스트림에 명령 경계를 표시하고(OSC 133/633), 서버가 그걸 인덱싱해서, 평범한 셸이 스크립트 가능해진다:

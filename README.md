@@ -210,7 +210,8 @@ the linked Claude/Codex session later, `ttym agent info` shows the linkage.
 One line in `~/.zshrc` (inert outside ttym panes):
 
 ```bash
-[[ -n "$TTYM_SESSION_ID" ]] && source /path/to/ttym/scripts/ttym-shell-integration.zsh
+[[ -n "$TTYM_SESSION_ID" ]] && source ~/.local/share/ttym/scripts/ttym-shell-integration.zsh
+# release install; from a checkout: <repo>/scripts/…
 ```
 
 The shell then marks command boundaries (OSC 133/633) in its own output

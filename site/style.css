@@ -114,12 +114,6 @@ pre .c { color: var(--dim); }
   .chapter:nth-of-type(even) .text { order: 0; }
   .steps li { grid-template-columns: 30px 1fr; }
   .steps li > span { grid-column: 2; }
-  /* A fixed bar that slides in mid-scroll fights touch scrolling (it covers the top of the
-     page while the finger is still moving). On phones the nav is part of the page instead:
-     it sits above the hero and scrolls away with it. */
-  .nav { position: absolute; transform: none; transition: none; background: none; border-bottom: 0;
-    backdrop-filter: none; -webkit-backdrop-filter: none; }
-  .nav-logo { visibility: hidden; }                /* the hero's logo is right below */
   .nav nav a:not(.gh) { display: none; }
   /* The one-liner stays one line (a URL broken mid-word reads badly) and scrolls sideways;
      the copy button is how it gets used on a phone anyway. */
@@ -132,6 +126,15 @@ pre .c { color: var(--dim); }
   pre .c { display: none; }                        /* the command fits; its comment is in the text above */
   .clip video { cursor: zoom-in; }
   .meta { flex-direction: column; align-items: center; }
+}
+
+/* A fixed bar that slides in mid-scroll fights touch scrolling (it covers the top of the
+   page while the finger is still moving). On touch screens, and phones held sideways wider
+   than 860px, the nav is part of the page: it sits above the hero and scrolls away with it. */
+@media (max-width: 860px), (pointer: coarse) {
+  .nav { position: absolute; transform: none; transition: none; background: none; border-bottom: 0;
+    backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .nav-logo { visibility: hidden; }                /* the hero's logo is right below */
 }
 
 @media (prefers-reduced-motion: reduce) {
