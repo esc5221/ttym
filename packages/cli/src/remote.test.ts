@@ -8,5 +8,6 @@ describe('remote base URLs', () => {
     expect(baseUrlFor('192.168.0.10', 7690)).toBe('http://192.168.0.10:7690');
     expect(baseUrlFor('fe80::1', 7690)).toBe('http://[fe80::1]:7690');
     expect(baseUrlFor('studio.local', 7690)).toBe('http://studio.local:7690');
+    expect(baseUrlFor('ttym.lullu.lan', 7690)).toBe('http://ttym.lullu.lan');
   });
 });

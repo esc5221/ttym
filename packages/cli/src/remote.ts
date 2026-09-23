@@ -97,10 +97,16 @@ async function disallowHost(port: number, host: string | undefined, json: boolea
   out(json, r, `${r?.changed ? 'removed' : 'not in the list'}: ${r?.host ?? host}`);
 }
 
-/** https for names a proxy fronts (tunnel, tailnet); plain http:port for a LAN address. */
+/**
+ * Where a browser reaches an allowed host:
+ *   IP or *.local (mDNS)            → http://host:<port>  — the server itself, LAN bind
+ *   *.lan · *.internal · *.home.arpa → http://host          — a local reverse proxy on :80
+ *   anything else                    → https://host         — tunnel or tailscale serve
+ */
 export function baseUrlFor(host: string, port: number): string {
-  const lan = isIP(host) !== 0 || host.endsWith('.local');
-  return lan ? `http://${isIP(host) === 6 ? `[${host}]` : host}:${port}` : `https://${host}`;
+  if (isIP(host) !== 0 || host.endsWith('.local')) return `http://${isIP(host) === 6 ? `[${host}]` : host}:${port}`;
+  if (/\.(lan|internal|home\.arpa)$/.test(host)) return `http://${host}`;
+  return `https://${host}`;
 }
 
 export async function mintLink(port: number, host: string) {
