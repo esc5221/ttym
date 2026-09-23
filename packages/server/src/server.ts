@@ -18,6 +18,8 @@ import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
 import { AgentSleeper, psProcesses, readAgentStatus, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
+import { RemoteStore } from './remote/store.js';
+import { gate, gateUpgrade, type RemoteContext } from './remote/http.js';
 
 let mapRefreshInFlight = false;
 import { readFileSync as readFileSyncFs, writeFileSync as writeFileSyncFs, unlinkSync, chmodSync, mkdirSync } from 'node:fs';
@@ -246,10 +248,9 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
   // here; that one origin is refused before anything else.
   if (req.headers.origin === 'null') { res.writeHead(403); res.end('forbidden origin'); return true; }
 
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // No CORS headers: the web UI is served from this origin (Vite dev proxies
+  // it), so no other site gets to read these responses. remote/http.ts `gate`
+  // already refused cross-site writes before this point.
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return true; }
 
   const json = (status: number, body: unknown) => {
@@ -1386,10 +1387,18 @@ export async function createServer(port: number): Promise<TtymServer> {
   // Inject TTYM_BUS_URL into SessionManager for holder env
   manager.setBusUrl(`http://127.0.0.1:${port}/api`);
 
+  // 기본은 loopback만 — 로컬 호출(CLI·훅·localhost UI)은 무인증이라 열린 인터페이스가 곧 원격 셸이다.
+  // LAN 노출은 TTYM_BIND=0.0.0.0 (또는 특정 IP)로 부팅 시점에만 선택하고, 그 경로로 오는 요청은
+  // remote/http.ts의 gate가 허용 호스트 + 로그인 쿠키를 요구한다.
+  // config가 아닌 env인 이유: PATCH /api/config가 로컬에서 열려 있어, 파일에 두면 원격 스위치가 된다.
+  const bindHost = process.env.TTYM_BIND || '127.0.0.1';
+  const remote: RemoteContext = { store: new RemoteStore(resolve(getHomeDir(), 'remote.json')), bindHost, port, log };
+
   // Idle agents sleep; the first key wakes them. See agent-sleep.ts.
   let sleeper: AgentSleeper | null = null;
 
   const httpServer = createHttpServer((req, res) => {
+    if (gate(req, res, remote)) return;
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
     // /view/<cap>/… before the SPA catch-all, which would otherwise answer with index.html.
     if (handleViewContent(req, res, (req.url || '/').split('?')[0]!, { store: viewerStore })) return;
@@ -1398,7 +1407,13 @@ export async function createServer(port: number): Promise<TtymServer> {
     res.writeHead(404);
     res.end('not found');
   });
-  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  const wss = new WebSocketServer({
+    server: httpServer, path: '/ws',
+    verifyClient: (info, done) => {
+      const refused = gateUpgrade(info.req, remote);
+      if (refused) done(false, refused[0], refused[1]); else done(true);
+    },
+  });
 
   // Keepalive. A viewer whose tab is hidden sends PAUSE_VIEW, so its socket
   // carries zero bytes — and a proxy in front of us (Cloudflare tunnel, measured)
@@ -2069,14 +2084,10 @@ export async function createServer(port: number): Promise<TtymServer> {
   httpServer.headersTimeout = 3000;
   httpServer.requestTimeout = 10000;
 
-  // 기본은 loopback만 — 이 API는 무인증이라 열린 인터페이스가 곧 원격 셸이다.
-  // LAN 노출은 TTYM_BIND=0.0.0.0 (또는 특정 IP)로 부팅 시점에만 선택한다.
-  // config가 아닌 env인 이유: PATCH /api/config가 무인증이라, 파일에 두면
-  // 프록시 너머에서 바인드를 여는 원격 스위치가 된다.
-  const bindHost = process.env.TTYM_BIND || '127.0.0.1';
   await new Promise<void>((resolve) => httpServer.listen(port, bindHost, resolve));
   // Hooks address the server that owns their session — not a hardcoded 7690.
   const boundPort = (httpServer.address() as { port: number } | null)?.port ?? port;
+  remote.port = boundPort;
   manager.setExtraSessionEnv({ TTYM_PORT: String(boundPort) });
 
   sleeper = new AgentSleeper({
