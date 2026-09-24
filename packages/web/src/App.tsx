@@ -144,7 +144,7 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
   agentStates: Record<number, AgentState>;
   activeId: string | null;
   uiStyle: UiStyle;
-  /** 폰: 버튼은 이름 앞 세 글자와 ▾만. 탭 줄에 자리를 넘긴다 — 전체 이름은 패널에 있다. */
+  /** 폰: 버튼은 이름 앞 네 글자(넘치면 …)와 ▾만. 탭 줄에 자리를 넘긴다 — 전체 이름은 패널에 있다. */
   compact?: boolean;
   open: boolean;
   onToggle: (open: boolean) => void;
@@ -368,7 +368,7 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
         <>
           {/* 점은 없다 — 탭마다 이미 점이 있고, 여기 모인 점은 어느 탭 얘긴지 말해주지 못한다. */}
           {compact ? (
-            <span>{Array.from(current).slice(0, 3).join('')}</span>
+            <span>{Array.from(current).length > 4 ? `${Array.from(current).slice(0, 4).join('')}…` : current}</span>
           ) : (
             <>
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{current}</span>
