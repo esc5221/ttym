@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as api from '@ttym/api';
-import { Terminal, LayoutView, getHost, type TerminalMux } from '@ttym/ui';
+import { LayoutView, getHost, type TerminalMux } from '@ttym/ui';
 import { MutationBarrier, formatCwd, layoutToSessionIds, memberNameBySession, removePane, resizeSplit, swapPanes } from '@ttym/shared';
-import { actionBtnStyle, ZEN_DEFAULT_COLS, AGENT_COLORS, API_BASE, useSurface, IS_NATIVE, UI_STYLES, apiAddMember, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, miniLinkBtnStyle, navigate, quotePathForShell, stripBtnStyle, uploadDroppedFiles, type AgentState, type UiStyle, type Workspace } from '../app-shared.js';
+import { actionBtnStyle, ZEN_DEFAULT_COLS, AGENT_COLORS, API_BASE, useSurface, IS_NATIVE, UI_STYLES, apiAddMember, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, miniLinkBtnStyle, navigate, quotePathForShell, stripBtnStyle, type AgentState, type UiStyle, type Workspace } from '../app-shared.js';
 import { KeyBar } from '../KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
 import { useViewerState } from '../viewer/useViewerState.js';
@@ -11,12 +11,14 @@ import { ViewerPanel } from '../viewer/ViewerPanel.js';
 import { ViewerOverlay } from '../viewer/ViewerOverlay.js';
 import { viewSrc } from '../viewer/content.js';
 import { PaneTabs } from '../viewer/PaneTabs.js';
-import { SelectionOpen, type SelectionTarget } from '../viewer/SelectionOpen.js';
+import type { SelectionTarget } from '../viewer/SelectionOpen.js';
 import { parsePathCandidate } from '../viewer/paths.js';
 import { type ViewerFocus } from '../route.js';
 import { StripMenu, attachDropdownTitleStyle, attachDropdownItemStyle, attachDropdownEmptyStyle } from '../StripMenu.js';
-import { ageText, sleepTitle } from './sleep-text.js';
+import { sleepTitle } from './sleep-text.js';
 import { ZenView } from './ZenView.js';
+import { SessionBody } from './SessionBody.js';
+import { WorkspaceSessionsContext, paneView, type WorkspaceSessions } from './session-context.js';
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
@@ -471,6 +473,26 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
     if (parent) parent.style.setProperty('--pane-actions-w', `${Math.ceil(el.getBoundingClientRect().width) + 16}px`);
   }, []);
 
+  const markDead = useCallback((sid: number) => setDeadSessions((prev) => new Set(prev).add(sid)), []);
+  const focusSid = useCallback((sid: number) => {
+    setFocusedSid(sid);
+    setSelOpen(null);
+    setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; });
+  }, []);
+  const ringBell = useCallback((sid: number) => {
+    if (touch) navigator.vibrate?.(60);
+    setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid)));
+  }, [touch, focusedSid]);
+  const reloadViewer = useCallback((sid: number) => setViewerReload((prev) => ({ ...prev, [sid]: (prev[sid] ?? 0) + 1 })), []);
+
+  const sessions = useMemo<WorkspaceSessions>(() => ({
+    mux, localEchoEnabled, touch, agentStates, lastAgentIds, deadSessions, markDead, focusedSid, focusSid, bells, ringBell,
+    viewer, open, openFull, viewerReload, reloadViewer, selOpen, setSelOpen, offerSelection, search, setSearch,
+    fileDropSid, setFileDropSid, insertPathsIntoPane, sleepAgent, wakeAgent, restoreAgent, sleepNote, restartAt, detachMember,
+  }), [mux, localEchoEnabled, touch, agentStates, lastAgentIds, deadSessions, markDead, focusedSid, focusSid, bells, ringBell,
+    viewer, open, openFull, viewerReload, reloadViewer, selOpen, offerSelection, search,
+    fileDropSid, insertPathsIntoPane, sleepAgent, wakeAgent, restoreAgent, sleepNote, restartAt, detachMember]);
+
   const renderPane = useCallback((sid: number, _path: number[]) => {
     if (sid <= 0) {
       return (
@@ -495,34 +517,12 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
     const asleep = sleep?.state === 'sleeping' || sleep?.state === 'waking';
     const canRestore = !agent?.active && !asleep && (lastAgentIds[sid]?.claude || lastAgentIds[sid]?.codex);
     // 헤더의 탭. 왼쪽 덩어리(이름·#id·cwd)가 터미널 탭이고, 그 오른쪽에 뷰어 탭이 선다.
-    // full로 나가 있으면 pane 안에서는 안 그린다 — 같은 탭을 두 번 마운트하지 않는다.
-    const viewerState = open?.sid === sid ? null : (viewer.states[sid] ?? null);
-    const activeVid = viewer.active[sid];
-    const paneTab = viewerState && activeVid && viewerState.items.some((i) => i.id === activeVid) ? activeVid : 'term';
-    const paneItem = paneTab === 'term' ? null : viewerState!.items.find((i) => i.id === paneTab)!;
+    const { state: viewerState, tab: paneTab, item: paneItem } = paneView(sessions, sid);
     return (
       <div
         key={sid}
         data-pane-sid={sid}
-        onMouseDown={() => { setFocusedSid(sid); setSelOpen(null); setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; }); }}
-        onMouseUp={(e) => { if (paneTab === 'term' && e.button === 0) offerSelection(sid, e); }}
-        onDragOver={(e) => {
-          // 파일 드래그만 받는다 — 헤더의 pane 교환 드래그는 Files 타입이 없다.
-          if (!e.dataTransfer.types.includes('Files')) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'copy';
-          setFileDropSid(sid);
-        }}
-        onDragLeave={() => setFileDropSid((cur) => (cur === sid ? null : cur))}
-        onDrop={(e) => {
-          if (!e.dataTransfer.types.includes('Files')) return;
-          e.preventDefault();
-          setFileDropSid(null);
-          const files = Array.from(e.dataTransfer.files);
-          void uploadDroppedFiles(files)
-            .then((paths) => insertPathsIntoPane(sid, paths))
-            .catch(() => {});
-        }}
+        onMouseDown={() => focusSid(sid)}
         style={{
           display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, background: 'var(--bg0)',
           border: fileDropSid === sid
@@ -533,52 +533,6 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
           position: 'relative',
         }}
       >
-        {search?.sid === sid ? (
-          <div style={{
-            position: 'absolute', top: 34, right: 10, zIndex: 3,
-            display: 'flex', alignItems: 'center', gap: 8,
-            background: 'var(--bg1)', border: '1px solid var(--line)', borderRadius: 6,
-            padding: '4px 8px', fontFamily: 'var(--mono)', fontSize: 11,
-          }}>
-            <input
-              autoFocus
-              value={search.query}
-              placeholder="find"
-              onChange={(e) => {
-                const query = e.target.value;
-                setSearch((cur) => (cur ? { ...cur, query } : cur));
-                getHost(sid)?.findNext(query, true);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') { e.preventDefault(); const h = getHost(sid); if (e.shiftKey) h?.findPrevious(search.query); else h?.findNext(search.query); }
-                else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  const h = getHost(sid);
-                  h?.clearSearch(); h?.focusTerminal();
-                  setSearch(null);
-                }
-              }}
-              style={{ background: 'none', border: 'none', outline: 'none', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 11, width: 150 }}
-            />
-            <span style={{ color: 'var(--text-dim)', minWidth: 34, textAlign: 'right' }}>
-              {search.query ? `${search.count === 0 ? 0 : search.index + 1}/${search.count}` : ''}
-            </span>
-            <span onClick={() => { const h = getHost(sid); h?.findPrevious(search.query); }} style={{ cursor: 'pointer', color: 'var(--text-soft)' }}>↑</span>
-            <span onClick={() => { const h = getHost(sid); h?.findNext(search.query); }} style={{ cursor: 'pointer', color: 'var(--text-soft)' }}>↓</span>
-            <span onClick={() => { const h = getHost(sid); h?.clearSearch(); h?.focusTerminal(); setSearch(null); }} style={{ cursor: 'pointer', color: 'var(--text-dim)' }}>✕</span>
-          </div>
-        ) : null}
-        {selOpen?.sid === sid ? (
-          <SelectionOpen
-            target={selOpen}
-            onDismiss={() => setSelOpen((cur) => (cur?.sid === sid ? null : cur))}
-            onOpen={async (candidate) => {
-              const results = await viewer.open(sid, [candidate.target], undefined, candidate.line !== undefined ? { line: candidate.line, col: candidate.col } : undefined);
-              const r = results[0];
-              return r && !r.ok ? r.error.replace(/^not found: .*$/, 'not found') : null;
-            }}
-          />
-        ) : null}
         <div
           className="reveal-parent"
           style={{
@@ -692,7 +646,7 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void copySessionUrl(sid); }} style={miniLinkBtnStyle}>copy</button>
             {paneItem ? (
               <>
-                <button onClick={(e) => { e.stopPropagation(); setViewerReload((prev) => ({ ...prev, [sid]: (prev[sid] ?? 0) + 1 })); }} style={miniLinkBtnStyle} title="reload">⟳</button>
+                <button onClick={(e) => { e.stopPropagation(); reloadViewer(sid); }} style={miniLinkBtnStyle} title="reload">⟳</button>
                 <a href={viewSrc(paneItem)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={miniLinkBtnStyle} title="open in a browser tab">↗</a>
                 <button onClick={(e) => { e.stopPropagation(); openFull(sid, paneItem.id); }} style={miniLinkBtnStyle} title="fill the workspace">full</button>
               </>
@@ -700,73 +654,20 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
             <button className="reveal" onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
           </span>
         </div>
-        <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        {/* isolation: xterm 6의 스크롤바는 보일 때 z-index 11이 된다(vscode scrollable-element).
-            터미널을 자기 스태킹 컨텍스트에 가두지 않으면, 뷰어가 앞에 있어도 출력이 흐를 때마다
-            터미널 스크롤바가 뷰어(z 10) 위로 떠오른다 — elementsFromPoint로 실측. */}
-        <div className={asleep ? 'pane-asleep' : undefined} style={{ flex: 1, minHeight: 0, padding: U.termPad, isolation: 'isolate', ...(touch ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}>
-          {!dead ? (
-            <Terminal
-              mux={mux}
-              attachId={sid}
-              fontSize={touch ? 14 : fontSize}
-              fontFamily={fontFamily || undefined}
-              geometry={touch ? (fitSids.has(sid) ? 'borrow' : 'follow') : 'fit'}
-              enableWebgl={!touch}
-              localEcho={localEchoEnabled}
-              onExit={() => setDeadSessions((prev) => new Set(prev).add(sid))}
-              onBell={() => { if (touch) navigator.vibrate?.(60); setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid))); }}
-            />
-          ) : (
-            <div style={emptyPaneStyle}>
-              <span style={{ color: 'var(--err)', fontSize: 11 }}>session ended</span>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => void restartAt(sid)} style={actionBtnStyle}>restart</button>
-                <button onClick={() => void detachMember(sid)} style={{ ...actionBtnStyle, background: 'var(--line)', color: 'var(--text-soft)' }}>close</button>
-              </div>
-            </div>
-          )}
-        </div>
-        {/* Sleep pill: the one place the pane says "not live". A click wakes; so does any key,
-            which is why it must not steal focus from the terminal (mousedown is stopped, not the click). */}
-        {sleep || sleepNote?.sid === sid ? (
-          <div
-            className={`agent-sleep-pill ${sleep?.state ?? 'note'}`}
-            onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
-            onClick={(e) => { e.stopPropagation(); if (sleep?.state === 'sleeping') void wakeAgent(sid); }}
-            title={sleep ? sleepTitle(sleep) : undefined}
-          >
-            {sleepNote?.sid === sid && !sleep ? <span>{sleepNote.text}</span>
-              : sleep!.state === 'sleeping' ? <><span className="mark">☾</span><span>sleeping · {ageText(sleep!.since)} · type or click to wake</span></>
-              : sleep!.state === 'waking' ? <><span className="mark spin">◌</span><span>waking…{sleep!.queued ? ` ${sleep!.queued} B queued` : ''}</span></>
-              : <><span className="mark">✕</span><span>resume failed: {sleep!.error ?? 'unknown'}</span><button onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle}>restore</button></>}
-          </div>
-        ) : null}
-        {/* 뷰어 탭은 터미널 위에 덮는다. 터미널을 떼거나 숨기면 PTY 크기가 흔들리고 돌아올 때
-            다시 fit해야 한다 — 그대로 깔아두면 탭을 되돌리는 순간 그 화면이다. */}
-        {/* z-index: xterm의 레이어(link·decoration)가 자기 z-index를 갖고 있어, 없으면
-            오버레이가 그 밑으로 들어가 휠·클릭을 터미널이 먹는다(elementFromPoint로 실측). */}
-        {paneItem && viewerState ? (
-          <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', background: 'var(--bg0)' }}>
-            <ViewerPanel
-              sid={sid}
-              state={viewerState}
-              activeId={paneItem.id}
-              chrome="none"
-              reloadKey={viewerReload[sid] ?? 0}
-              jump={viewer.jump[sid]}
-              onSelect={(vid) => viewer.setActive(sid, vid)}
-              onClose={(vid) => void viewer.close(sid, vid)}
-              onCloseAll={() => void viewer.closeAll(sid)}
-              onOpen={(targets) => void viewer.open(sid, targets)}
-              mode="pane"
-            />
-          </div>
-        ) : null}
-        </div>
+        <SessionBody
+          sid={sid}
+          viewerOverlay
+          terminal={{
+            fontSize: touch ? 14 : fontSize,
+            fontFamily: fontFamily || undefined,
+            geometry: touch ? (fitSids.has(sid) ? 'borrow' : 'follow') : 'fit',
+            enableWebgl: !touch,
+          }}
+          wrapStyle={{ padding: U.termPad, ...(touch ? { overflow: 'auto', WebkitOverflowScrolling: 'touch' } : null) }}
+        />
       </div>
     );
-  }, [deadSessions, focusedSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, search, bells, fitSids, mux, localEchoEnabled, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restartAt, restoreAgent, insertPathsIntoPane, viewer, open, viewerReload, openFull, selOpen, offerSelection, sleepAgent, wakeAgent, sleepNote]);
+  }, [sessions, deadSessions, focusedSid, focusSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, bells, fitSids, touch, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restoreAgent, viewer, openFull, sleepAgent, reloadViewer, openZen, actionsRef, U]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
@@ -806,18 +707,14 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
     // 먹는데, 터미널 추가는 카드 목록 아래에 있고 분할 프리셋은 폰에서 쓸 데가
     // 없다. attach는 데스크톱에서 하면 된다.
     return (
-      <>
+      <WorkspaceSessionsContext.Provider value={sessions}>
         {ws ? (
           <PhoneWorkspace
-            mux={mux}
             sessionIds={sessionIds}
             memberNames={memberNames}
             sessionCwds={sessionCwds}
-            agentStates={agentStates}
-            deadSessions={deadSessions}
-            bells={bells}
-            focusedSid={focusedSid}
-            pane={pane ?? zen}
+            // --full은 폰에서 따로 없다 — 그 pane을 열고 그 탭을 앞에 세운다.
+            pane={pane ?? zen ?? open?.sid ?? null}
             fontSize={fontSize}
             // 위치는 URL이 갖는다. 목록에서 열 때만 히스토리에 쌓고, pane 사이를
             // 넘길 때와 목록으로 나올 때는 갈아끼운다 — 안 그러면 여섯 번 넘긴 뒤
@@ -826,26 +723,17 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
               sid === null ? { page: 'workspace', id: workspaceId } : { page: 'workspace', id: workspaceId, pane: sid },
               options,
             )}
-            onFocusSid={(sid) => {
-              setFocusedSid(sid);
-              setBells((prev) => { if (!prev.has(sid)) return prev; const next = new Set(prev); next.delete(sid); return next; });
-            }}
-            localEchoEnabled={localEchoEnabled}
-            onSearch={(sid) => setSearch({ sid, query: '', index: -1, count: 0 })}
-            onExit={(sid) => setDeadSessions((prev) => new Set(prev).add(sid))}
-            onBell={(sid) => { navigator.vibrate?.(60); setBells((prev) => (focusedSid === sid ? prev : new Set(prev).add(sid))); }}
             onSplit={() => void doSplit('right')}
-            onRestart={(sid) => void restartAt(sid)}
-            onDetach={(sid) => void detachMember(sid)}
           />
         ) : (
           <div style={{ color: 'var(--text-dim)', padding: 40, fontFamily: 'var(--mono)' }}>loading…</div>
         )}
-      </>
+      </WorkspaceSessionsContext.Provider>
     );
   }
 
   return (
+    <WorkspaceSessionsContext.Provider value={sessions}>
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {actionsSlot ? createPortal(stripActions, actionsSlot) : null}
       {open !== null && fullState && sessionIds.includes(open.sid) ? (
@@ -864,17 +752,13 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
       ) : null}
       {zenSid !== null && sessionIds.includes(zenSid) ? (
         <ZenView
-          mux={mux}
           sid={zenSid}
           name={memberNames[zenSid]}
           cwd={sessionCwds[zenSid]}
           cols={ZEN_DEFAULT_COLS}
-          localEchoEnabled={localEchoEnabled}
           fontFamily={fontFamily}
           baseFontSize={fontSize}
           onExit={() => openZen(null)}
-          onBell={() => setBells((prev) => new Set(prev).add(zenSid))}
-          onSessionExit={() => { setDeadSessions((prev) => new Set(prev).add(zenSid)); openZen(null); }}
           sideOpen={zenSideOpen}
           onToggleSide={toggleZenSide}
           side={zenViewer ? (
@@ -915,5 +799,6 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
       ) : null}
 
     </div>
+    </WorkspaceSessionsContext.Provider>
   );
 }

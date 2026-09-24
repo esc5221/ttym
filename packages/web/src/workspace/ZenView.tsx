@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Terminal, type TerminalMux } from '@ttym/ui';
 import { formatCwd } from '@ttym/shared';
 import { readZenFontDelta, writeZenFontDelta, miniLinkBtnStyle } from '../app-shared.js';
+import { SessionBody } from './SessionBody.js';
 
 /** zen 읽기 모드 — 크롬을 전부 걷고 한 pane만 고정 폭으로 크게 읽는다.
  *
@@ -16,19 +16,16 @@ import { readZenFontDelta, writeZenFontDelta, miniLinkBtnStyle } from '../app-sh
  *  바가 absolute인 것이 핵심이다. 흐름에 두면 마우스를 위로 올릴 때마다 컨테이너
  *  높이가 줄고 → rows가 바뀌고 → PTY가 리플로우된다. 읽는 중에 화면이 다시
  *  그려지는 최악의 경우다. */
-export function ZenView({ mux, sid, name, cwd, cols, localEchoEnabled, fontFamily, baseFontSize, onExit, onBell, onSessionExit, side, sideOpen, onToggleSide }: {
-  mux: TerminalMux;
+export function ZenView({ sid, name, cwd, cols, fontFamily, baseFontSize, onExit, side, sideOpen, onToggleSide }: {
   sid: number;
   name?: string;
   cwd?: string;
   cols: number;
-  localEchoEnabled: boolean;
   fontFamily: string;
   /** pane의 글자 크기. zen은 여기에 기억된 차이만 더한다 — 기본은 같은 크기. */
   baseFontSize: number;
+  /** ⌘. · exit 버튼 · 세션이 끝났을 때. */
   onExit: () => void;
-  onBell: () => void;
-  onSessionExit: () => void;
   /** 이 세션의 뷰어. 있으면 바에 토글이 생기고, 열면 터미널 오른쪽에 나란히 선다. */
   side?: React.ReactNode;
   sideOpen?: boolean;
@@ -94,20 +91,23 @@ export function ZenView({ mux, sid, name, cwd, cols, localEchoEnabled, fontFamil
       </div>
       <div style={split ? { ...zenStageStyle, justifyContent: 'stretch', padding: '6px 0 0' } : zenStageStyle}>
         <div style={split ? { flex: `0 0 ${sideRatio * 100}%`, minWidth: 0, display: 'flex', overflow: 'hidden', padding: '0 6px' } : { display: 'contents' }}>
-          <Terminal
-            mux={mux}
-            attachId={sid}
-            fontSize={fontSize}
-            fontFamily={fontFamily}
-            localEcho={localEchoEnabled}
-            geometry="borrow"
-            // 나란히 볼 때는 고정 cols 대신 왼쪽 영역에 맞춘다 — splitter를 끌면 PTY도 따라온다.
-            // borrow는 그대로라 zen을 나가면 서버가 이전 기하를 되돌린다.
-            fixedCols={split ? undefined : cols}
-            // 100% 폭이면 wrapper(max-content)가 그 안 왼쪽에 붙어 가운데 정렬이 안 먹는다.
-            style={split ? { width: '100%', height: '100%' } : { width: 'max-content', height: '100%' }}
-            onExit={onSessionExit}
-            onBell={onBell}
+          {/* 뷰어는 옆에 따로 선다(side) — 본문에 덮지 않는다. 알약·검색·경로 open은 grid와 같다. */}
+          <SessionBody
+            sid={sid}
+            viewerOverlay={false}
+            onExit={onExit}
+            terminal={{
+              fontSize,
+              fontFamily,
+              geometry: 'borrow',
+              // 나란히 볼 때는 고정 cols 대신 왼쪽 영역에 맞춘다 — splitter를 끌면 PTY도 따라온다.
+              // borrow는 그대로라 zen을 나가면 서버가 이전 기하를 되돌린다.
+              fixedCols: split ? undefined : cols,
+              enableWebgl: true,
+              // 100% 폭이면 wrapper(max-content)가 그 안 왼쪽에 붙어 가운데 정렬이 안 먹는다.
+              style: split ? { width: '100%', height: '100%' } : { width: 'max-content', height: '100%' },
+            }}
+            wrapStyle={split ? { display: 'flex' } : { display: 'flex', justifyContent: 'center' }}
           />
         </div>
         {split ? (

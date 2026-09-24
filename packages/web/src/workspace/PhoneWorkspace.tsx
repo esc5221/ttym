@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { TerminalMux, Terminal, getHost } from '@ttym/ui';
+import { Terminal, getHost } from '@ttym/ui';
 import { formatCwd } from '@ttym/shared';
-import { AGENT_COLORS, AgentState, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, readPhoneFontSize, stripBtnStyle, writePhoneFontSize } from '../app-shared.js';
+import { AGENT_COLORS, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, readPhoneFontSize, stripBtnStyle, writePhoneFontSize } from '../app-shared.js';
 import { KeyBar } from '../KeyBar.js';
 import { useSwipe } from '../useSwipe.js';
 import { usePinchZoom } from '../usePinchZoom.js';
+import { PaneTabs } from '../viewer/PaneTabs.js';
+import { SessionBody } from './SessionBody.js';
+import { paneView, useWorkspaceSessions } from './session-context.js';
 
 /**
  * 폰의 workspace 화면. 두 모드로 나뉜다.
@@ -20,34 +23,23 @@ import { usePinchZoom } from '../usePinchZoom.js';
  */
 
 export interface PhoneWorkspaceProps {
-  mux: TerminalMux;
   sessionIds: number[];
   memberNames: Record<number, string>;
   sessionCwds: Record<number, string>;
-  agentStates: Record<number, AgentState>;
-  deadSessions: Set<number>;
-  bells: Set<number>;
-  focusedSid: number | null;
-  onFocusSid: (sid: number) => void;
   /** 지금 전체화면인 세션. URL(#w/<id>/p/<sid>)이 원천이다. */
   pane: number | null;
   onOpenPane: (sid: number | null, options?: { replace?: boolean }) => void;
   /** 앱 설정의 글자 크기 — 폰이 아직 핀치로 자기 값을 안 정했을 때의 출발점. */
   fontSize: number;
-  localEchoEnabled: boolean;
-  onSearch: (sid: number) => void;
-  onExit: (sid: number) => void;
-  onBell: (sid: number) => void;
   onSplit: () => void;
-  onRestart: (sid: number) => void;
-  onDetach: (sid: number) => void;
 }
 
 /** 핀치로 폰트를 키울 때 이 행수 밑으로는 못 내려간다. */
 const MIN_ROWS = 8;
 
 export function PhoneWorkspace(props: PhoneWorkspaceProps) {
-  const { sessionIds, focusedSid, pane, onOpenPane } = props;
+  const { sessionIds, pane, onOpenPane } = props;
+  const ctx = useWorkspaceSessions();
   const showing = pane !== null && sessionIds.includes(pane) ? pane : null;
 
   // 보고 있던 pane이 사라졌으면 URL도 목록으로 되돌린다. 안 그러면 주소에는
@@ -74,20 +66,18 @@ export function PhoneWorkspace(props: PhoneWorkspaceProps) {
         fontSize={fontSize}
         onFontSize={setFontSize}
         onBack={() => onOpenPane(null, { replace: true })}
-        onMove={(sid) => { props.onFocusSid(sid); onOpenPane(sid, { replace: true }); }}
+        onMove={(sid) => { ctx.focusSid(sid); onOpenPane(sid, { replace: true }); }}
       />
     );
   }
 
-  return <ListView {...props} onOpen={(sid) => { props.onFocusSid(sid); onOpenPane(sid); }} focusedSid={focusedSid} />;
+  return <ListView {...props} onOpen={(sid) => { ctx.focusSid(sid); onOpenPane(sid); }} />;
 }
 
 // ───── 카드 목록 ─────
 
-function ListView({
-  mux, sessionIds, memberNames, sessionCwds, agentStates, deadSessions, bells,
-  onOpen, onSplit, onRestart, onDetach,
-}: PhoneWorkspaceProps & { onOpen: (sid: number) => void }) {
+function ListView({ sessionIds, memberNames, sessionCwds, onOpen, onSplit }: PhoneWorkspaceProps & { onOpen: (sid: number) => void }) {
+  const { mux, agentStates, deadSessions, bells, restartAt, detachMember, viewer } = useWorkspaceSessions();
   if (sessionIds.length === 0) {
     return (
       <div style={emptyPaneStyle}>
@@ -136,6 +126,12 @@ function ListView({
               <span style={{ color: color ?? 'var(--text)', fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
                 {memberNames[sid] || `#${sid}`}
               </span>
+              {(viewer.states[sid]?.items.length ?? 0) > 0 ? (
+                // 이 pane에 `ttym open`으로 열린 파일이 있다 — 열면 탭 줄에 선다.
+                <span title="open files" style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)', flexShrink: 0 }}>
+                  ▤ {viewer.states[sid]!.items.length}
+                </span>
+              ) : null}
               {bells.has(sid) ? (
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)', boxShadow: '0 0 6px var(--warn)', flexShrink: 0 }} />
               ) : null}
@@ -152,8 +148,8 @@ function ListView({
 
             {dead ? (
               <div style={{ display: 'flex', gap: 8, padding: 12 }}>
-                <button onClick={(e) => { e.stopPropagation(); onRestart(sid); }} style={actionBtnStyle}>restart</button>
-                <button onClick={(e) => { e.stopPropagation(); onDetach(sid); }} style={{ ...actionBtnStyle, background: 'var(--line)', color: 'var(--text-soft)' }}>close</button>
+                <button onClick={(e) => { e.stopPropagation(); void restartAt(sid); }} style={actionBtnStyle}>restart</button>
+                <button onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={{ ...actionBtnStyle, background: 'var(--line)', color: 'var(--text-soft)' }}>close</button>
               </div>
             ) : (
               // 카드는 훑어보는 자리다. 입력도, GPU도 여기 쓸 이유가 없다.
@@ -188,10 +184,15 @@ function ListView({
 // ───── 전체화면 ─────
 
 function FocusView({
-  mux, sid, sessionIds, memberNames, sessionCwds, agentStates, deadSessions,
-  localEchoEnabled, onSearch, onExit, onBell, onBack, onMove, onRestart, onDetach, fontSize, onFontSize,
+  sid, sessionIds, memberNames, sessionCwds, onBack, onMove, fontSize, onFontSize,
 }: PhoneWorkspaceProps & { sid: number; onBack: () => void; onMove: (sid: number) => void; onFontSize: (next: number) => void }) {
+  const ctx = useWorkspaceSessions();
+  const { agentStates, deadSessions, viewer } = ctx;
   const bodyRef = useRef<HTMLDivElement>(null);
+  // 파일 탭이 앞에 있으면 손가락은 문서의 것이다. 제스처는 본문에 capture로 걸려 있어서
+  // 켜 두면 문서를 스크롤하는 손가락이 뒤의 터미널 scrollback을 같이 굴린다.
+  const view = paneView(ctx, sid, true);
+  const onTerminal = view.item === null;
   const at = sessionIds.indexOf(sid);
   const prev = at > 0 ? sessionIds[at - 1] : undefined;
   const next = at < sessionIds.length - 1 ? sessionIds[at + 1] : undefined;
@@ -216,6 +217,7 @@ function FocusView({
       return h.term.buffer.active.viewportY !== before;
     },
     lineHeight: fontSize * 1.08,
+    enabled: onTerminal,
   });
 
   // 핀치로 폰트. 8~28로 물리고, 키울 때는 최소 행수도 지킨다 — borrow는 폰트가
@@ -228,7 +230,7 @@ function FocusView({
       if (h > 0 && h / (stepped * 1.08) < MIN_ROWS) return;
     }
     onFontSize(stepped);
-  });
+  }, onTerminal);
 
   const dead = deadSessions.has(sid);
   const agent = agentStates[sid];
@@ -264,52 +266,51 @@ function FocusView({
         </span>
       </div>
 
+      {view.state ? (
+        // 파일 탭이 있을 때만 선다 — 데스크톱 pane 헤더의 탭 줄과 같은 물건이다.
+        <div style={{ display: 'flex', alignItems: 'center', height: 30, flexShrink: 0, borderBottom: '1px solid var(--line)', background: 'var(--bg1)' }}>
+          <span
+            className={`pane-tab pane-tab-term${onTerminal ? ' on' : ''}`}
+            onClick={() => { if (!onTerminal) viewer.setActive(sid, 'term'); }}
+            style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 10px', height: '100%', flexShrink: 0, fontSize: 11, fontFamily: 'var(--mono)' }}
+          >term</span>
+          <PaneTabs
+            items={view.state.items}
+            activeId={onTerminal ? null : view.tab}
+            onSelect={(vid) => viewer.setActive(sid, vid)}
+            onClose={(vid) => void viewer.close(sid, vid)}
+          />
+        </div>
+      ) : null}
+
       {/* 스크롤할 물건은 여기 하나도 없다. 아래 Terminal이 borrow로 이 상자에
           꼭 맞게 PTY를 빌리므로, 넘칠 것이 없어 컨테이너 스크롤이 생기지 않는다.
           세로로 훑으면 xterm scrollback 하나만 움직인다.
 
-          KeyBar(4+30+4)와 홈 인디케이터만큼은 패딩으로 비운다 — fixed라 flex
-          계산에 안 들어가고, borrow는 이 패딩을 뺀 content box를 기준으로
-          빌리므로 마지막 줄이 키바 뒤로 숨지 않는다. */}
-      <div
-        ref={bodyRef}
-        style={{
-          flex: 1, minHeight: 0, background: 'var(--bg0)', overflow: 'hidden',
-          paddingBottom: dead ? 0 : 'calc(38px + env(safe-area-inset-bottom))',
-          // none 이어야 xterm이 터치를 온전히 받는다. 루트의 pan-y를 물려받으면
-          // 브라우저가 "세로 팬은 내 몫"이라 여겨 xterm의 scrollback 스크롤이 죽는다
-          // (실측: viewportY가 baseY에서 한 칸도 안 움직였다). 여기는 스크롤할
-          // 컨테이너가 없으니 브라우저에게 넘길 것도 없다.
-          touchAction: 'none',
-        }}
-      >
-        {dead ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 12 }}>
-            <span style={{ color: 'var(--err)', fontSize: 11, fontFamily: 'var(--mono)' }}>session ended</span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => onRestart(sid)} style={actionBtnStyle}>restart</button>
-              <button onClick={() => onDetach(sid)} style={{ ...actionBtnStyle, background: 'var(--line)', color: 'var(--text-soft)' }}>close</button>
-            </div>
-          </div>
-        ) : (
+          KeyBar(4+30+4)와 홈 인디케이터만큼은 바깥 상자의 패딩으로 비운다 — fixed라
+          flex 계산에 안 들어간다. 패딩이 본문 안에 있으면 터미널은 피해 가도 본문에
+          absolute로 붙는 sleep 알약·뷰어는 키바 밑에 깔린다(실측).
+
+          touchAction none: xterm이 터치를 온전히 받게 한다. 루트의 pan-y를 물려받으면
+          브라우저가 "세로 팬은 내 몫"이라 여겨 xterm의 scrollback 스크롤이 죽는다
+          (실측: viewportY가 baseY에서 한 칸도 안 움직였다). 뷰어가 덮일 때는 그 층이
+          touchAction을 되돌린다(SessionBody). */}
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', paddingBottom: dead ? 0 : 'calc(38px + env(safe-area-inset-bottom))' }}>
+        <SessionBody
+          ref={bodyRef}
+          sid={sid}
+          viewerOverlay
+          showFullInPlace
+          style={{ background: 'var(--bg0)', overflow: 'hidden', touchAction: 'none' }}
           // borrow: 폰 크기로 PTY를 빌려 쓰고, 목록으로 나가면 서버가 이전 기하를
           // 되돌린다. follow로 두면 터미널이 서버 기하 그대로(실측 909px) 그려져
           // 화면(341px)을 넘치고, 그 컨테이너 스크롤이 xterm scrollback과 겹쳐
           // 손가락 하나에 스크롤이 두 번 걸린다. 빌려 쓰면 넘칠 것이 없다.
-          <Terminal
-            mux={mux}
-            attachId={sid}
-            fontSize={fontSize}
-            geometry="borrow"
-            enableWebgl={false}
-            localEcho={localEchoEnabled}
-            onExit={() => onExit(sid)}
-            onBell={() => onBell(sid)}
-          />
-        )}
+          terminal={{ fontSize, geometry: 'borrow', enableWebgl: false }}
+        />
       </div>
 
-      {!dead ? <KeyBar sid={sid} onSearch={() => onSearch(sid)} /> : null}
+      {!dead ? <KeyBar sid={sid} onSearch={() => ctx.setSearch({ sid, query: '', index: -1, count: 0 })} /> : null}
     </div>
   );
 }
