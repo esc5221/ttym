@@ -138,12 +138,14 @@ function streamDropAt(x: number, y: number): string | null {
   return row?.dataset.streamRow ?? null;
 }
 
-function StreamMenu({ groups, current, agentStates, activeId, uiStyle, open, onToggle, onPick, pendingNew, onCreateStream, onRenameStream, onRemoveStream, onReorderStreams, onMoveWorkspace, onNewWorkspaceIn, highlight }: {
+function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact = false, open, onToggle, onPick, pendingNew, onCreateStream, onRenameStream, onRemoveStream, onReorderStreams, onMoveWorkspace, onNewWorkspaceIn, highlight }: {
   groups: StreamGroup[];
   current: string;
   agentStates: Record<number, AgentState>;
   activeId: string | null;
   uiStyle: UiStyle;
+  /** 폰: 버튼은 이름 앞 세 글자와 ▾만. 탭 줄에 자리를 넘긴다 — 전체 이름은 패널에 있다. */
+  compact?: boolean;
   open: boolean;
   onToggle: (open: boolean) => void;
   onPick: (ws: Workspace) => void;
@@ -158,8 +160,6 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, open, onT
   /** 탭 줄에서 끌어온 탭이 지금 어느 줄 위에 있는가 — 그 줄을 밝힌다. */
   highlight: string | null;
 }) {
-  const all = groups.flatMap((g) => g.items);
-  const overall = streamAgent(all, agentStates);
   const count = groups.find((g) => g.stream === current)?.items.length ?? 0;
   const named = groups.filter((g) => g.stream !== UNSORTED_STREAM).map((g) => g.stream);
 
@@ -361,14 +361,20 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, open, onT
       align="left"
       open={open}
       onToggle={() => onToggle(!open)}
-      anchorStyle={streamTriggerStyle}
+      anchorStyle={compact ? { ...streamTriggerStyle, padding: '0 7px', gap: 3 } : streamTriggerStyle}
       anchorProps={{ 'data-stream-trigger': true }}
       panelStyle={streamPanelStyle}
       label={
         <>
-          <AgentDot kind={overall.kind} running={overall.running} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{current}</span>
-          <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>{count}</span>
+          {/* 점은 없다 — 탭마다 이미 점이 있고, 여기 모인 점은 어느 탭 얘긴지 말해주지 못한다. */}
+          {compact ? (
+            <span>{Array.from(current).slice(0, 3).join('')}</span>
+          ) : (
+            <>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{current}</span>
+              <span style={{ color: 'var(--text-dim)', fontWeight: 400 }}>{count}</span>
+            </>
+          )}
           <span style={{ color: 'var(--text-dim)', fontWeight: 400, fontSize: 9 }}>▾</span>
         </>
       }
@@ -893,6 +899,7 @@ function App() {
   const [agentStates, setAgentStates] = useState<Record<number, AgentState>>({});
   const [stripSlot, setStripSlot] = useState<HTMLSpanElement | null>(null);
   const appSurface = useSurface();
+  const phone = appSurface === 'phone';
   const visualH = useViewportHeight();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
@@ -1446,7 +1453,7 @@ function App() {
       >
         <button
           onClick={() => navigate({ page: 'dashboard' })}
-          style={{ ...tabStyle, ...(homeActive ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}
+          style={{ ...tabStyle, ...(phone ? phoneTabTrim : null), ...(homeActive ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null) }}
           title="home · ⌘1"
         >⌂</button>
         {/* stream이 하나뿐이어도 보인다 — 둘째 stream을 만드는 자리가 여기뿐이다 */}
@@ -1456,6 +1463,7 @@ function App() {
           agentStates={agentStates}
           activeId={route.page === 'workspace' ? route.id : null}
           uiStyle={uiStyle}
+          compact={phone}
           open={streamMenuOpen}
           onToggle={setStreamMenuOpen}
           onPick={(ws) => navigate({ page: 'workspace', id: ws.id })}
@@ -1468,7 +1476,7 @@ function App() {
           onMoveWorkspace={(ws, stream) => { void moveWorkspaceToStream(ws, stream); }}
           onNewWorkspaceIn={(stream) => { void createWorkspaceTab(stream); }}
         />
-        <span style={{ width: 1, height: 16, background: 'var(--line)', flexShrink: 0, margin: '0 5px' }} />
+        <span style={{ width: 1, height: 16, background: 'var(--line)', flexShrink: 0, margin: phone ? '0 3px' : '0 5px' }} />
         <div style={{ position: 'relative', flex: 1, minWidth: 0, alignSelf: 'stretch', display: 'flex' }}>
           <div
             ref={tabScrollerRef}
@@ -1497,6 +1505,7 @@ function App() {
               }}
               style={{
                 ...tabStyle,
+                ...(phone ? phoneTabTrim : null),
                 ...(active ? { ...tabActiveStyle, background: UI_STYLES[uiStyle].tabActiveBg } : null),
                 ...(dragTabId === ws.id ? { opacity: 0.55, cursor: 'grabbing' } : null),
               }}
@@ -1518,11 +1527,12 @@ function App() {
                   style={{ background: 'var(--bg0)', color: 'var(--text)', border: '1px solid var(--line-strong)', borderRadius: 4, padding: '1px 5px', fontFamily: 'var(--mono)', fontSize: 12, width: 110, outline: 'none' }}
                 />
               ) : (
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: phone ? 110 : 160 }}>
                   {workspaceDisplayLabel(ws)}
                 </span>
               )}
-              <span style={{ color: 'var(--text-dim)' }}>{ids.length}</span>
+              {/* 폰은 보고 있는 탭만 개수를 단다 — 나머지는 점이 상태를 말한다. */}
+              {phone && !active ? null : <span style={{ color: 'var(--text-dim)' }}>{ids.length}</span>}
             </button>
           );
         })}
@@ -1589,6 +1599,9 @@ const tabActiveStyle: React.CSSProperties = {
   color: 'var(--text)',
   border: '1px solid var(--line)',
 };
+
+/** 폰의 탭 줄 — 390px에 탭이 두 개도 안 들어가던 여백을 줄인다(스크롤 영역 178px 실측). */
+const phoneTabTrim: React.CSSProperties = { padding: '0 8px', gap: 5 };
 
 const tabAddStyle: React.CSSProperties = {
   ...tabStyle,
