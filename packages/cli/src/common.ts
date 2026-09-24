@@ -185,6 +185,11 @@ export async function ensureCompatibleServer(port) {
 export async function shellAwait(port, sessionId, command, timeoutMs) {
   const probe = await fetchJson(port, `/api/sessions/${sessionId}/commands?limit=1`).catch(() => null);
   if (!probe || probe.integration !== true) return null;
+  // 셸 통합이 있어도 마지막 명령이 아직 안 끝났으면 프롬프트가 아니다 — zsh 안에서 띄운
+  // claude/codex 가 앞에 떠 있는 것. 명령(텍스트+LF)으로 보내면 입력창에 줄바꿈만 들어가고
+  // 제출되지 않아 await 가 타임아웃까지 멈췄다. 이때는 에이전트 경로(interaction)로 간다.
+  const last = probe.commands?.[0];
+  if (last && last.endedAt == null) return null;
   return fetchRequest(port, 'POST', `/api/sessions/${sessionId}/commands`, { command, timeoutMs }, timeoutMs + 15_000);
 }
 
