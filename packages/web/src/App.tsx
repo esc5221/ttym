@@ -396,7 +396,7 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
         </>
       }
     >
-      <div className="stream-grid" onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
+      <div className={compact ? 'stream-grid stream-grid-stack' : 'stream-grid'} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
         {shown.map(({ stream, items }, i) => {
           const unsorted = stream === UNSORTED_STREAM;
           const agent = streamAgent(items, agentStates);
@@ -436,6 +436,9 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
                       onContextMenu={(e) => { e.preventDefault(); if (!unsorted) setLabelMenu({ name: stream, x: e.clientX, y: e.clientY, armed: false }); }}
                       style={{
                         ...streamLabelStyle,
+                        // 이름 칸은 fit-content(120px)로 묶여 있다. 칸이 글자를 따라 늘지 않게 버튼이
+                        // 칸 폭을 넘지 못하고, 넘치는 이름은 … 로 줄인다 (전체는 title).
+                        minWidth: 0, maxWidth: '100%', overflow: 'hidden',
                         color: stream === current ? 'var(--text)' : 'var(--text-soft)',
                         cursor: unsorted ? 'default' : dragLabel === stream ? 'grabbing' : 'pointer',
                         ...(dragLabel === stream ? { opacity: 0.55 } : null),
@@ -443,7 +446,7 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
                       title={unsorted ? '아직 stream이 없는 workspace' : `${stream} · 더블클릭: 이름 변경 · 드래그: 순서 · 우클릭: 메뉴`}
                     >
                       <AgentDot kind={agent.kind} running={agent.running} />
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{stream}</span>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{stream}</span>
                     </button>
                   )}
                   <div {...rowProps} className={`${rowProps.className} stream-pills`}>
