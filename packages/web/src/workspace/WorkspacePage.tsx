@@ -2,23 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as api from '@ttym/api';
 import { LayoutView, getHost, type TerminalMux } from '@ttym/ui';
-import { MutationBarrier, formatCwd, layoutToSessionIds, memberNameBySession, removePane, resizeSplit, swapPanes } from '@ttym/shared';
-import { actionBtnStyle, ZEN_DEFAULT_COLS, AGENT_COLORS, API_BASE, useSurface, IS_NATIVE, UI_STYLES, apiAddMember, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, miniLinkBtnStyle, navigate, quotePathForShell, stripBtnStyle, type AgentState, type UiStyle, type Workspace } from '../app-shared.js';
+import { MutationBarrier, layoutToSessionIds, memberNameBySession, removePane, resizeSplit, swapPanes } from '@ttym/shared';
+import { actionBtnStyle, ZEN_DEFAULT_COLS, API_BASE, useSurface, IS_NATIVE, UI_STYLES, apiAddMember, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, navigate, quotePathForShell, stripBtnStyle, type AgentState, type UiStyle, type Workspace } from '../app-shared.js';
 import { KeyBar } from '../KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
 import { useViewerState } from '../viewer/useViewerState.js';
 import { ViewerPanel } from '../viewer/ViewerPanel.js';
 import { ViewerOverlay } from '../viewer/ViewerOverlay.js';
-import { viewSrc } from '../viewer/content.js';
-import { PaneTabs } from '../viewer/PaneTabs.js';
 import type { SelectionTarget } from '../viewer/SelectionOpen.js';
 import { parsePathCandidate } from '../viewer/paths.js';
 import { type ViewerFocus } from '../route.js';
 import { StripMenu, attachDropdownTitleStyle, attachDropdownItemStyle, attachDropdownEmptyStyle } from '../StripMenu.js';
-import { sleepTitle } from './sleep-text.js';
 import { ZenView } from './ZenView.js';
+import { PaneHeader } from './PaneHeader.js';
 import { SessionBody } from './SessionBody.js';
-import { WorkspaceSessionsContext, paneView, type WorkspaceSessions } from './session-context.js';
+import { WorkspaceSessionsContext, type WorkspaceSessions } from './session-context.js';
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
@@ -451,28 +449,6 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
     return () => { document.title = 'ttym'; };
   }, [ws?.name, sessionIds.length]);
 
-  // viewer 탭 스트립이 우측 absolute 액션 클러스터(☾ sleep · zen · split · detach · × …) 밑으로
-  // 깔려서, 마지막 탭의 ×를 누르려 하면 hover로 살아난 그 버튼들이 클릭을 가로채던 문제.
-  // 클러스터의 실제 폭을 재서 헤더에 --pane-actions-w로 싣고, PaneTabs가 그만큼 오른쪽을 비운다.
-  // reveal 버튼은 opacity만 바뀌고 폭은 그대로라(=클러스터 폭 불변) hover에도 탭이 재배치되지 않는다.
-  const actionsRo = useRef<ResizeObserver | null>(null);
-  if (actionsRo.current === null && typeof ResizeObserver !== 'undefined') {
-    actionsRo.current = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        const el = e.target as HTMLElement;
-        const parent = el.parentElement;
-        if (parent) parent.style.setProperty('--pane-actions-w', `${Math.ceil(el.getBoundingClientRect().width) + 16}px`);
-      }
-    });
-  }
-  useEffect(() => () => actionsRo.current?.disconnect(), []);
-  const actionsRef = useCallback((el: HTMLSpanElement | null) => {
-    if (!el || !actionsRo.current) return;
-    actionsRo.current.observe(el);
-    const parent = el.parentElement;
-    if (parent) parent.style.setProperty('--pane-actions-w', `${Math.ceil(el.getBoundingClientRect().width) + 16}px`);
-  }, []);
-
   const markDead = useCallback((sid: number) => setDeadSessions((prev) => new Set(prev).add(sid)), []);
   const focusSid = useCallback((sid: number) => {
     setFocusedSid(sid);
@@ -511,13 +487,6 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
     const isFocused = focusedSid === sid;
     const name = memberNames[sid];
     const cwd = sessionCwds[sid];
-    const agent = agentStates[sid];
-    const agentColor = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
-    const sleep = agent?.sleep ?? null;
-    const asleep = sleep?.state === 'sleeping' || sleep?.state === 'waking';
-    const canRestore = !agent?.active && !asleep && (lastAgentIds[sid]?.claude || lastAgentIds[sid]?.codex);
-    // 헤더의 탭. 왼쪽 덩어리(이름·#id·cwd)가 터미널 탭이고, 그 오른쪽에 뷰어 탭이 선다.
-    const { state: viewerState, tab: paneTab, item: paneItem } = paneView(sessions, sid);
     return (
       <div
         key={sid}
@@ -533,127 +502,25 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
           position: 'relative',
         }}
       >
-        <div
-          className="reveal-parent"
-          style={{
-            display: 'flex', alignItems: 'center', height: 30, padding: 0,
-            flexShrink: 0, userSelect: 'none', position: 'relative',
-            ...(U.headerBar ? {
-              background: isFocused ? 'var(--bg0)' : 'var(--bg2)',
-              borderLeft: dead ? '2px solid var(--err)' : isFocused ? '2px solid var(--accent)' : '2px solid transparent',
-              borderBottom: '1px solid var(--line)',
-            } : null),
-          }}
-          draggable
+        <PaneHeader
+          sid={sid}
+          name={name}
+          cwd={cwd}
+          isFocused={isFocused}
+          dead={dead}
+          zoomed={zoomedSid === sid}
+          fit={fitSids.has(sid)}
+          U={U}
+          dragging={dragSid}
           onDragStart={() => setDragSid(sid)}
           onDragEnd={() => setDragSid(null)}
-          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-          onDrop={(e) => { e.preventDefault(); if (dragSid !== null && dragSid !== sid) commitSwap(dragSid, sid); setDragSid(null); }}
-          title="drag: swap"
-        >
-          {/* 터미널 탭 = 이름·#id (절대 안 줄어든다) + cwd (탭에 자리를 먼저 내준다). 두 형제로 나눈
-              이유: 한 덩어리로 두면 flex가 덩어리째 줄여 이름까지 사라진다 — 탭 10개에서 실측. */}
-          <span
-            className={`pane-tab pane-tab-term${paneTab === 'term' ? ' on' : ''}`}
-            onClick={() => { if (paneTab !== 'term') viewer.setActive(sid, 'term'); }}
-            onDoubleClick={() => setZoomedSid((z) => (z === sid ? null : sid))}
-            title={paneTab === 'term' ? 'double-click: zoom' : 'back to the terminal'}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 0 2px 10px',
-              flexShrink: 0, height: '100%',
-              // frame: 포커스 신호는 텍스트 밝기 하나. classic: 바 배경이 말한다.
-              opacity: U.headerBar ? 1 : isFocused ? 1 : 0.45,
-            }}
-          >
-            {sleep ? (
-              <span className={`agent-sleep-mark ${sleep.state}`} title={sleepTitle(sleep)}>
-                {sleep.state === 'sleeping' ? '☾' : sleep.state === 'waking' ? '◌' : '✕'}
-              </span>
-            ) : agentColor ? (
-              <span
-                className={agent?.active ? 'agent-dot-run' : undefined}
-                style={{ width: 5, height: 5, borderRadius: '50%', background: agentColor, opacity: agent?.active ? 1 : 0.4, flexShrink: 0 }}
-                title={agent?.active ? `${agent.kind} · running` : `${agent?.kind} · idle`}
-              />
-            ) : null}
-
-            <span style={{ color: agentColor ?? (isFocused ? 'var(--text)' : 'var(--text-soft)'), fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
-              {name || `#${sid}`}
-            </span>
-            {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)', flexShrink: 0 }}>#{sid}</span> : null}
-          </span>
-          <span
-            onClick={() => { if (paneTab !== 'term') viewer.setActive(sid, 'term'); }}
-            onDoubleClick={() => setZoomedSid((z) => (z === sid ? null : sid))}
-            title={cwd}
-            style={{
-              flexGrow: viewerState ? 0 : 1, flexShrink: viewerState ? 4 : 1, minWidth: 0, overflow: 'hidden',
-              padding: '2px 10px 2px 6px', height: '100%', display: 'inline-flex', alignItems: 'center',
-              opacity: U.headerBar ? 1 : isFocused ? 1 : 0.45,
-            }}
-          >
-            {cwd ? (
-              <span style={{ color: 'var(--cwd)', fontSize: 10, fontFamily: 'var(--mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-                {formatCwd(cwd)}
-              </span>
-            ) : null}
-          </span>
-          {viewerState ? (
-            <PaneTabs
-              items={viewerState.items}
-              activeId={paneTab === 'term' ? null : paneTab}
-              onSelect={(vid) => viewer.setActive(sid, vid)}
-              onClose={(vid) => void viewer.close(sid, vid)}
-              // 우측 액션 클러스터가 absolute라, 측정된 그 폭(--pane-actions-w)만큼 스트립 오른쪽을
-              // 비운다 — 마지막 탭의 ×가 클러스터 밑에 깔리지 않게. 측정 전 첫 프레임은 8px 폴백.
-              reserveRight="var(--pane-actions-w, 8px)"
-            />
-          ) : null}
-          <span ref={actionsRef} style={{
-            position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-            display: 'inline-flex', alignItems: 'center', gap: 6, zIndex: 2,
-            // hover로 펼쳐지는 버튼들은 탭 끝을 잠깐 덮는다 — cwd를 덮던 것과 같은 규칙. 바탕은 깔지
-            // 않는다: 투명한 버튼도 폭을 차지해서, 바탕이 있으면 hover 전에도 탭을 가린다(실측).
-          }}>
-            {bells.has(sid) ? (
-              <span title="bell" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)', boxShadow: '0 0 6px var(--warn)', flexShrink: 0 }} />
-            ) : null}
-            {zoomedSid === sid ? <span style={{ color: 'var(--warn)', fontSize: 10, fontFamily: 'var(--mono)' }}>zoom</span> : null}
-
-            {agent?.kind && !asleep && !dead ? (
-              <button className="reveal" onClick={(e) => { e.stopPropagation(); void sleepAgent(sid); }} style={miniLinkBtnStyle} title="sleep now: the process exits, the screen stays, any input resumes it">☾</button>
-            ) : null}
-            {canRestore ? (
-              <button className="reveal" onClick={(e) => { e.stopPropagation(); restoreAgent(sid); }} style={miniLinkBtnStyle} title="resume last agent session">restore</button>
-            ) : null}
-            {touch ? null : (
-              <button className="reveal" onClick={(e) => { e.stopPropagation(); openZen(sid); }} style={miniLinkBtnStyle} title="zen · ⌘.">zen</button>
-            )}
-            <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('right', sid); }} style={miniLinkBtnStyle} title="split right">│</button>
-            <button className="reveal" onClick={(e) => { e.stopPropagation(); void doSplit('down', sid); }} style={miniLinkBtnStyle} title="split down">─</button>
-            {touch ? (
-              <button
-                className="reveal"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setFitSids((prev) => { const next = new Set(prev); if (next.has(sid)) next.delete(sid); else next.add(sid); return next; });
-                }}
-                style={{ ...miniLinkBtnStyle, ...(fitSids.has(sid) ? { color: 'var(--accent)' } : null) }}
-                title="borrow this viewport size · restored on leave"
-              >{fitSids.has(sid) ? 'reset' : 'fit'}</button>
-            ) : null}
-            <button className="reveal" onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={miniLinkBtnStyle} title="detach · session keeps running">detach</button>
-            <button className="reveal" onClick={(e) => { e.stopPropagation(); void copySessionUrl(sid); }} style={miniLinkBtnStyle}>copy</button>
-            {paneItem ? (
-              <>
-                <button onClick={(e) => { e.stopPropagation(); reloadViewer(sid); }} style={miniLinkBtnStyle} title="reload">⟳</button>
-                <a href={viewSrc(paneItem)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} style={miniLinkBtnStyle} title="open in a browser tab">↗</a>
-                <button onClick={(e) => { e.stopPropagation(); openFull(sid, paneItem.id); }} style={miniLinkBtnStyle} title="fill the workspace">full</button>
-              </>
-            ) : null}
-            <button className="reveal" onClick={(e) => { e.stopPropagation(); void terminateMember(sid); }} style={closeBtnStyle} title="terminate">×</button>
-          </span>
-        </div>
+          onSwapWith={(other) => commitSwap(other, sid)}
+          onToggleZoom={() => setZoomedSid((z) => (z === sid ? null : sid))}
+          onToggleFit={() => setFitSids((prev) => { const next = new Set(prev); if (next.has(sid)) next.delete(sid); else next.add(sid); return next; })}
+          onSplit={(direction) => void doSplit(direction, sid)}
+          onZen={() => openZen(sid)}
+          onTerminate={() => void terminateMember(sid)}
+        />
         <SessionBody
           sid={sid}
           viewerOverlay
@@ -667,7 +534,7 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
         />
       </div>
     );
-  }, [sessions, deadSessions, focusedSid, focusSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, bells, fitSids, touch, fontSize, fontFamily, agentStates, lastAgentIds, doSplit, detachMember, terminateMember, commitSwap, restoreAgent, viewer, openFull, sleepAgent, reloadViewer, openZen, actionsRef, U]);
+  }, [deadSessions, focusedSid, focusSid, memberNames, sessionCwds, zoomedSid, zenSid, dragSid, fileDropSid, fitSids, touch, fontSize, fontFamily, doSplit, terminateMember, commitSwap, openZen, U]);
 
   // 툴바 줄을 없앴다 — split/layout/attach는 탭 스트립 우측 슬롯에 포털로 산다.
   const stripActions = (
