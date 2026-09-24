@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { TerminalMux, Terminal, getHost } from '@ttym/ui';
 import { formatCwd } from '@ttym/shared';
-import { AGENT_COLORS, AgentState, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, readPhoneFontSize, stripBtnStyle, writePhoneFontSize } from './app-shared.js';
-import { KeyBar } from './KeyBar.js';
-import { useSwipe } from './useSwipe.js';
-import { usePinchZoom } from './usePinchZoom.js';
+import { AGENT_COLORS, AgentState, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, readPhoneFontSize, stripBtnStyle, writePhoneFontSize } from '../app-shared.js';
+import { KeyBar } from '../KeyBar.js';
+import { useSwipe } from '../useSwipe.js';
+import { usePinchZoom } from '../usePinchZoom.js';
 
 /**
  * 폰의 workspace 화면. 두 모드로 나뉜다.
