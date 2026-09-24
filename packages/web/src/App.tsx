@@ -163,6 +163,23 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
   const count = groups.find((g) => g.stream === current)?.items.length ?? 0;
   const named = groups.filter((g) => g.stream !== UNSORTED_STREAM).map((g) => g.stream);
 
+  // 열면 지금 stream 줄이 패널 가운데 온다. 폰에서는 패널이 560px인데 내용이 1800px을 넘어,
+  // 맨 위부터 열면 아래쪽 stream은 스크롤해야 보였다. 패널은 StripMenu가 버튼 위치를 잰
+  // 다음 프레임에 그리므로, 줄이 생길 때까지 몇 프레임 기다린다.
+  useEffect(() => {
+    if (!open) return;
+    let raf = 0; let tries = 0;
+    const center = () => {
+      const row = document.querySelector<HTMLElement>(`.stream-grid [data-stream-row="${CSS.escape(current)}"]`);
+      const panel = row?.closest('.stream-grid')?.parentElement;
+      if (!row || !panel) { if (++tries < 10) raf = requestAnimationFrame(center); return; }
+      const r = row.getBoundingClientRect(); const p = panel.getBoundingClientRect();
+      panel.scrollTop += r.top - p.top - (panel.clientHeight - r.height) / 2;
+    };
+    raf = requestAnimationFrame(center);
+    return () => cancelAnimationFrame(raf);
+  }, [open, current]);
+
   // 열려 있는 동안 바깥 클릭으로 닫는다. 패널 안의 클릭은 stopPropagation으로
   // 여기까지 안 온다 — 입력창·드래그·우클릭 메뉴가 메뉴를 닫지 않게.
   useEffect(() => {
@@ -317,7 +334,7 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
   };
   const cancelPick = () => { if (pickTimer.current) { window.clearTimeout(pickTimer.current); pickTimer.current = null; } };
 
-  const pill = (ws: Workspace, label: string, delayed = false) => {
+  const pill = (ws: Workspace, label: string) => {
     const agent = workspaceAgent(ws, agentStates);
     const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
     return (
@@ -326,7 +343,7 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
         onMouseDown={(e) => beginPillDrag(ws, e)}
         onClick={() => {
           if (suppressClick.current) { suppressClick.current = false; return; }
-          if (delayed) pickLater(ws); else { onToggle(false); onPick(ws); }
+          onToggle(false); onPick(ws);
         }}
         style={{
           ...tabStyle,
@@ -382,23 +399,13 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
       <div className="stream-grid" onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.stopPropagation()}>
         {shown.map(({ stream, items }, i) => {
           const unsorted = stream === UNSORTED_STREAM;
-          // stream과 workspace의 이름이 같으면 두 번 쓰지 않는다 — 알약 하나가 둘 다다.
-          const merged = items.length === 1 && items[0].name === stream && renaming !== stream;
           const agent = streamAgent(items, agentStates);
           const isRenaming = renaming === stream;
           const rowProps = { 'data-stream-row': stream, className: `stream-row${lit === stream ? ' stream-row-lit' : ''}` };
           return (
             <Fragment key={stream}>
               {i ? <div className="stream-rule" /> : null}
-              {merged ? (
-                <>
-                  <div {...rowProps} data-stream-label className={`${rowProps.className} stream-pills`} style={{ paddingLeft: 5 }}
-                    onDoubleClick={() => { cancelPick(); startRename(stream); }}
-                    onContextMenu={(e) => { e.preventDefault(); setLabelMenu({ name: stream, x: e.clientX, y: e.clientY, armed: false }); }}
-                  >{pill(items[0], stream, true)}</div>
-                  <div {...rowProps} className={`${rowProps.className} stream-pills`} style={{ justifyContent: 'flex-end' }}>{addBtn(stream)}</div>
-                </>
-              ) : (
+              {(
                 <>
                   {isRenaming ? (
                     <div {...rowProps} data-stream-label style={{ display: 'flex', alignItems: 'center', height: 29, paddingLeft: 7 }}>
