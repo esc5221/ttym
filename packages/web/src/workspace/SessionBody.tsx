@@ -1,5 +1,5 @@
 import { forwardRef } from 'react';
-import { Terminal, getHost } from '@ttym/ui';
+import { Terminal, beginDragGuard, getHost } from '@ttym/ui';
 import { actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, uploadDroppedFiles } from '../app-shared.js';
 import { SelectionOpen } from '../viewer/SelectionOpen.js';
 import { ViewerPanel } from '../viewer/ViewerPanel.js';
@@ -51,8 +51,19 @@ export const SessionBody = forwardRef<HTMLDivElement, SessionBodyProps>(function
   return (
     <div
       ref={ref}
-      onMouseDown={() => ctx.focusSid(sid)}
-      onMouseUp={(e) => { if (!covered && e.button === 0) ctx.offerSelection(sid, e); }}
+      onMouseDown={(e) => {
+        ctx.focusSid(sid);
+        if (covered || e.button !== 0) return;
+        // 선택은 pane 밖에서 끝날 수 있다 — 옆 패널 위에서 놓으면 mouseup이 그쪽으로 간다.
+        // 그래서 mouseup은 window에서 받고, 그 사이 iframe이 포인터를 못 가져가게 막는다.
+        const pane = e.currentTarget;
+        beginDragGuard();
+        const up = (ev: MouseEvent) => {
+          window.removeEventListener('mouseup', up, true);
+          if (ev.button === 0) ctx.offerSelection(sid, pane, ev.clientX, ev.clientY);
+        };
+        window.addEventListener('mouseup', up, true);
+      }}
       onDragOver={(e) => {
         // 파일 드래그만 받는다 — 헤더의 pane 교환 드래그는 Files 타입이 없다.
         if (!e.dataTransfer.types.includes('Files')) return;

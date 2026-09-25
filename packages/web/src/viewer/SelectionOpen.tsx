@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PathCandidate } from './paths.js';
 import { copyText } from '../app-shared.js';
 
@@ -30,6 +30,17 @@ export function SelectionOpen({ target, onOpen, onDismiss }: {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  // 오른쪽 끝에서 놓으면 메뉴가 pane 밖으로 나간다. zen 옆 패널에서는 그 부분이 잘리고
+  // 패널에 가려진다. 그려진 폭을 재서 pane 안으로 민다.
+  const ref = useRef<HTMLSpanElement>(null);
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const box = el?.offsetParent as HTMLElement | null;
+    if (!el || !box) return;
+    const left = Math.max(4, target.x - 12);
+    setShift(Math.min(0, box.clientWidth - 4 - (left + el.offsetWidth)));
+  }, [target, error, copied]);
 
   const go = async () => {
     if (busy) return;
@@ -58,8 +69,9 @@ export function SelectionOpen({ target, onOpen, onDismiss }: {
   const where = target.candidate.line !== undefined ? `:${target.candidate.line}` : '';
   return (
     <span
+      ref={ref}
       className={`sel-open${error ? ' err' : ''}`}
-      style={{ left: Math.max(4, target.x - 12), top: Math.max(2, target.y - 66) }}
+      style={{ left: Math.max(4, Math.max(4, target.x - 12) + shift), top: Math.max(2, target.y - 66) }}
       onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); }}
       // mouseup must not reach the pane: it would read the still-selected text and offer a second menu.
       onMouseUp={(e) => e.stopPropagation()}

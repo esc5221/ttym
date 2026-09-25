@@ -3,6 +3,7 @@ export type { CreateOptions, SessionInfo, TtymAction, ActionHandler } from '@tty
 export { Terminal } from './Terminal';
 export type { TerminalProps } from './Terminal';
 export { LayoutView } from './LayoutView';
+export { beginDragGuard } from './drag-guard.js';
 export type { LayoutViewProps } from './LayoutView';
 export { refreshTerminalThemes, getHost, ensureFontsRegistered, resetAllHosts, reactivateHosts } from './terminal-host.js';
 export type { LocalEchoSetting } from './terminal-host.js';

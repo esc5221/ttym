@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatCwd } from '@ttym/shared';
+import { beginDragGuard } from '@ttym/ui';
 import { readZenFontDelta, writeZenFontDelta, miniLinkBtnStyle } from '../app-shared.js';
 import { SessionBody } from './SessionBody.js';
 
@@ -43,6 +44,8 @@ export function ZenView({ sid, name, cwd, cols, fontFamily, baseFontSize, onExit
     const rect = container.getBoundingClientRect();
     const el = e.currentTarget;
     el.classList.add('drag');
+    // 옆 패널이 iframe이면 포인터가 그 위로 가는 순간 move가 끊긴다.
+    beginDragGuard('col-resize');
     let last = sideRatio;
     const move = (ev: PointerEvent) => { last = Math.min(0.85, Math.max(0.15, (ev.clientX - rect.left) / rect.width)); setSideRatio(last); };
     const up = () => {

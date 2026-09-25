@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import type { LayoutNode } from '@ttym/shared';
+import { beginDragGuard } from './drag-guard.js';
 
 export interface LayoutViewProps {
   layout: LayoutNode;
@@ -97,6 +98,7 @@ export function LayoutView({
     const startDrag = (index: number, e: React.PointerEvent<HTMLDivElement>) => {
       if (!onResize) return;
       e.preventDefault();
+      beginDragGuard(horizontal ? 'col-resize' : 'row-resize');
       // 히트존이 헤어라인 안에 중첩돼 parentElement로는 못 찾는다.
       const container = (e.currentTarget as HTMLElement).closest('[data-splitbox]') as HTMLElement | null;
       if (!container) return;

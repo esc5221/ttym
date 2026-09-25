@@ -38,7 +38,8 @@ export interface WorkspaceSessions {
 
   selOpen: SelectionTarget | null;
   setSelOpen: React.Dispatch<React.SetStateAction<SelectionTarget | null>>;
-  offerSelection: (sid: number, e: React.MouseEvent<HTMLDivElement>) => void;
+  /** 선택을 끝낸 자리(clientX/Y)에 경로 open 메뉴를 띄운다. 놓은 곳이 pane 밖이어도 된다. */
+  offerSelection: (sid: number, pane: HTMLElement, clientX: number, clientY: number) => void;
 
   search: { sid: number; query: string; index: number; count: number } | null;
   setSearch: React.Dispatch<React.SetStateAction<{ sid: number; query: string; index: number; count: number } | null>>;

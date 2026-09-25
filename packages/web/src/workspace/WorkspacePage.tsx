@@ -190,16 +190,17 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
     }
     return undefined;
   }, [sessionCwds]);
-  const offerSelection = useCallback((sid: number, e: React.MouseEvent<HTMLDivElement>) => {
-    const pane = e.currentTarget;
-    const px = e.clientX; const py = e.clientY;
+  const offerSelection = useCallback((sid: number, pane: HTMLElement, px: number, py: number) => {
     // 선택은 mouseup 뒤에 확정된다 — 한 틱 늦게 읽는다.
     setTimeout(() => {
       const text = getHost(sid)?.term.getSelection() ?? '';
       const candidate = parsePathCandidate(text, sessionCwds[sid], homeDir);
       if (!candidate) { setSelOpen((cur) => (cur?.sid === sid ? null : cur)); return; }
+      // 놓은 자리가 pane 밖(옆 패널 등)일 수 있다 — pane 안으로 끌어온다.
       const rect = pane.getBoundingClientRect();
-      setSelOpen({ sid, x: px - rect.left, y: py - rect.top, candidate, text });
+      const x = Math.min(rect.width, Math.max(0, px - rect.left));
+      const y = Math.min(rect.height, Math.max(0, py - rect.top));
+      setSelOpen({ sid, x, y, candidate, text });
     }, 0);
   }, [sessionCwds, homeDir]);
 
