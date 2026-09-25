@@ -9,7 +9,20 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "declaration": true,
-    "lib": ["ES2022", "DOM"]
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "paths": {
+      "@xterm/headless": [
+        "../server/node_modules/@xterm/headless"
+      ],
+      "@xterm/addon-serialize": [
+        "../server/node_modules/@xterm/addon-serialize"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }
