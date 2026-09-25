@@ -1,6 +1,7 @@
 import type React from 'react';
 import { useEffect, useState } from 'react';
 import * as api from '@ttym/api';
+import type { LocalEchoSetting } from '@ttym/ui';
 import { workspaceLabel, memberNameBySession, layoutToSessionIds, type LayoutNode } from '@ttym/shared';
 
 /** App의 모든 페이지가 공유하는 타입·서버 API·라우팅·공용 스타일.
@@ -144,18 +145,25 @@ export interface AgentSleep {
 }
 export interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean; sleep?: AgentSleep | null }
 
-export function readLocalEchoEnabled(): boolean {
+/** '0' 꺼짐 · '1' classic(처음부터 있던 방식) · '2' tolerant. 예전에 저장된 '1'은 그대로 classic이다. */
+export function readLocalEchoEnabled(): LocalEchoSetting {
   try {
-    return window.localStorage.getItem(LOCAL_ECHO_STORAGE_KEY) === '1';
+    const v = window.localStorage.getItem(LOCAL_ECHO_STORAGE_KEY);
+    return v === '2' ? 'tolerant' : v === '1';
   } catch {
     return false;
   }
 }
 
-export function writeLocalEchoEnabled(value: boolean) {
+export function writeLocalEchoEnabled(value: LocalEchoSetting) {
   try {
-    window.localStorage.setItem(LOCAL_ECHO_STORAGE_KEY, value ? '1' : '0');
+    window.localStorage.setItem(LOCAL_ECHO_STORAGE_KEY, value === 'tolerant' ? '2' : value ? '1' : '0');
   } catch {}
+}
+
+/** 서버 config 의 local-echo 값. 'true'/'false' 는 예전 그대로, 'tolerant' 가 새 값. */
+export function parseLocalEchoConfig(value: string): LocalEchoSetting {
+  return value === 'tolerant' ? 'tolerant' : value === 'true';
 }
 
 /**

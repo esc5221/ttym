@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { TerminalMux, CreateOptions } from '@ttym/vt';
-import { acquireHost, destroyHost, type TerminalHost, type HostOptions } from './terminal-host.js';
+import { acquireHost, destroyHost, type TerminalHost, type HostOptions, type LocalEchoSetting } from './terminal-host.js';
 
 export interface TerminalProps {
   mux: TerminalMux;
@@ -21,7 +21,7 @@ export interface TerminalProps {
    * GPU 컨텍스트는 포커스된 큰 터미널 전용 자원이다.
    */
   enableWebgl?: boolean;
-  localEcho?: boolean;
+  localEcho?: LocalEchoSetting;
   /** fit(기본) | follow(서버 기하 추종) | borrow(빌려쓰기 — 반납 시 자동 복원). */
   geometry?: 'fit' | 'follow' | 'borrow';
   /** cols를 못박는다 (rows는 컨테이너가 정한다). zen 읽기 모드용. */

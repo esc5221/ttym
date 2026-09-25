@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { ViewItem, ViewerState } from '@ttym/api';
-import type { TerminalMux } from '@ttym/ui';
+import type { LocalEchoSetting, TerminalMux } from '@ttym/ui';
 import type { AgentState } from '../app-shared.js';
 import type { ViewerHook } from '../viewer/useViewerState.js';
 import type { SelectionTarget } from '../viewer/SelectionOpen.js';
@@ -16,7 +16,7 @@ import type { ViewerFocus } from '../route.js';
  */
 export interface WorkspaceSessions {
   mux: TerminalMux;
-  localEchoEnabled: boolean;
+  localEchoEnabled: LocalEchoSetting;
   touch: boolean;
   agentStates: Record<number, AgentState>;
   lastAgentIds: Record<number, { claude?: string; codex?: string }>;

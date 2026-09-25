@@ -8,6 +8,8 @@ import { WebFontsAddon } from '@xterm/addon-web-fonts';
 import type { IDisposable } from '@xterm/xterm';
 import { LocalEchoController, type TerminalMux, type ActionHandler } from '@ttym/vt';
 
+export type LocalEchoSetting = boolean | 'tolerant';
+
 /**
  * A TerminalHost owns everything one session's terminal needs — the xterm
  * instance, its wrapper DOM, renderer, write pipeline — and outlives any
@@ -41,7 +43,8 @@ export interface HostOptions {
   /** CSS font-family 스택. 비우면 플랫폼 기본(DEFAULT_TERMINAL_FONTS). */
   fontFamily?: string;
   enableWebgl: boolean;
-  localEcho: boolean;
+  /** 예측 에코. true = classic(처음부터 있던 방식), 'tolerant' = 셸의 실제 에코 모양을 더 받아주는 방식. */
+  localEcho: LocalEchoSetting;
   /**
    * fit(기본): 이 뷰가 pane 크기로 PTY를 리사이즈하는 주도자다.
    * follow: 서버 기하가 진실이고 이 뷰는 추종만 한다 — attach에 cols를 안 싣고,
@@ -336,10 +339,15 @@ export class TerminalHost {
 
     this.localEcho = new LocalEchoController({
       writeOptimistic: (text) => this.term.write(text),
-      writeOptimisticBackspace: () => this.term.write('\b \b'),
+      writeOptimisticBackspace: (cells = 1) => this.term.write('\b'.repeat(cells) + ' '.repeat(cells) + '\b'.repeat(cells)),
       requestSnapshot: () => this.mux.requestSnapshot(this.sessionId),
+      mode: opts.localEcho === 'tolerant' ? 'tolerant' : 'classic',
+      lineBeforeCursor: () => {
+        const b = this.term.buffer.active;
+        return b.getLine(b.baseY + b.cursorY)?.translateToString(false, 0, b.cursorX) ?? '';
+      },
     });
-    this.localEcho.setEnabled(opts.localEcho && opts.mode !== 'readonly');
+    this.localEcho.setEnabled(!!opts.localEcho && opts.mode !== 'readonly');
     this.term.onBell(() => this.onAction({ kind: 'bell', sessionId: this.sessionId }));
   }
 
@@ -512,7 +520,8 @@ export class TerminalHost {
     const prev = this.opts;
     // 선택 필드는 병합 — 한 호출부가 geometry를 빼먹어도 모드가 증발하지 않는다
     this.opts = { ...prev, ...opts };
-    this.localEcho.setEnabled(opts.localEcho && opts.mode !== 'readonly');
+    this.localEcho.setMode(opts.localEcho === 'tolerant' ? 'tolerant' : 'classic');
+    this.localEcho.setEnabled(!!opts.localEcho && opts.mode !== 'readonly');
     if (prev.fontSize !== opts.fontSize) {
       this.term.options.fontSize = opts.fontSize;
       this.scheduleFit();

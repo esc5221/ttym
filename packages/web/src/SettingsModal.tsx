@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { refreshTerminalThemes } from '@ttym/ui';
+import { refreshTerminalThemes, type LocalEchoSetting } from '@ttym/ui';
 import { API_BASE, actionBtnStyle, type UiStyle } from './app-shared.js';
 
 /**
@@ -15,8 +15,8 @@ type Section = 'general' | 'appearance' | 'agents' | 'map';
 const SECTIONS: Section[] = ['general', 'appearance', 'agents', 'map'];
 
 interface Props {
-  localEchoEnabled: boolean;
-  onLocalEchoChange: (value: boolean) => void;
+  localEchoEnabled: LocalEchoSetting;
+  onLocalEchoChange: (value: LocalEchoSetting) => void;
   uiStyle: UiStyle;
   onUiStyleChange: (value: UiStyle) => void;
   mainView: 'preview' | 'map';
@@ -96,11 +96,11 @@ function GeneralSection({ mainView, onMainViewChange, localEchoEnabled, onLocalE
       <Field label="main view" hint="what the home page shows: live session previews, or the AI work map">
         <Segmented options={['preview', 'map'] as const} value={mainView} onChange={onMainViewChange} />
       </Field>
-      <Field label="optimistic local echo" hint="experimental: predicts printable shell echo before server confirmation">
+      <Field label="optimistic local echo" hint="on: the original matching · tolerant: also accepts shells that recolor or redraw what you typed, and holds off at password prompts">
         <Segmented
-          options={['off', 'on'] as const}
-          value={localEchoEnabled ? 'on' : 'off'}
-          onChange={(v) => onLocalEchoChange(v === 'on')}
+          options={['off', 'on', 'tolerant'] as const}
+          value={localEchoEnabled === 'tolerant' ? 'tolerant' : localEchoEnabled ? 'on' : 'off'}
+          onChange={(v) => onLocalEchoChange(v === 'tolerant' ? 'tolerant' : v === 'on')}
         />
       </Field>
     </>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as api from '@ttym/api';
-import { LayoutView, getHost, type TerminalMux } from '@ttym/ui';
+import { LayoutView, getHost, type LocalEchoSetting, type TerminalMux } from '@ttym/ui';
 import { MutationBarrier, layoutToSessionIds, memberNameBySession, removePane, resizeSplit, swapPanes } from '@ttym/shared';
 import { actionBtnStyle, ZEN_DEFAULT_COLS, API_BASE, useSurface, IS_NATIVE, UI_STYLES, apiAddMember, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, navigate, quotePathForShell, stripBtnStyle, type AgentState, type UiStyle, type Workspace } from '../app-shared.js';
 import { KeyBar } from '../KeyBar.js';
@@ -20,7 +20,7 @@ import { WorkspaceSessionsContext, type WorkspaceSessions } from './session-cont
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
-export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; pane: number | null; zen: number | null; open: ViewerFocus | null; localEchoEnabled: boolean; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
+export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnabled, agentStates, actionsSlot, uiStyle, fontSize, fontFamily }: { mux: TerminalMux; workspaceId: string; pane: number | null; zen: number | null; open: ViewerFocus | null; localEchoEnabled: LocalEchoSetting; agentStates: Record<number, AgentState>; actionsSlot: HTMLElement | null; uiStyle: UiStyle; fontSize: number; fontFamily: string }) {
   const U = UI_STYLES[uiStyle];
   const [ws, setWs] = useState<Workspace | null>(null);
   const [memberNames, setMemberNames] = useState<Record<number, string>>({});

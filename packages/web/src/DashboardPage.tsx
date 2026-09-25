@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { TerminalMux, Terminal, LayoutView } from '@ttym/ui';
-import type { SessionInfo } from '@ttym/ui';
+import type { LocalEchoSetting, SessionInfo } from '@ttym/ui';
 import { formatCwd, memberNameBySession, layoutToSessionIds, workspaceLabel, removePane, type LayoutNode } from '@ttym/shared';
 import { AGENT_COLORS, AgentState, Workspace, apiDeleteWorkspace, apiRemoveMember, closeBtnStyle, copySessionUrl, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, miniLinkBtnStyle, navigate, stripBtnStyle, workspaceDisplayLabel } from './app-shared.js';
 
 type DashPanel = { kind: 'hover' } | { kind: 'live'; sid: number } | { kind: 'ws'; wsId: string };
 
-export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mux: TerminalMux; agentStates: Record<number, AgentState>; localEchoEnabled: boolean; actionsSlot: HTMLElement | null }) {
+export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot }: { mux: TerminalMux; agentStates: Record<number, AgentState>; localEchoEnabled: LocalEchoSetting; actionsSlot: HTMLElement | null }) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [sessionCwds, setSessionCwds] = useState<Record<number, string>>({});

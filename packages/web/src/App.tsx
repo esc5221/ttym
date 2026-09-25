@@ -2,10 +2,10 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { createPortal } from 'react-dom';
 import * as api from '@ttym/api';
 import { TerminalMux, Terminal, refreshTerminalThemes, ensureFontsRegistered, resetAllHosts, reactivateHosts } from '@ttym/ui';
-import type { SessionInfo } from '@ttym/ui';
+import type { LocalEchoSetting, SessionInfo } from '@ttym/ui';
 import '@xterm/xterm/css/xterm.css';
 import { layoutToSessionIds, nextWorkspaceName } from '@ttym/shared';
-import { apiAddStream, apiDeleteWorkspace, apiRemoveStream, apiRenameStream, apiReorderStreams, fetchStreams, groupByStream, isNameConflict, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, IS_NATIVE, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, apiCreateWorkspace, apiReorderWorkspaces, apiUpdateWorkspace, copySessionUrl, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, readLocalEchoEnabled, readUiStyle, sessionWorkspaceMembership, workspaceDisplayLabel, writeLocalEchoEnabled, type AgentState, type Route, type UiStyle, type Workspace } from './app-shared.js';
+import { apiAddStream, apiDeleteWorkspace, apiRemoveStream, apiRenameStream, apiReorderStreams, fetchStreams, groupByStream, isNameConflict, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, IS_NATIVE, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, apiCreateWorkspace, apiReorderWorkspaces, apiUpdateWorkspace, copySessionUrl, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, readLocalEchoEnabled, parseLocalEchoConfig, readUiStyle, sessionWorkspaceMembership, workspaceDisplayLabel, writeLocalEchoEnabled, type AgentState, type Route, type UiStyle, type Workspace } from './app-shared.js';
 import { StripMenu, attachDropdownStyle, attachDropdownTitleStyle, attachDropdownItemStyle } from './StripMenu.js';
 import { DashboardPage } from './DashboardPage.js';
 import { MapPage } from './MapPage.js';
@@ -20,7 +20,7 @@ function uuid(): string {
 
 // ───── 대시보드 ─────
 
-function SessionPage({ mux, sessionId, localEchoEnabled }: { mux: TerminalMux; sessionId: number; localEchoEnabled: boolean }) {
+function SessionPage({ mux, sessionId, localEchoEnabled }: { mux: TerminalMux; sessionId: number; localEchoEnabled: LocalEchoSetting }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={toolbarStyle}>
@@ -1319,7 +1319,7 @@ function App() {
     return () => window.removeEventListener('keydown', handler, true);
   }, [visibleWorkspaces]);
 
-  const handleLocalEchoChange = useCallback((value: boolean) => {
+  const handleLocalEchoChange = useCallback((value: LocalEchoSetting) => {
     writeLocalEchoEnabled(value);
     setLocalEchoEnabled(value);
   }, []);
@@ -1352,7 +1352,7 @@ function App() {
       setMainView(values['main-view']);
       try { localStorage.setItem(MAIN_VIEW_STORAGE_KEY, values['main-view']); } catch {}
     }
-    if (values['local-echo'] !== undefined) setLocalEchoEnabled(values['local-echo'] === 'true');
+    if (values['local-echo'] !== undefined) setLocalEchoEnabled(parseLocalEchoConfig(values['local-echo']));
     if (values['font-size'] !== undefined) {
       const size = Number(values['font-size']);
       if (Number.isFinite(size) && size >= 8 && size <= 32) setFontSize(size);
