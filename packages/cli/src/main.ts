@@ -11,7 +11,8 @@ import { cmdService } from './service.js';
 import { cmdRemote } from './remote.js';
 import { cmdUpgrade, cmdVersion } from './upgrade.js';
 import { cmdOpen, cmdView } from './viewer.js';
-import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr, cmdCommandsAddr, cmdOutputAddr } from './sessions.js';
+import { cmdGuide } from './guide.js';
+import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr, cmdTurn, cmdCommandsAddr, cmdOutputAddr } from './sessions.js';
 
 // ───── Main ─────
 
@@ -29,6 +30,8 @@ function printHelp() {
   console.log('  resize <addr> <cols> <rows>  Resize a session');
   console.log('  kill <addr>                  Kill a session (holder included)');
   console.log('  await <addr> -- "prompt"     Ask an agent (or run a shell command) and wait');
+  console.log('  turn <interaction> [--full]  What an agent did in that turn (the await footer names it)');
+  console.log('  guide agents                 How agents in panes talk to each other');
   console.log('  commands <addr>              Command history with exit codes (shell integration)');
   console.log('  output <addr> [--cmd N]      One command output, precisely sliced');
   console.log('  open <path|url>... [--to <addr>] [--full|--pane] [--root <dir>]  Open inside the pane (md·csv·html·images·dirs·urls)');
@@ -66,6 +69,8 @@ switch (cmd) {
   case 'resize':  await cmdResizeAddr(); break;
   case 'kill':    await cmdKillAddr(); break;
   case 'await':   await cmdAwaitAddr(); break;
+  case 'turn':    await cmdTurn(); break;
+  case 'guide':   cmdGuide(); break;
   case 'commands': await cmdCommandsAddr(); break;
   case 'output':  await cmdOutputAddr(); break;
   case 'open':    await cmdOpen(); break;

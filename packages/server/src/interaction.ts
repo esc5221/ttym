@@ -1,5 +1,6 @@
 import type { Session, TerminalMarker } from './session.js';
-import { agentKindOf, claudeStructuredTranscript } from './agent-providers.js';
+import { agentKindOf, claudeStructuredTranscript, claudeTranscriptPath } from './agent-providers.js';
+import { readTurn, summarize, type TurnSummary } from './agent-turn.js';
 
 /**
  * One prompt and the output it produced.
@@ -21,6 +22,10 @@ export interface InteractionView {
   transcriptSource?: 'structured' | 'screen';
   /** Screen quality at extraction time — 'degraded' means approximate. */
   integrity?: 'healthy' | 'degraded';
+  /** 이 턴을 다시 읽을 곳 — `ttym turn`이 outline·full을 여기서 만든다. structured일 때만. */
+  turnPath?: string;
+  /** 턴 크기: 걸린 시간·도구 횟수·수정한 파일. await 결과 아래 한 줄. */
+  summary?: TurnSummary;
   createdAt: number;
   completedAt: number | null;
 }
@@ -28,6 +33,11 @@ export interface InteractionView {
 interface InteractionRecord extends InteractionView {
   marker: TerminalMarker | null;
   waiters: Array<() => void>;
+}
+
+/** 턴의 시간 범위. 앞쪽 여유는 claudeStructuredTranscript와 같다(프롬프트 직전 생성). */
+export function turnRange(rec: { turnPath?: string; createdAt: number }, endedAt: number | null) {
+  return { path: rec.turnPath ?? '', sinceMs: rec.createdAt - 2_000, untilMs: endedAt === null ? undefined : endedAt + 2_000 };
 }
 
 let counter = 0;
@@ -109,6 +119,11 @@ export class InteractionStore {
     if (structured !== null) {
       rec.transcript = structured;
       rec.transcriptSource = 'structured';
+      rec.turnPath = claudeTranscriptPath(meta!.cwd as string, claudeSid as string);
+      const now = Date.now();
+      rec.summary = await readTurn(turnRange(rec, now))
+        .then((events) => summarize(events, rec.createdAt, now))
+        .catch(() => undefined);
     } else if (rec.marker) {
       rec.transcript = session.transcriptSince(rec.marker);
       if (rec.transcript !== null) rec.transcriptSource = 'screen';

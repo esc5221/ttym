@@ -65,8 +65,19 @@ be told when it lands.
 
 ## Reading the result
 
-`await` returns the agent's answer. Then verify it yourself — run the tests,
-read the diff. An agent reporting success is a claim, not evidence.
+`await` returns what the agent said last in that turn, read from its transcript,
+and two lines under it:
+
+```
+── turn int_xxx · 42s · tools 3 (Bash 2, Read 1) · edited 1: foo.ts
+   more: ttym turn int_xxx   (--full: tool inputs/outputs)
+```
+
+The answer is the agent's own summary. The footer is what it did: "no tools"
+means it only talked. When the footer does not match the claim, read more:
+`ttym turn <id>` (every message + one line per tool) or `--full` (tool
+inputs and outputs). Then verify it yourself — run the tests, read the diff. An
+agent reporting success is a claim, not evidence.
 
 `ttym screen <addr>` shows the current screen with control characters stripped.
 Add `--raw` only when you actually need the escape sequences.
@@ -81,6 +92,10 @@ timeout   still running — the session is fine, you stopped waiting
 failed    the turn ended without an answer
 ```
 
+Without `--json`, a timeout exits 124 with nothing on stdout. Pick the same
+request back up with `ttym await --id <interaction>` instead of asking again —
+a second prompt to the same agent abandons the first.
+
 None of these mean the session died. Holders run detached, so the session
 survives its server, let alone a dropped wait. Read `ttym screen <addr>` to see
 where it actually got to, and continue from there.
@@ -94,6 +109,13 @@ ttym workspace remove --current <name>        # drop it from the workspace
 
 Leave sessions running only if someone will look at them again. An abandoned
 agent holds a PTY and its context forever.
+
+## Talking to agents that are already there
+
+When you run inside a pane (`$TTYM_SESSION_ID` is set), the other members of your
+workspace are `:name`. `ttym guide agents` prints the current rules for asking
+them, waiting in the background, and reading their turns — read it first; it
+comes from the same binary you are about to run.
 
 ## Working with what is already there
 

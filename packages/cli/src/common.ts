@@ -100,7 +100,8 @@ export const GLOBAL = { port: null, json: false };
  *   0 성공 · 1 일반 실패 · 2 usage · 3 대상 해석 실패(없음·모호)
  *   4 서버 연결 불가 · 5 API 버전 불일치
  */
-export const EXIT = { OK: 0, FAIL: 1, USAGE: 2, NOT_FOUND: 3, NO_SERVER: 4, VERSION: 5 };
+// TIMEOUT(124)는 coreutils timeout과 같은 값 — await가 끊겼지만 상대는 아직 일하는 중이다.
+export const EXIT = { OK: 0, FAIL: 1, USAGE: 2, NOT_FOUND: 3, NO_SERVER: 4, VERSION: 5, TIMEOUT: 124 };
 
 export function getPort() {
   if (GLOBAL.port !== null) return GLOBAL.port;

@@ -7,7 +7,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
-import { InteractionStore } from './interaction.js';
+import { readTurn, renderFull, renderOutline } from './agent-turn.js';
+import { InteractionStore, turnRange } from './interaction.js';
 import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
 import { ConfigStore } from './config-file.js';
 import { agentKindOf } from './agent-providers.js';
@@ -508,6 +509,21 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       res.setHeader('Location', path);
       json(202, { interaction: current });
     });
+    return true;
+  }
+
+  // GET /api/interactions/:iid?detail=outline|full — 끝난 턴을 transcript에서 다시 읽는다.
+  // 세션 번호 없이 id만으로 — await 결과에 찍힌 id 하나로 더 볼 수 있게.
+  const turnMatch = path.match(/^\/api\/interactions\/([A-Za-z0-9_]+)$/);
+  if (turnMatch && req.method === 'GET') {
+    const existing = interactions.get(turnMatch[1]);
+    if (!existing) { json(404, { error: 'not found' }); return true; }
+    const detail = url.searchParams.get('detail');
+    if (!detail) { json(200, { interaction: existing }); return true; }
+    if (!existing.turnPath) { json(200, { interaction: existing, detail: null, reason: 'no structured transcript for this turn' }); return true; }
+    readTurn(turnRange(existing, existing.completedAt))
+      .then((events) => json(200, { interaction: existing, detail: detail === 'full' ? renderFull(events) : renderOutline(events) }))
+      .catch((e) => json(500, { error: `transcript unreadable: ${(e as Error).message}` }));
     return true;
   }
 

@@ -280,7 +280,11 @@ async function awaitInteraction(port: number, sessionId: number, prompt: string,
     timeoutMs,
     submit: 'cr',
   }, timeoutMs + 15_000);
-  const interaction = response?.interaction ?? null;
+  return awaitResult(port, sessionId, response?.interaction ?? null, raw);
+}
+
+/** 서버의 interaction 하나를 await 결과 모양으로. 새로 보낸 것과 --id로 이어받은 것이 같은 길을 탄다. */
+async function awaitResult(port: number, sessionId: number, interaction: any, raw: boolean) {
   let output = interaction?.transcript ?? null;
   if (output === null) {
     const screen = await fetchJson(port, `/api/sessions/${sessionId}/screen`).catch(() => null);
@@ -293,11 +297,112 @@ async function awaitInteraction(port: number, sessionId: number, prompt: string,
       // 추출 품질은 숨기지 않는다 — 어디서 온 답인지, 화면이 온전했는지.
       transcriptSource: interaction.transcriptSource ?? null,
       integrity: interaction.integrity ?? null,
+      // 턴 크기와 더 보는 법 — 기본 답은 마지막 text 하나라, 무엇이 빠졌는지 판단할 근거를 같이 준다.
+      summary: interaction.summary ?? null,
+      more: interaction.turnPath ? { outline: `ttym turn ${interaction.id}`, full: `ttym turn ${interaction.id} --full`, path: interaction.turnPath } : null,
     } : null,
     completed: interaction?.status === 'completed',
     reason: awaitReason(interaction?.status ?? null),
     output: raw ? output : stripAnsi(output),
   };
+}
+
+/**
+ * 보낸 사람 머리말. 에이전트 pane에서 부르면 받는 쪽이 사용자 입력과 동료의 질문을 가를 수 있게
+ * 한 줄 앞에 붙인다. 답하는 법은 적지 않는다 — 받는 쪽은 평소처럼 답하고, 그 말을 그대로 읽어 온다.
+ * 줄바꿈 없이 같은 줄: TUI 입력창에 LF를 쓰면 에이전트마다 다르게 먹는다.
+ */
+async function senderPrefix(port: number, ownArgs: string[], targetSessionId: number): Promise<string> {
+  if (ownArgs.includes('--no-from')) return '';
+  const sid = parseInt(process.env.TTYM_SESSION_ID ?? '', 10);
+  if (!Number.isFinite(sid)) return '';
+  // 에이전트에게만. 셸 통합 없는 셸에 붙이면 머리말이 명령의 일부로 실행된다(`[` 명령).
+  // 에이전트가 붙은 적 있는 세션만 서버 meta에 그 세션 id가 남는다.
+  const meta = await fetchJson(port, `/api/sessions/${targetSessionId}/meta`).catch(() => null);
+  if (!meta || !(meta.claudeSessionId || meta.claudeLastSessionId || meta.codexSessionId || meta.codexLastSessionId)) return '';
+  const list = await fetchJson(port, '/api/workspaces').catch(() => null);
+  const workspaces = Array.isArray(list) ? list : (list?.workspaces ?? []);
+  for (const ws of workspaces) {
+    const m = (ws.members ?? []).find((x: any) => x.sessionId === sid);
+    // 받는 쪽이 그대로 복사해 되물을 수 있는 주소 — memberAddress의 ws/name은 주소 문법이 아니다.
+    if (m) return `[ttym · from ${ws.name}:${m.name}] `;
+  }
+  return `[ttym · from #${sid}] `;
+}
+
+function formatDuration(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms)) return '';
+  return ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60_000)}m${Math.round((ms % 60_000) / 1000)}s`;
+}
+
+/** 답 아래 두 줄: 턴 크기, 그리고 더 보는 명령. */
+function footerLines(interaction: any): string[] {
+  if (!interaction?.more) return [];
+  const s = interaction.summary;
+  const parts = [`turn ${interaction.id}`];
+  if (s) {
+    const d = formatDuration(s.durationMs);
+    if (d) parts.push(d);
+    const tools = Object.entries(s.tools as Record<string, number>).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${n} ${c}`).join(', ');
+    parts.push(s.toolCount ? `tools ${s.toolCount} (${tools})` : 'no tools');
+    if (s.filesEdited.length) parts.push(`edited ${s.filesEdited.length}: ${s.filesEdited.map((f: string) => f.split('/').pop()).slice(0, 4).join(', ')}${s.filesEdited.length > 4 ? ', …' : ''}`);
+    if (s.errors) parts.push(`${s.errors} tool errors`);
+  }
+  return [`── ${parts.join(' · ')}`, `   more: ${interaction.more.outline}   (--full: tool inputs/outputs)`];
+}
+
+function printAwaitText(result: any, bare: boolean) {
+  process.stdout.write(result.output);
+  if (result.output && !result.output.endsWith('\n')) process.stdout.write('\n');
+  if (!bare) for (const line of footerLines(result.interaction)) process.stdout.write(`${line}\n`);
+}
+
+/** ttym await --id <interaction> — timeout으로 끊긴 요청을 이어서 기다린다. 요청은 서버에서 계속 돌고 있다. */
+async function resumeAwait(port: number, iid: string, timeoutMs: number, raw: boolean, ownArgs: string[]) {
+  const found = await fetchJson(port, `/api/interactions/${encodeURIComponent(iid)}`).catch(() => null);
+  if (!found?.interaction) { console.error(`no interaction ${iid} (the server keeps them for a while after they settle)`); process.exit(EXIT.NOT_FOUND); }
+  const sid = found.interaction.sessionId;
+  const waited = await fetchRequest(port, 'GET', `/api/sessions/${sid}/interactions/${encodeURIComponent(iid)}?wait=${timeoutMs}`, undefined, timeoutMs + 15_000);
+  const result = await awaitResult(port, sid, waited?.interaction ?? found.interaction, raw);
+  if (hasFlag('--json')) return printOutput({ target: `#${sid}`, ...result }, true);
+  reportAwaitStatus(result, timeoutMs);
+  printAwaitText(result, ownArgs.includes('--bare'));
+}
+
+/**
+ * timeout이면 여기서 끝낸다. 예전에는 그 순간의 화면을 답처럼 stdout에 찍고 0으로 나갔다 —
+ * 백그라운드로 걸어 둔 에이전트는 그걸 "끝났다"로 읽는다. 화면이 필요하면 ttym screen.
+ */
+function reportAwaitStatus(result: any, timeoutMs: number) {
+  if (result.interaction?.status === 'pending') {
+    console.error(`timeout: still running after ${timeoutMs}ms — keep waiting: ttym await --id ${result.interaction.id}`);
+    process.exit(EXIT.TIMEOUT);
+  } else if (result.interaction?.status === 'failed') {
+    console.error('agent ended the turn without answering');
+  }
+}
+
+/** ttym turn <interaction> [--full|--path] — 끝난 턴을 transcript에서 다시 읽는다. */
+export async function cmdTurn() {
+  const args = process.argv.slice(3);
+  const iid = args.find((a) => !a.startsWith('--'));
+  if (!iid || args.includes('--help')) {
+    console.error('usage: ttym turn <interaction-id> [--full | --path | --json]');
+    console.error('  what an agent did in one await: every message, one line per tool call (--full: inputs/outputs).');
+    console.error('  the id is on the footer under an await answer ("── turn int_…"), or interaction.id with --json.');
+    process.exit(EXIT.USAGE);
+  }
+  // `ttym turn … | head` 가 파이프를 닫아도 스택을 찍지 않는다.
+  process.stdout.on('error', (e: NodeJS.ErrnoException) => { if (e.code === 'EPIPE') process.exit(0); throw e; });
+  const port = getPort();
+  await ensureCompatibleServer(port);
+  const detail = args.includes('--full') ? 'full' : 'outline';
+  const res = await fetchJson(port, `/api/interactions/${encodeURIComponent(iid)}?detail=${detail}`).catch(() => null);
+  if (!res?.interaction) { console.error(res?.error ?? `no interaction ${iid}`); process.exit(EXIT.NOT_FOUND); }
+  if (args.includes('--path')) { console.log(res.interaction.turnPath ?? ''); return; }
+  if (hasFlag('--json')) return printOutput(res, true);
+  if (res.detail === null) { console.error(res.reason ?? 'no transcript for this turn'); process.exit(EXIT.FAIL); }
+  process.stdout.write(res.detail.endsWith('\n') ? res.detail : `${res.detail}\n`);
 }
 
 export async function cmdAwaitAddr() {
@@ -306,8 +411,15 @@ export async function cmdAwaitAddr() {
   const prompt = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
   const ownArgs = sep === -1 ? args : args.slice(0, sep);
   const token = args[0];
+  const resumeId = readOption(ownArgs, '--id');
+  if (resumeId) {
+    const port = getPort();
+    await ensureCompatibleServer(port);
+    return resumeAwait(port, resumeId, parseInt(readOption(ownArgs, '--timeout') || '120000', 10), ownArgs.includes('--raw'), ownArgs);
+  }
   if (!token || !prompt) {
-    console.error('usage: ttym await <ws:name|:name|#id | --match \"expr\"> [--timeout ms] [--raw] -- "prompt"');
+    console.error('usage: ttym await <ws:name|:name|#id | --match \"expr\"> [--timeout ms] [--raw] [--bare] [--no-from] -- "prompt"');
+    console.error('       ttym await --id <interaction> [--timeout ms]     keep waiting on one that timed out');
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
@@ -322,12 +434,14 @@ export async function cmdAwaitAddr() {
     const targets = await resolveMatches(port, args[1] ?? '');
     const results = [];
     for (const t of targets) {
-      results.push({ target: t.label, ...await awaitInteraction(port, t.sessionId, prompt, timeoutMs, raw) });
+      const from = await senderPrefix(port, ownArgs, t.sessionId);
+      results.push({ target: t.label, ...await awaitInteraction(port, t.sessionId, from + prompt, timeoutMs, raw) });
     }
     if (hasFlag('--json')) return printOutput(results, true);
     for (const entry of results) {
       console.log(`── ${entry.target} ──`);
-      console.log(entry.output || `(${entry.reason})`);
+      if (entry.output) printAwaitText(entry, ownArgs.includes('--bare'));
+      else console.log(`(${entry.reason})`);
     }
     return;
   }
@@ -363,13 +477,9 @@ export async function cmdAwaitAddr() {
     return;
   }
 
-  const result = await awaitInteraction(port, target.sessionId, prompt, timeoutMs, raw);
+  const from = await senderPrefix(port, ownArgs, target.sessionId);
+  const result = await awaitInteraction(port, target.sessionId, from + prompt, timeoutMs, raw);
   if (hasFlag('--json')) return printOutput({ target: target.label, ...result }, true);
-  if (result.interaction?.status === 'pending') {
-    console.error(`timeout: still running after ${timeoutMs}ms — resume with id ${result.interaction.id}`);
-  } else if (result.interaction?.status === 'failed') {
-    console.error('agent ended the turn without answering');
-  }
-  process.stdout.write(result.output);
-  if (result.output && !result.output.endsWith('\n')) process.stdout.write('\n');
+  reportAwaitStatus(result, timeoutMs);
+  printAwaitText(result, ownArgs.includes('--bare'));
 }

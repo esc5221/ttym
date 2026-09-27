@@ -92,9 +92,13 @@ export interface StructuredTranscriptOpts {
  * Returns null when the file, session or a fresh-enough message is missing;
  * callers fall back to screen extraction.
  */
+/** Claude Code가 이 세션의 대화를 쓰는 파일. */
+export function claudeTranscriptPath(cwd: string, claudeSessionId: string, home = process.env.HOME ?? '/tmp'): string {
+  return resolve(home, '.claude', 'projects', claudeProjectDirName(cwd), `${claudeSessionId}.jsonl`);
+}
+
 export async function claudeStructuredTranscript(opts: StructuredTranscriptOpts): Promise<string | null> {
-  const home = opts.home ?? process.env.HOME ?? '/tmp';
-  const path = resolve(home, '.claude', 'projects', claudeProjectDirName(opts.cwd), `${opts.claudeSessionId}.jsonl`);
+  const path = claudeTranscriptPath(opts.cwd, opts.claudeSessionId, opts.home);
   const retries = opts.retries ?? 3;
   // Small clock slack: the hook's timestamp and ours come from the same
   // machine, but the interaction is created just before the prompt lands.
