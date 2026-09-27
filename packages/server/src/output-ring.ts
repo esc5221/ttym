@@ -8,7 +8,10 @@ export interface Chunk {
  * PTY output을 저장하고, 재접속 시 delta replay를 지원한다.
  */
 export class OutputRing {
-  private chunks: Chunk[] = [];
+  // 앞쪽 폐기는 head 인덱스만 민다. Array.shift()는 큰 배열에서 O(n)이라
+  // 작은 chunk가 수만 개 쌓인 세션에서 push마다 배열 전체를 옮겼다.
+  private buf: Chunk[] = [];
+  private head = 0;
   private used = 0;
   private _nextSeq: number;
   private _baseSeq: number;
@@ -22,17 +25,29 @@ export class OutputRing {
   get baseSeq() { return this._baseSeq; }
   get byteSize() { return this.used; }
 
+  private get chunks(): Chunk[] {
+    if (this.head > 0) { this.buf = this.buf.slice(this.head); this.head = 0; }
+    return this.buf;
+  }
+
+  private dropOldest(): void {
+    const old = this.buf[this.head]!;
+    this.buf[this.head++] = undefined as unknown as Chunk;
+    this.used -= old.data.length;
+    this._baseSeq = old.seq + 1;
+    if (this.head >= 1024 && this.head * 2 >= this.buf.length) {
+      this.buf = this.buf.slice(this.head);
+      this.head = 0;
+    }
+  }
+
   push(data: Buffer): number {
     const seq = this._nextSeq++;
-    this.chunks.push({ seq, data });
+    this.buf.push({ seq, data });
     this.used += data.length;
 
     // oldest 폐기 (메모리 상한 유지)
-    while (this.used > this.maxBytes && this.chunks.length > 0) {
-      const old = this.chunks.shift()!;
-      this.used -= old.data.length;
-      this._baseSeq = old.seq + 1;
-    }
+    while (this.used > this.maxBytes && this.head < this.buf.length) this.dropOldest();
 
     return seq;
   }
@@ -44,11 +59,7 @@ export class OutputRing {
 
   /** 해당 seq 이하의 chunk를 안전하게 제거 (ACK 기반) */
   trimTo(ackSeq: number) {
-    while (this.chunks.length > 0 && this.chunks[0].seq <= ackSeq) {
-      const old = this.chunks.shift()!;
-      this.used -= old.data.length;
-      this._baseSeq = old.seq + 1;
-    }
+    while (this.head < this.buf.length && this.buf[this.head]!.seq <= ackSeq) this.dropOldest();
   }
 
   /** [fromSeq, toSeqExclusive) 구간 바이트 — 명령 출력 절취용. truncated = 앞부분이 ring에서 밀려남. */
@@ -66,7 +77,8 @@ export class OutputRing {
   }
 
   clear() {
-    this.chunks = [];
+    this.buf = [];
+    this.head = 0;
     this.used = 0;
   }
 }

@@ -1748,9 +1748,13 @@ export async function createServer(port: number): Promise<TtymServer> {
       const batcher = batchers.get(sessionId);
       if (!batcher) return;
       batcher.acking = true;
-      while (batcher.sentEntries.length > 0 && batcher.sentEntries[0]!.seq <= seq) {
-        batcher.unackedBytes -= batcher.sentEntries.shift()!.bytes;
+      // shift()를 반복하면 큰 배열에서 O(n²) — 개수를 센 뒤 한 번에 잘라낸다.
+      let n = 0;
+      while (n < batcher.sentEntries.length && batcher.sentEntries[n]!.seq <= seq) {
+        batcher.unackedBytes -= batcher.sentEntries[n]!.bytes;
+        n++;
       }
+      if (n > 0) batcher.sentEntries.splice(0, n);
       if (batcher.unackedBytes < 0) batcher.unackedBytes = 0;
 
       if (batcher.pausedForBackpressure && batcher.unackedBytes <= ACK_LOW_WATER) {
