@@ -5,7 +5,7 @@ import { TerminalMux, Terminal, refreshTerminalThemes, ensureFontsRegistered, re
 import type { LocalEchoSetting, SessionInfo } from '@ttym/ui';
 import '@xterm/xterm/css/xterm.css';
 import { layoutToSessionIds, nextWorkspaceName } from '@ttym/shared';
-import { apiAddStream, apiDeleteWorkspace, apiRemoveStream, apiRenameStream, apiReorderStreams, fetchStreams, groupByStream, isNameConflict, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, IS_NATIVE, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, apiCreateWorkspace, apiReorderWorkspaces, apiUpdateWorkspace, copySessionUrl, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, miniLinkBtnStyle, navigate, parseHash, readLocalEchoEnabled, parseLocalEchoConfig, readUiStyle, sessionWorkspaceMembership, workspaceDisplayLabel, writeLocalEchoEnabled, type AgentState, type Route, type UiStyle, type Workspace } from './app-shared.js';
+import { apiAddStream, apiDeleteWorkspace, apiRemoveStream, apiRenameStream, apiReorderStreams, fetchStreams, groupByStream, isNameConflict, streamOf, tabStyle, UNSORTED_STREAM, AGENT_COLORS, API_BASE, useSurface, useViewportHeight, IS_NATIVE, TTYM_HOST, UI_STYLES, UI_STYLE_STORAGE_KEY, apiCreateWorkspace, apiReorderWorkspaces, apiUpdateWorkspace, copySessionUrl, fetchWorkspaces, getSessionUrl, isSecure, memberLabel, reloadIfStaleBundle, miniLinkBtnStyle, navigate, parseHash, readLocalEchoEnabled, parseLocalEchoConfig, readUiStyle, sessionWorkspaceMembership, workspaceDisplayLabel, writeLocalEchoEnabled, type AgentState, type Route, type UiStyle, type Workspace } from './app-shared.js';
 import { StripMenu, attachDropdownStyle, attachDropdownTitleStyle, attachDropdownItemStyle } from './StripMenu.js';
 import { DashboardPage } from './DashboardPage.js';
 import { MapPage } from './MapPage.js';
@@ -970,12 +970,14 @@ function App() {
 
     // 한 번 삐끗하면 영원히 "connecting..."이던 결함 — 백오프 재시도.
     const attempt = async (delayMs: number) => {
+      let failures = 0;
       while (!cancelled) {
         try {
           await mux.connect();
           if (!cancelled) { setConnected(true); setEverConnected(true); }
           return;
         } catch {
+          if (++failures >= 3 && failures % 3 === 0 && await reloadIfStaleBundle()) return;
           setConnectNote(`retrying in ${Math.round(delayMs / 1000) || 1}s…`);
           await new Promise((r) => setTimeout(r, delayMs));
           delayMs = Math.min(delayMs * 2, 5000);
@@ -997,15 +999,19 @@ function App() {
       setConnectNote('disconnected · reconnecting…');
       const retry = async () => {
         let delay = 500;
+        let failures = 0;
         while (!cancelled) {
           try {
             await mux.connect();
             if (cancelled) return;
             setConnected(true);
+            // 서버가 새 web 빌드와 함께 재시작됐으면 여기서 갈아탄다.
+            if (await reloadIfStaleBundle()) return;
             // 워터마크는 mux.cleanup()을 살아남았다 — 재부착은 그 지점부터다.
             reactivateHosts();
             return;
           } catch {
+            if (++failures % 3 === 0 && await reloadIfStaleBundle()) return;
             await new Promise((r) => setTimeout(r, delay));
             delay = Math.min(delay * 2, 5000);
           }

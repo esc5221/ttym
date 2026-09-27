@@ -176,6 +176,34 @@ export function parseLocalEchoConfig(value: string): LocalEchoSetting {
 export function getTtymHost(): string {
   return window.location.host;
 }
+
+/**
+ * 이 탭이 낡은 번들인가 — 서버의 index.html이 가리키는 엔트리 스크립트가
+ * 지금 떠 있는 것과 다르면 새로고침한다. 낡은 탭은 서버가 바뀐 규칙(예: 9/23
+ * same-origin)으로 WS를 거절해도 스스로 알 길이 없어 재시도만 영원히 돈다
+ * (실측: 거절 로그 51,110건). 재접속 실패가 이어질 때와 재접속 직후에 부른다.
+ * 새로고침 루프를 막으려고 30초에 한 번만 리로드한다.
+ */
+export async function reloadIfStaleBundle(): Promise<boolean> {
+  if (IS_NATIVE) return false;
+  const mine = document.querySelector<HTMLScriptElement>('script[type="module"][src*="/assets/"]')?.getAttribute('src');
+  if (!mine) return false;
+  let html: string;
+  try {
+    const res = await fetch(`${window.location.origin}/`, { cache: 'no-store', headers: { Accept: 'text/html' } });
+    if (!res.ok) return false;
+    html = await res.text();
+  } catch { return false; }
+  const live = /<script[^>]*type="module"[^>]*src="([^"]*\/assets\/[^"]+)"/.exec(html)?.[1];
+  if (!live || live === mine) return false;
+  try {
+    const last = Number(sessionStorage.getItem('ttym-stale-reload-at') ?? 0);
+    if (Date.now() - last < 30_000) return false;
+    sessionStorage.setItem('ttym-stale-reload-at', String(Date.now()));
+  } catch {}
+  window.location.reload();
+  return true;
+}
 /** 입력 성격: 터치가 주 입력 수단인가 — 키바·상시 액션·webgl off의 기준.
  *  공간 성격(useNarrow)과 분리: 아이패드+키보드는 coarse지만 넓다. */
 export const IS_COARSE = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches === true;
