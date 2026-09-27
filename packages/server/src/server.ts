@@ -18,6 +18,7 @@ import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
 import { AgentSleeper, psProcesses, readAgentStatus, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { RemoteStore } from './remote/store.js';
 import { gate, gateUpgrade, type RemoteContext } from './remote/http.js';
 
@@ -35,6 +36,8 @@ const WS_HIGH_WATER = 1 << 20;
 // Comfortably under the ~125s idle cutoff measured on the tunnel path, and
 // under the 100s Cloudflare documents, with room for one lost round.
 const WS_PING_INTERVAL_MS = 30_000;
+/** A loop stall this long (or a window at 50%+ CPU) earns a LAG log line. */
+const LOOP_LAG_LOG_MS = 200;
 // Ack-based viewer backpressure (vscode terminal model): measure what the
 // client has *parsed*, not what the network delivered. Wide hysteresis keeps
 // the stream from stuttering at the boundary.
@@ -1436,7 +1439,25 @@ export async function createServer(port: number): Promise<TtymServer> {
   // once a minute or worse, which is exactly when the keepalive must not slip.
   // It also runs outside the batcher — a paused viewer must still be pinged.
   const alive = new WeakMap<WebSocket, boolean>();
+  // Event-loop health, one line per window only when it went bad. A blocked
+  // loop is what the browser sees as "infinite loading"; without this line the
+  // only way to spot it was sampling the process by hand (09-27: 80% CPU in an
+  // O(n) Array.shift, invisible in every log).
+  const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+  loopDelay.enable();
+  let lastCpu = process.cpuUsage();
   const heartbeat = setInterval(() => {
+    {
+      const cpu = process.cpuUsage(lastCpu);
+      lastCpu = process.cpuUsage();
+      const cpuPct = Math.round(((cpu.user + cpu.system) / 1000) / WS_PING_INTERVAL_MS * 100);
+      const p99 = Math.round(loopDelay.percentile(99) / 1e6);
+      const max = Math.round(loopDelay.max / 1e6);
+      loopDelay.reset();
+      if (max >= LOOP_LAG_LOG_MS || cpuPct >= 50) {
+        log(`LAG ${WS_PING_INTERVAL_MS / 1000}s p99=${p99}ms max=${max}ms cpu=${cpuPct}% clients=${wss.clients.size}`);
+      }
+    }
     for (const client of wss.clients) {
       if (alive.get(client) === false) {
         // Missed a full round — the socket is a corpse the OS has not reaped.
@@ -2135,6 +2156,7 @@ export async function createServer(port: number): Promise<TtymServer> {
       markCleanExit();
       clearInterval(agentExpirySweep);
       clearInterval(heartbeat);
+      loopDelay.disable();
       unsubscribeWorkspaceChanges();
       if (gcTimer) clearInterval(gcTimer);
       fileBridge?.stop?.();
