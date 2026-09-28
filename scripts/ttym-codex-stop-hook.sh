@@ -19,12 +19,12 @@ fi
 curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \
   -H 'content-type: application/json' -d "$AGENT_PATCH" >/dev/null
 
+# Settle the interaction. Codex's Stop input carries the last assistant message,
+# the rollout path and the turn id — the server reads the turn by that id.
+STOP_BODY=$(printf '%s' "$HOOK_PAYLOAD" | jq -c \
+  '{event: "Stop", reply: (.last_assistant_message // null), transcriptPath: (.transcript_path // null), turnId: (.turn_id // null)}' 2>/dev/null)
+[ -z "$STOP_BODY" ] && STOP_BODY='{"event":"Stop"}'
 curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/stop" \
-  -H 'content-type: application/json' -d '{"event":"Stop"}' >/dev/null
-
-CURRENT_SEQ=$(curl -s -m 5 "$BASE/api/sessions/$TTYM_SESSION_ID/meta" | jq -r '.seq // 0' 2>/dev/null)
-curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \
-  -H 'content-type: application/json' \
-  -d "{\"stopSeq\":${CURRENT_SEQ:-0},\"stopAt\":$(date +%s)}" >/dev/null
+  -H 'content-type: application/json' -d "$STOP_BODY" >/dev/null
 
 exit 0

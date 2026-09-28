@@ -65,20 +65,32 @@ send API(`POST /api/sessions/:id/send`)는 `Buffer.from(data)` — 이스케이�
 - Claude Code Bash tool 환경에서는 `$'...'` ANSI-C quoting이 안 될 수 있음. 이 경우 `printf '\r'` 파이프 등 우회 필요
 - await 명령은 `\r` 자동 append 내장 (payload에 CR/LF 없으면 `\r` 추가)
 
-### await (request-response, Claude 전용)
+### await — 묻고 답을 받는다
 
-프롬프트 보내고 응답 완료까지 blocking 대기. `\r` 자동 append — 직접 붙일 필요 없음.
+`ttym guide agents`가 이 바이너리 기준의 사용법(동기·백그라운드·이어받기·얼마나 읽을지)을 출력한다.
+에이전트에게는 이걸 읽으라고 하면 된다. 아래는 구조.
 
 ```sh
-ttym await :claude-sub --json -- '질문'
-ttym await :claude-sub --json --raw -- '질문'       # ANSI 원본
-ttym await :claude-sub --timeout 60000 --json -- '질문'
+ttym await :bob -- '질문'                  # 답 + 요약 한 줄(turn id · 시간 · 도구 · 수정 파일)
+ttym turn <interaction>  [--full|--path]   # 그 턴에 한 말 전부 + 도구 한 줄씩 / 입력·출력까지
+ttym await --id <interaction>              # timeout(종료 코드 124) 난 요청을 이어서 기다림
+ttym await :bob --json -- '질문'           # { output, screen, reason, interaction: { id, summary, more } }
 ```
 
-동작 원리: meta.seq bump → send → Stop hook이 stopSeq 기록 → 폴링 감지 → screen 반환.
-병렬 가능: 여러 멤버에 동시에 await 실행하면 각각 독립적으로 완료 감지.
+상대에 따라 완료 신호와 답이 다르다:
 
-**await는 Claude Code에서만 동작한다** — Stop hook 기반이므로. Codex 등 다른 에이전트는 send + screen 폴링 사용.
+```
+상대                        완료 신호          답
+셸 (셸 통합 OSC 133)         133;D              그 명령의 출력 구간 (common.ts shellAwait)
+Claude Code · Codex         Stop 훅            그 턴의 마지막 말 — 훅 입력의 last_assistant_message.
+                                              turn·요약은 transcript_path의 JSONL에서 (agent-turn.ts)
+                                              둘 다 없으면 보낸 뒤의 화면 구간 (transcriptSource: screen)
+신호 없는 터미널             없음               timeout. --json의 screen에 그 순간 화면. send + screen으로 다룬다
+```
+
+- 병렬 가능: 여러 멤버에 동시에 await하면 각각 따로 끝난다. 한 멤버에 두 번째 await는 첫 번째를 버린다.
+- pane 안에서 에이전트에게 보내면 앞에 `[ttym · from ws:name]`이 붙는다 (`--no-from`).
+- 자는 에이전트에게 보내면 깨운 뒤 보낸다.
 
 ### 프로비저닝 속도
 
@@ -88,14 +100,11 @@ ttym await :claude-sub --timeout 60000 --json -- '질문'
 
 ### 에이전트별 submit 차이
 
-- **Claude Code**: `\r` (CR) — await가 자동 처리
-- **Codex**: `\r` (CR) — 동일하지만 await(Stop hook) 미지원, send+screen 폴링 사용
+- **Claude Code**·**Codex**: `\r` (CR) — await가 자동 처리
 - **zsh**: `\n` (LF)
 
-Codex도 Stop hook을 지원한다 (v0.114.0+, `codex_hooks` feature flag 필요).
-- `~/.codex/config.toml`의 `[features]`에 `codex_hooks = true` 추가
-- `~/.codex/hooks.json`에 Stop 이벤트 등록 (`scripts/ttym-codex-stop-hook.sh`)
-- await 명령은 Claude/Codex 모두 동작. Node.js 내부에서 CR 바이트를 직접 전송하므로 shell escaping 문제 없음.
+Codex 훅은 `codex_hooks` feature flag(v0.114.0+)와 `~/.codex/hooks.json`의 SessionStart·Stop 등록이 필요하다
+(`scripts/ttym-codex-hook.sh`, `scripts/ttym-codex-stop-hook.sh`). hooks.json이 바뀌면 Codex가 다음 실행 때 신뢰를 묻는다.
 
 ## 뷰어 (`ttym open`)
 
@@ -168,9 +177,10 @@ ttym map refresh --dry-run      # 프롬프트만 출력
 
 ## Stop Hook (scripts/ttym-claude-stop-hook.sh)
 
-Claude Code 응답 완료 시 발동. 두 가지 역할:
-1. `claudeActive` 상태 클리어
-2. `stopSeq`/`stopAt`을 meta에 기록 → await의 완료 신호
+Claude Code 턴 종료 시 발동 (Stop·StopFailure·SessionEnd). Codex는 scripts/ttym-codex-stop-hook.sh로 같은 일:
+1. 에이전트 상태 갱신 — `claudeActive` 해제, 백그라운드 작업·예약(`claudeInFlight`, agent sleep이 읽음)
+2. `POST /api/internal/sessions/:id/stop` — 진행 중인 await를 끝낸다. 훅 입력의 마지막 답·transcript 경로
+   (Codex는 turn id도)를 그대로 넘긴다
 
 ## Agent Bus (server/src/agent-*)
 

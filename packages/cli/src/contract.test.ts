@@ -183,7 +183,7 @@ suite('CLI 계약', () => {
     const r = run(['await', 'suite:echoer', '--json', '--timeout', '1500', '--', 'noop']);
     expect(r.stdout, `stdout이 비었다 — 전체 출력: ${r.out}`).not.toBe('');
     const j = JSON.parse(r.stdout);
-    for (const key of ['target', 'interaction', 'completed', 'output']) {
+    for (const key of ['target', 'interaction', 'completed', 'output', 'screen']) {
       expect(j, `missing ${key}`).toHaveProperty(key);
     }
     for (const key of ['id', 'status', 'transcriptSource', 'integrity']) {
@@ -205,7 +205,7 @@ suite('CLI 계약', () => {
     expect(r.stdout, `stdout이 비었다 — 전체 출력: ${r.out}`).not.toBe('');
     const j = JSON.parse(r.stdout);
     expect(j, 'output이 없다').toHaveProperty('output');
-    expect(j.output, 'output에 ESC 바이트(0x1b)가 들어있다').not.toMatch(/\x1b/);
+    for (const text of [j.output, j.screen]) if (text !== null) expect(text, 'output·screen에 ESC 바이트(0x1b)가 들어있다').not.toMatch(/\x1b/);
   });
 
   it('§6 await 프롬프트 본문에 --raw가 있어도 strip 동작은 유지되고, 플래그 --raw는 인자로 인식된다', () => {
@@ -213,12 +213,13 @@ suite('CLI 계약', () => {
     const rawFromPrompt = run(['await', 'suite:echoer', '--json', '--timeout', '2000', '--', 'printf', ansiCommand]);
     expect(rawFromPrompt.stdout, `stdout이 비었다 — 전체 출력: ${rawFromPrompt.out}`).not.toBe('');
     const promptJson = JSON.parse(rawFromPrompt.stdout);
-    expect(promptJson.output, '프롬프트의 --raw 토큰이 strip을 비활성화했다').not.toMatch(/\x1b/);
+    // 셸 통합 없는 sh라 답(output)이 없다 — 그 순간의 화면이 screen으로 온다.
+    expect(promptJson.output ?? promptJson.screen, '프롬프트의 --raw 토큰이 strip을 비활성화했다').not.toMatch(/\x1b/);
 
     const rawFromFlag = run(['await', 'suite:echoer', '--raw', '--json', '--timeout', '2000', '--', 'printf', ansiCommand]);
     expect(rawFromFlag.stdout, `stdout이 비었다 — 전체 출력: ${rawFromFlag.out}`).not.toBe('');
     const flagJson = JSON.parse(rawFromFlag.stdout);
-    expect(flagJson.output, '실제 --raw 플래그가 raw 출력을 만들지 못했다').toMatch(/\x1b/);
+    expect(flagJson.output ?? flagJson.screen, '실제 --raw 플래그가 raw 출력을 만들지 못했다').toMatch(/\x1b/);
   });
 
   it('§6 await --match --json은 각 항목이 target·interaction·completed·reason·output을 가진다', () => {

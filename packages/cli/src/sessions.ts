@@ -283,13 +283,21 @@ async function awaitInteraction(port: number, sessionId: number, prompt: string,
   return awaitResult(port, sessionId, response?.interaction ?? null, raw);
 }
 
-/** 서버의 interaction 하나를 await 결과 모양으로. 새로 보낸 것과 --id로 이어받은 것이 같은 길을 탄다. */
+/**
+ * 서버의 interaction 하나를 await 결과 모양으로. 새로 보낸 것과 --id로 이어받은 것이 같은 길을 탄다.
+ *
+ * output은 답뿐이다 — 에이전트가 한 말(transcript) 또는 서버가 잘라 준 화면 구간. 답이 없는데
+ * (timeout·신호 없는 터미널) 지금 화면을 output에 넣으면 부르는 쪽이 진행 중인 화면을 답으로
+ * 읽는다. 그 화면은 screen에 따로 담는다.
+ */
 async function awaitResult(port: number, sessionId: number, interaction: any, raw: boolean) {
-  let output = interaction?.transcript ?? null;
+  const output = interaction?.transcript ?? null;
+  let screen: string | null = null;
   if (output === null) {
-    const screen = await fetchJson(port, `/api/sessions/${sessionId}/screen`).catch(() => null);
-    output = screen?.screen ?? '';
+    const res = await fetchJson(port, `/api/sessions/${sessionId}/screen`).catch(() => null);
+    screen = typeof res?.screen === 'string' ? res.screen : null;
   }
+  const clean = (text: string | null) => (text === null ? null : raw ? text : stripAnsi(text));
   return {
     interaction: interaction ? {
       id: interaction.id,
@@ -303,7 +311,8 @@ async function awaitResult(port: number, sessionId: number, interaction: any, ra
     } : null,
     completed: interaction?.status === 'completed',
     reason: awaitReason(interaction?.status ?? null),
-    output: raw ? output : stripAnsi(output),
+    output: clean(output),
+    screen: clean(screen),
   };
 }
 
@@ -352,8 +361,9 @@ function footerLines(interaction: any): string[] {
 }
 
 function printAwaitText(result: any, bare: boolean) {
+  if (!result.output) return;
   process.stdout.write(result.output);
-  if (result.output && !result.output.endsWith('\n')) process.stdout.write('\n');
+  if (!result.output.endsWith('\n')) process.stdout.write('\n');
   if (!bare) for (const line of footerLines(result.interaction)) process.stdout.write(`${line}\n`);
 }
 
@@ -376,6 +386,7 @@ async function resumeAwait(port: number, iid: string, timeoutMs: number, raw: bo
 function reportAwaitStatus(result: any, timeoutMs: number) {
   if (result.interaction?.status === 'pending') {
     console.error(`timeout: still running after ${timeoutMs}ms — keep waiting: ttym await --id ${result.interaction.id}`);
+    console.error('  (no turn-end signal from a plain terminal? drive it with send and read it with ttym screen)');
     process.exit(EXIT.TIMEOUT);
   } else if (result.interaction?.status === 'failed') {
     console.error('agent ended the turn without answering');

@@ -44,15 +44,14 @@ fi
 curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \
   -H 'content-type: application/json' -d "$AGENT_PATCH" >/dev/null
 
-# Settle whatever interaction is in flight for this session.
+# Settle whatever interaction is in flight for this session. The answer rides
+# along from the hook input as it is: Claude Code (2.1.x) sends the last
+# assistant message and the transcript path, so the server neither guesses the
+# file nor scrapes the screen. Older versions send neither; the server falls back.
+STOP_BODY=$(printf '%s' "$HOOK_PAYLOAD" | jq -c --arg ev "$EVENT" \
+  '{event: $ev, reply: (.last_assistant_message // null), transcriptPath: (.transcript_path // null)}' 2>/dev/null)
+[ -z "$STOP_BODY" ] && STOP_BODY="{\"event\":\"$EVENT\"}"
 curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/stop" \
-  -H 'content-type: application/json' -d "{\"event\":\"$EVENT\"}" >/dev/null
-
-# Legacy signal, still written so a v2 CLI polling meta.stopSeq keeps working
-# during a rollback. Remove once no v2 client remains.
-CURRENT_SEQ=$(curl -s -m 5 "$BASE/api/sessions/$TTYM_SESSION_ID/meta" | jq -r '.seq // 0' 2>/dev/null)
-curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \
-  -H 'content-type: application/json' \
-  -d "{\"stopSeq\":${CURRENT_SEQ:-0},\"stopAt\":$(date +%s)}" >/dev/null
+  -H 'content-type: application/json' -d "$STOP_BODY" >/dev/null
 
 exit 0

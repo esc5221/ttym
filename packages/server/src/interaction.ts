@@ -1,6 +1,6 @@
 import type { Session, TerminalMarker } from './session.js';
-import { agentKindOf, claudeStructuredTranscript, claudeTranscriptPath } from './agent-providers.js';
-import { readTurn, summarize, type TurnSummary } from './agent-turn.js';
+import { agentKindOf, claudeTranscriptPath } from './agent-providers.js';
+import { isTranscriptPath, lastText, readTurn, summarize, type TurnEvent, type TurnSummary } from './agent-turn.js';
 
 /**
  * One prompt and the output it produced.
@@ -24,6 +24,8 @@ export interface InteractionView {
   integrity?: 'healthy' | 'degraded';
   /** 이 턴을 다시 읽을 곳 — `ttym turn`이 outline·full을 여기서 만든다. structured일 때만. */
   turnPath?: string;
+  /** Codex의 turn_id. 있으면 turnPath 안에서 이 턴만 자른다. */
+  turnId?: string;
   /** 턴 크기: 걸린 시간·도구 횟수·수정한 파일. await 결과 아래 한 줄. */
   summary?: TurnSummary;
   createdAt: number;
@@ -36,8 +38,18 @@ interface InteractionRecord extends InteractionView {
 }
 
 /** 턴의 시간 범위. 앞쪽 여유는 claudeStructuredTranscript와 같다(프롬프트 직전 생성). */
-export function turnRange(rec: { turnPath?: string; createdAt: number }, endedAt: number | null) {
-  return { path: rec.turnPath ?? '', sinceMs: rec.createdAt - 2_000, untilMs: endedAt === null ? undefined : endedAt + 2_000 };
+export function turnRange(rec: { turnPath?: string; turnId?: string; createdAt: number }, endedAt: number | null) {
+  return { path: rec.turnPath ?? '', turnId: rec.turnId, sinceMs: rec.createdAt - 2_000, untilMs: endedAt === null ? undefined : endedAt + 2_000 };
+}
+
+/**
+ * Stop 훅이 넘겨주는 것. Claude Code와 Codex의 Stop 입력이 같은 이름을 쓴다
+ * (transcript_path, last_assistant_message; Codex는 turn_id도). 옛 훅은 아무것도 안 넘긴다.
+ */
+export interface StopReport {
+  reply?: string | null;
+  transcriptPath?: string;
+  turnId?: string;
 }
 
 let counter = 0;
@@ -55,6 +67,9 @@ function view(rec: InteractionRecord): InteractionView {
 }
 
 export class InteractionStore {
+  /** transcript가 훅보다 늦을 때 다시 읽는 횟수. 테스트는 0. */
+  constructor(private transcriptRetries = 3) {}
+
   private byId = new Map<string, InteractionRecord>();
   /** At most one in flight per session: agents answer one prompt at a time. */
   private pendingBySession = new Map<number, InteractionRecord>();
@@ -97,41 +112,57 @@ export class InteractionStore {
     session: Session,
     status: 'completed' | 'failed' = 'completed',
     meta?: Record<string, unknown>,
+    report: StopReport = {},
   ): Promise<InteractionView | null> {
     const rec = this.pendingBySession.get(session.id);
     if (!rec) return null;
+    const now = Date.now();
 
-    // The agent's own record first — the screen is a rendering, and its tail
-    // carries whatever the TUI painted after the answer. Screen extraction
-    // stays as the fallback, and says so.
-    let structured: string | null = null;
+    // 이 턴이 기록된 파일. 훅이 알려준 경로가 우선이고, 옛 Claude 훅이면 meta로 찾는다.
     // The Stop hook clears claudeSessionId into claudeLastSessionId BEFORE
     // reporting the stop — by the time we run, the live id has already moved.
     const claudeSid = (meta?.claudeSessionId ?? meta?.claudeLastSessionId) as unknown;
-    if (status === 'completed' && meta && agentKindOf(meta) === 'claude-code'
-        && typeof claudeSid === 'string' && typeof meta.cwd === 'string') {
-      structured = await claudeStructuredTranscript({
-        cwd: meta.cwd,
-        claudeSessionId: claudeSid,
-        sinceMs: rec.createdAt,
-      }).catch(() => null);
+    if (isTranscriptPath(report.transcriptPath)) rec.turnPath = report.transcriptPath;
+    else if (meta && agentKindOf(meta) === 'claude-code' && typeof claudeSid === 'string' && typeof meta.cwd === 'string') {
+      rec.turnPath = claudeTranscriptPath(meta.cwd, claudeSid);
     }
-    if (structured !== null) {
-      rec.transcript = structured;
+    if (typeof report.turnId === 'string' && report.turnId) rec.turnId = report.turnId;
+
+    let events: TurnEvent[] | null = null;
+    if (status === 'completed' && rec.turnPath) {
+      events = await this.readWithRetry(turnRange(rec, now), report.reply);
+    }
+
+    // 답: 에이전트가 이 턴에 마지막으로 한 말. 훅이 준 값 → transcript의 마지막 text → 화면 구간.
+    // 화면은 렌더링이라 TUI가 답 뒤에 그린 것까지 섞인다. 마지막 수단이고, 그렇다고 표시한다.
+    const reply = typeof report.reply === 'string' && report.reply.trim() ? report.reply.trim() : (events ? lastText(events) : null);
+    if (status === 'completed' && reply !== null) {
+      rec.transcript = reply;
       rec.transcriptSource = 'structured';
-      rec.turnPath = claudeTranscriptPath(meta!.cwd as string, claudeSid as string);
-      const now = Date.now();
-      rec.summary = await readTurn(turnRange(rec, now))
-        .then((events) => summarize(events, rec.createdAt, now))
-        .catch(() => undefined);
+      if (events) rec.summary = summarize(events, rec.createdAt, now);
     } else if (rec.marker) {
       rec.transcript = session.transcriptSince(rec.marker);
       if (rec.transcript !== null) rec.transcriptSource = 'screen';
     }
+    if (rec.transcriptSource !== 'structured') { rec.turnPath = undefined; rec.turnId = undefined; }
     // Extraction quality rides along: a transcript read off a degraded screen
     // must not be indistinguishable from a faithful one.
     rec.integrity = session.integrity;
     return this.settle(rec, status);
+  }
+
+  /**
+   * transcript는 Stop 훅보다 조금 늦게 디스크에 닿는다. 답을 훅이 이미 줬으면 요약만
+   * 필요하니 한 번 읽고, 답을 여기서 찾아야 하면 마지막 text가 보일 때까지 몇 번 더 읽는다.
+   */
+  private async readWithRetry(range: ReturnType<typeof turnRange>, hookReply: unknown): Promise<TurnEvent[] | null> {
+    const tries = typeof hookReply === 'string' && hookReply.trim() ? 1 : this.transcriptRetries + 1;
+    for (let i = 0; i < tries; i++) {
+      const events = await readTurn(range).catch(() => null);
+      if (events && (tries === 1 || lastText(events) !== null)) return events;
+      if (i + 1 < tries) await new Promise((r) => setTimeout(r, 250));
+    }
+    return null;
   }
 
   /** Mark as timed out but keep it resolvable: the agent may still answer. */

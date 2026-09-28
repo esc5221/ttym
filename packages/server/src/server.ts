@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import { readTurn, renderFull, renderOutline } from './agent-turn.js';
-import { InteractionStore, turnRange } from './interaction.js';
+import { InteractionStore, turnRange, type StopReport } from './interaction.js';
 import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
 import { ConfigStore } from './config-file.js';
 import { agentKindOf } from './agent-providers.js';
@@ -574,13 +574,18 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       // the agent answered. The rest still end the wait — an agent that died
       // is not going to reply, and blocking to timeout would misreport that.
       let outcome: 'completed' | 'failed' = 'completed';
+      // 훅이 에이전트의 Stop 입력에서 그대로 옮겨 온 것: 마지막 답, transcript 경로, (Codex) turn id.
+      const report: StopReport = {};
       try {
         const parsed = body ? JSON.parse(body) : {};
         if (parsed.event === 'StopFailure' || parsed.event === 'SessionEnd') outcome = 'failed';
         if (parsed.outcome === 'failed') outcome = 'failed';
+        if (typeof parsed.reply === 'string') report.reply = parsed.reply;
+        if (typeof parsed.transcriptPath === 'string') report.transcriptPath = parsed.transcriptPath;
+        if (typeof parsed.turnId === 'string') report.turnId = parsed.turnId;
       } catch { /* an empty or malformed body is treated as a plain Stop */ }
       void manager.getMeta(id).catch(() => ({})).then(async (meta) => {
-        const settled = await interactions.finish(session, outcome, meta as Record<string, unknown>);
+        const settled = await interactions.finish(session, outcome, meta as Record<string, unknown>, report);
         log(`HTTP STOP session=${id} outcome=${outcome} interaction=${settled?.id ?? 'none'} source=${settled?.transcriptSource ?? '-'}`);
         json(200, { ok: true, interaction: settled });
       });

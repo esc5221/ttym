@@ -18,6 +18,8 @@
  * to them breaks nothing but that user's display.
  */
 
+// seq·stopSeq·stopAt: 옛 await 핸드셰이크. 이제 아무도 쓰지 않지만 예전 세션의 meta에 값이
+// 남아 있다 — 목록에서 빼면 그 값이 사용자 메모로 드러나고 PATCH로 바뀐다.
 const RUNTIME_EXACT = new Set(['seq', 'stopSeq', 'stopAt', 'agentActiveAt', 'agentSleep']);
 const RUNTIME_PREFIXES = ['claude', 'codex'];
 
