@@ -17,7 +17,7 @@ import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { ViewerStore } from './viewer/store.js';
 import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
-import { AgentSleeper, psProcesses, readAgentStatus, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, SUBMIT_GAP_MS, findAgentProcess, psProcesses, readAgentStatus, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { RemoteStore } from './remote/store.js';
@@ -242,6 +242,24 @@ export interface TtymServer {
 // ───── HTTP API ─────
 
 let bootSafeMode = false;
+
+const PROMPT_PIECE_BYTES = 512;
+const PROMPT_PIECE_GAP_MS = 20;
+
+/** Split without cutting a UTF-8 sequence: a piece never ends on a continuation byte's lead. */
+export function utf8Pieces(bytes: Buffer, max: number): Buffer[] {
+  const out: Buffer[] = [];
+  for (let i = 0; i < bytes.length;) {
+    let end = Math.min(bytes.length, i + max);
+    while (end < bytes.length && end > i + 1 && (bytes[end]! & 0xc0) === 0x80) end--;
+    out.push(bytes.subarray(i, end));
+    i = end;
+  }
+  return out.length ? out : [bytes];
+}
+
+/** Claude panes on a permission prompt or dialog → what for. Filled by the waiting sweep. */
+const agentWaiting = new Map<number, string>();
 
 function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void, viewer?: { store: ViewerStore; service: ViewerService }, sleeper?: AgentSleeper): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -468,10 +486,18 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       // Mark before writing: output that arrives between the two would
       // otherwise fall outside the range and be dropped from the transcript.
       const interaction = interactions.start(session, prompt);
-      // A PTY that exits mid-answer will never report Stop; settle the wait
-      // rather than hold the request open until its timeout.
-      session.onExit(() => interactions.abandonSession(id));
-      session.write(Buffer.from(prompt));
+      // A long prompt goes in pieces the PTY takes whole, a beat apart. Written at
+      // once, macOS accepts ~1 KB and the holder writes the rest when it drains; the
+      // TUI then reads two chunks, and Claude Code sometimes kept only the second —
+      // the first ~1024 bytes vanished (PLAYBOOK F-10: 2 in 10 at 2971 bytes; 0 in 30
+      // in 512-byte pieces 20 ms apart). Bracketed paste fixes the split but makes
+      // Claude treat the prompt as pasted material and decline its instructions.
+      const pieces = submit === 'cr' ? utf8Pieces(Buffer.from(prompt), PROMPT_PIECE_BYTES) : [Buffer.from(prompt)];
+      for (let i = 0; i < pieces.length; i++) {
+        if (session.isDead) break;
+        session.write(pieces[i]!);
+        if (i + 1 < pieces.length) await new Promise((r) => setTimeout(r, PROMPT_PIECE_GAP_MS));
+      }
       // Interactive TUIs read Enter as CR; a shell wants LF. Neither is right
       // for both, so the caller says which, defaulting to the agent case.
       // The CR waits a beat: two back-to-back writes can land in one PTY
@@ -480,11 +506,11 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       // forever. Longer prompts widen the paste window, which is why this
       // was a timing lottery. A shell's LF has no such heuristics.
       if (submit === 'cr') {
-        setTimeout(() => { if (!session.isDead) session.write(Buffer.from([0x0d])); }, 75);
+        setTimeout(() => { if (!session.isDead) session.write(Buffer.from([0x0d])); }, SUBMIT_GAP_MS);
       } else if (submit === 'lf') {
         session.write(Buffer.from([0x0a]));
       }
-      log(`HTTP INTERACTION session=${id} id=${interaction.id} len=${prompt.length}`);
+      log(`HTTP INTERACTION session=${id} id=${interaction.id} len=${prompt.length} pieces=${pieces.length}`);
 
       const settled = await interactions.wait(interaction.id, timeoutMs);
       if (settled && settled.status !== 'pending') { json(200, { interaction: settled }); return; }
@@ -856,7 +882,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     const sessions = manager.list();
     Promise.all(sessions.map(async (info) => {
       const meta = await manager.getMeta(info.id);
-      return [info.id, { kind: agentKindOf(meta), active: agentIsActive(meta), sleep: sleeper?.stateOf(info.id) ?? null }] as const;
+      return [info.id, { kind: agentKindOf(meta), active: agentIsActive(meta), sleep: sleeper?.stateOf(info.id) ?? null, waiting: agentWaiting.get(info.id) ?? null }] as const;
     })).then((entries) => {
       json(200, Object.fromEntries(entries));
     }).catch(() => json(500, { error: 'assembly failed' }));
@@ -1524,6 +1550,46 @@ export async function createServer(port: number): Promise<TtymServer> {
   }, 60_000);
   agentExpirySweep.unref();
 
+  // Permission prompts and dialogs. Claude Code writes `waiting` (and what for) to
+  // ~/.claude/sessions/<pid>.json; nothing pushes it, so a pane blocked on "allow this
+  // command?" looked exactly like one quietly working. A sweep reads the files and
+  // broadcasts only the changes — one ps per sweep, and only while a Claude pane exists.
+  const WAITING_SWEEP_MS = 3_000;
+  const waitingSweep = setInterval(() => {
+    void (async () => {
+      const claudePanes: Array<{ id: number; shellPid: number }> = [];
+      for (const info of manager.list()) {
+        const session = manager.get(info.id);
+        if (!session || session.isDead || !session.childPid) continue;
+        if (sleeper?.stateOf(info.id)) continue; // a sleeping pane has no agent to ask
+        const meta = await manager.getMeta(info.id).catch(() => null);
+        if (meta && agentKindOf(meta) === 'claude-code') claudePanes.push({ id: info.id, shellPid: session.childPid });
+      }
+      const seen = new Set<number>();
+      if (claudePanes.length > 0) {
+        const procs = await psProcesses().catch(() => null);
+        if (!procs) return;
+        for (const pane of claudePanes) {
+          const agent = findAgentProcess(procs, pane.shellPid);
+          const status = agent?.kind === 'claude' ? await readAgentStatus(agent.pid) : null;
+          if (status?.status !== 'waiting') continue;
+          seen.add(pane.id);
+          const what = status.waitingFor ?? 'input';
+          if (agentWaiting.get(pane.id) !== what) {
+            agentWaiting.set(pane.id, what);
+            manager.getMeta(pane.id).then((meta) => broadcastAgentState(pane.id, meta)).catch(() => {});
+          }
+        }
+      }
+      for (const id of [...agentWaiting.keys()]) {
+        if (seen.has(id)) continue;
+        agentWaiting.delete(id);
+        manager.getMeta(id).then((meta) => broadcastAgentState(id, meta)).catch(() => {});
+      }
+    })().catch(() => {});
+  }, WAITING_SWEEP_MS);
+  waitingSweep.unref();
+
   function broadcastAgentState(sessionId: number, meta: Record<string, unknown>) {
     const kind = agentKindOf(meta);
     const event = {
@@ -1531,6 +1597,7 @@ export async function createServer(port: number): Promise<TtymServer> {
       kind,
       active: agentIsActive(meta),
       sleep: sleeper?.stateOf(sessionId) ?? null,
+      waiting: agentWaiting.get(sessionId) ?? null,
     };
     lastAnnouncedActive.set(sessionId, event.active);
     const frame = encode(0, CMD.AGENT, jsonPayload(event));

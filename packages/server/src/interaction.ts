@@ -52,6 +52,9 @@ export interface StopReport {
   turnId?: string;
 }
 
+/** 끝난 interaction을 얼마나 두나. await --id·ttym turn이 이 안에서 찾는다. */
+export const RETAIN_SETTLED_MS = 6 * 60 * 60_000;
+
 let counter = 0;
 
 function newId(): string {
@@ -71,6 +74,7 @@ export class InteractionStore {
   constructor(private transcriptRetries = 3) {}
 
   private byId = new Map<string, InteractionRecord>();
+  private watchedExit = new Set<number>();
   /** At most one in flight per session: agents answer one prompt at a time. */
   private pendingBySession = new Map<number, InteractionRecord>();
 
@@ -84,6 +88,15 @@ export class InteractionStore {
   start(session: Session, prompt: string): InteractionView {
     const previous = this.pendingBySession.get(session.id);
     if (previous) this.settle(previous, 'failed');
+    // 끝난 기록은 한동안 남긴다 — 티켓으로 맡긴 쪽이 몇 시간 뒤에 await --id로 가져간다.
+    // 부르는 곳이 없어 서버가 사는 내내 쌓이기만 했다.
+    this.prune(RETAIN_SETTLED_MS);
+    // A PTY that exits mid-answer will never report Stop; settle the wait rather than
+    // hold it until its timeout. Once per session — it used to be added on every await.
+    if (!this.watchedExit.has(session.id)) {
+      this.watchedExit.add(session.id);
+      session.onExit(() => { this.watchedExit.delete(session.id); this.abandonSession(session.id); });
+    }
 
     const rec: InteractionRecord = {
       id: newId(),

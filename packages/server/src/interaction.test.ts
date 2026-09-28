@@ -5,6 +5,7 @@ import type { Session, TerminalMarker } from './session.js';
 /** A Session stand-in: markCursor/transcriptSince are all the store touches. */
 function fakeSession(id: number, transcript: string | null = 'output') {
   let disposed = false;
+  const exitCbs: Array<(code: number) => void> = [];
   const marker: TerminalMarker = {
     get line() { return disposed ? -1 : 4; },
     dispose() { disposed = true; },
@@ -13,8 +14,11 @@ function fakeSession(id: number, transcript: string | null = 'output') {
     id,
     markCursor: () => marker,
     transcriptSince: () => transcript,
+    onExit: (cb: (code: number) => void) => { exitCbs.push(cb); },
+    exit: () => { for (const cb of exitCbs) cb(0); },
+    get exitListeners() { return exitCbs.length; },
     get markerDisposed() { return disposed; },
-  } as unknown as Session & { markerDisposed: boolean };
+  } as unknown as Session & { markerDisposed: boolean; exit: () => void; exitListeners: number };
 }
 
 describe('InteractionStore', () => {
@@ -115,5 +119,29 @@ describe('InteractionStore', () => {
     expect(store.prune(-1)).toBe(1);
     expect(store.get(settled.id)).toBeNull();
     expect(store.get(pending.id)?.status).toBe('pending');
+  });
+
+  it('watches a session exit once, however many awaits it gets', async () => {
+    const store = new InteractionStore(0);
+    const session = fakeSession(9);
+    for (let i = 0; i < 5; i++) store.start(session, `q${i}`);
+    expect(session.exitListeners).toBe(1);
+    const last = store.start(session, 'last');
+    session.exit();
+    expect(store.get(last.id)?.status).toBe('failed');
+  });
+});
+
+import { utf8Pieces } from './server.js';
+
+describe('prompt pieces (F-10)', () => {
+  it('never splits a UTF-8 character and keeps every byte', () => {
+    const text = '가나다라마바사'.repeat(200) + ' tail';
+    const bytes = Buffer.from(text);
+    const pieces = utf8Pieces(bytes, 512);
+    expect(pieces.every((p) => p.length <= 512)).toBe(true);
+    expect(Buffer.concat(pieces).equals(bytes)).toBe(true);
+    for (const p of pieces) expect(p.toString('utf8')).not.toContain('�');
+    expect(utf8Pieces(Buffer.from('short'), 512)).toHaveLength(1);
   });
 });
