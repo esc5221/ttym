@@ -167,8 +167,8 @@ export const SessionBody = forwardRef<HTMLDivElement, SessionBodyProps>(function
           title={sleep ? sleepTitle(sleep) : undefined}
         >
           {sleepNote?.sid === sid && !sleep ? <span>{sleepNote.text}</span>
-            : sleep!.state === 'sleeping' ? <><span className="mark">☾</span><span>sleeping · {ageText(sleep!.since)} · type or click to wake</span></>
-            : sleep!.state === 'waking' ? <><span className="mark spin">◌</span><span>waking…{sleep!.queued ? ` ${sleep!.queued} B queued` : ''}</span></>
+            : sleep!.state === 'sleeping' ? <><span className="mark">☾</span><span>sleeping · {ageText(sleep!.since)} · type or click to wake{sleep!.dropped ? ` · ${sleep!.dropped} B dropped (queue full)` : ''}</span></>
+            : sleep!.state === 'waking' ? <><span className="mark spin">◌</span><span>waking…{sleep!.queued ? ` ${sleep!.queued} B queued` : ''}{sleep!.dropped ? ` · ${sleep!.dropped} B dropped (queue full)` : ''}</span></>
             : <><span className="mark">✕</span><span>resume failed: {sleep!.error ?? 'unknown'}</span><button onClick={(e) => { e.stopPropagation(); ctx.restoreAgent(sid); }} style={miniLinkBtnStyle}>restore</button></>}
         </div>
       ) : null}

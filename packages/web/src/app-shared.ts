@@ -142,8 +142,9 @@ export interface AgentSleep {
   reason: 'idle' | 'manual';
   error?: string;
   queued?: number;
+  dropped?: number;
 }
-export interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean; sleep?: AgentSleep | null }
+export interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean; sleep?: AgentSleep | null; waiting?: string | null }
 
 /** '0' 꺼짐 · '1' classic(처음부터 있던 방식) · '2' tolerant. 예전에 저장된 '1'은 그대로 classic이다. */
 export function readLocalEchoEnabled(): LocalEchoSetting {

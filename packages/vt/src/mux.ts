@@ -60,6 +60,8 @@ export interface AgentStateEvent {
   active: boolean;
   /** Present once the server knows about sleep; null = awake. */
   sleep?: AgentSleepState | null;
+  /** The agent is stopped on a permission prompt or dialog — what for. null = not waiting. */
+  waiting?: string | null;
 }
 
 export interface ConfigChangeEvent {

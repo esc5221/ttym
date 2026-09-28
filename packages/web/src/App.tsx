@@ -73,8 +73,10 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
 
 /** 에이전트 점 — 탭·stream 메뉴가 같은 것을 보게 하려고 한 곳에 둔다.
  *  도는 중이면 뛰고, 붙어만 있으면 흐리게. 없으면 아무것도 안 그린다. */
-function AgentDot({ kind, running }: { kind: AgentState['kind'] | null | undefined; running: boolean }) {
+function AgentDot({ kind, running, waiting = false }: { kind: AgentState['kind'] | null | undefined; running: boolean; waiting?: boolean }) {
   if (!kind) return null;
+  // 누군가 permission·대화상자에서 기다린다: 다른 workspace를 보고 있어도 보이게 경고색으로.
+  if (waiting) return <span className="agent-waiting-dot" title="an agent here is waiting for you" />;
   return (
     <span
       className={running ? 'agent-dot-run' : undefined}
@@ -84,23 +86,28 @@ function AgentDot({ kind, running }: { kind: AgentState['kind'] | null | undefin
 }
 
 /** workspace 안의 에이전트 상태를 한 점으로 접는다 — 도는 게 있으면 그게 이긴다. */
-function workspaceAgent(ws: Workspace, agentStates: Record<number, AgentState>): { kind: AgentState['kind'] | null; running: boolean } {
+function workspaceAgent(ws: Workspace, agentStates: Record<number, AgentState>): { kind: AgentState['kind'] | null; running: boolean; waiting?: boolean } {
   const ids = layoutToSessionIds(ws.layout).filter((id) => id > 0);
   const states = ids.map((id) => agentStates[id]);
+  // 기다리는 게 있으면 그게 이긴다 — 도는 것보다 사람이 할 일이 먼저다.
+  const waiting = states.find((a) => a?.waiting && a.kind);
+  if (waiting) return { kind: waiting.kind, running: false, waiting: true };
   const running = states.find((a) => a?.active && a.kind);
   if (running) return { kind: running.kind, running: true };
   const idle = states.find((a) => a?.kind);
   return { kind: idle?.kind ?? null, running: false };
 }
 
-function streamAgent(items: Workspace[], agentStates: Record<number, AgentState>): { kind: AgentState['kind'] | null; running: boolean } {
+function streamAgent(items: Workspace[], agentStates: Record<number, AgentState>): { kind: AgentState['kind'] | null; running: boolean; waiting?: boolean } {
   let idle: AgentState['kind'] | null = null;
+  let running: { kind: AgentState['kind'] | null; running: boolean } | null = null;
   for (const ws of items) {
     const a = workspaceAgent(ws, agentStates);
-    if (a.running) return a;
+    if (a.waiting) return a;
+    if (a.running && !running) running = a;
     if (a.kind && !idle) idle = a.kind;
   }
-  return { kind: idle, running: false };
+  return running ?? { kind: idle, running: false };
 }
 
 /** 탭 줄 맨 앞의 stream 메뉴 — 보는 곳이자 만들고 옮기는 곳.
@@ -353,7 +360,7 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
         }}
         title={`${workspaceDisplayLabel(ws)} · 드래그: 다른 stream으로`}
       >
-        <AgentDot kind={agent.kind} running={agent.running} />
+        <AgentDot kind={agent.kind} running={agent.running} waiting={agent.waiting} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{label}</span>
         <span style={{ color: 'var(--text-dim)' }}>{ids.length}</span>
       </button>
@@ -445,7 +452,7 @@ function StreamMenu({ groups, current, agentStates, activeId, uiStyle, compact =
                       }}
                       title={unsorted ? '아직 stream이 없는 workspace' : `${stream} · 더블클릭: 이름 변경 · 드래그: 순서 · 우클릭: 메뉴`}
                     >
-                      <AgentDot kind={agent.kind} running={agent.running} />
+                      <AgentDot kind={agent.kind} running={agent.running} waiting={agent.waiting} />
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{stream}</span>
                     </button>
                   )}
@@ -1071,7 +1078,7 @@ function App() {
         if (cancelled) return;
         const entries = memberIds.map((id) => {
           const state = all[id];
-          return [id, state ? { kind: state.kind as AgentState['kind'], active: state.active, sleep: state.sleep ?? null } : { kind: null, active: false }] as const;
+          return [id, state ? { kind: state.kind as AgentState['kind'], active: state.active, sleep: state.sleep ?? null, waiting: state.waiting ?? null } : { kind: null, active: false }] as const;
         });
         setAgentStates(Object.fromEntries(entries));
       } catch {}
@@ -1080,7 +1087,7 @@ function App() {
     const fallback = window.setInterval(() => { void sweep(); }, 60_000);
     const mux = muxRef.current;
     const unsubscribe = mux ? mux.onAgent((event) => {
-      setAgentStates((prev) => ({ ...prev, [event.sessionId]: { kind: event.kind, active: event.active, sleep: event.sleep ?? null } }));
+      setAgentStates((prev) => ({ ...prev, [event.sessionId]: { kind: event.kind, active: event.active, sleep: event.sleep ?? null, waiting: event.waiting ?? null } }));
     }) : undefined;
     return () => { cancelled = true; window.clearInterval(fallback); unsubscribe?.(); };
   }, [connected, workspaces.map((w) => w.id + ':' + layoutToSessionIds(w.layout).join('.')).join('|')]);
@@ -1528,7 +1535,7 @@ function App() {
               title={`${workspaceDisplayLabel(ws)}${IS_NATIVE ? ` · ⌘${i + 2}` : ''} · 더블클릭: 이름 변경 · 드래그: 재배치`}
               onDoubleClick={() => { setRenamingId(ws.id); setRenameDraft(ws.name); }}
             >
-              <AgentDot kind={agent.kind} running={agent.running} />
+              <AgentDot kind={agent.kind} running={agent.running} waiting={agent.waiting} />
               {renamingId === ws.id ? (
                 <input
                   autoFocus

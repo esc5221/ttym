@@ -64,9 +64,11 @@ export interface AgentSleepInfo {
   args?: string[];
   error?: string;
   queued?: number;
+  /** Input thrown away because the wake queue was full. */
+  dropped?: number;
 }
 
-export function getAgentStates(base: BaseUrl): Promise<Record<number, { kind: string | null; active: boolean; sleep?: AgentSleepInfo | null }>> {
+export function getAgentStates(base: BaseUrl): Promise<Record<number, { kind: string | null; active: boolean; sleep?: AgentSleepInfo | null; waiting?: string | null }>> {
   return request(base, '/api/agent-states');
 }
 

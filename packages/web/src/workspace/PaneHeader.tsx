@@ -105,6 +105,10 @@ export function PaneHeader({ sid, name, cwd, isFocused, dead, zoomed, fit, U, dr
           {name || `#${sid}`}
         </span>
         {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)', flexShrink: 0 }}>#{sid}</span> : null}
+        {/* permission 프롬프트·대화상자에서 멈춘 에이전트. 안 보이면 일하는 중과 구별이 안 된다. */}
+        {agent?.waiting && !asleep ? (
+          <span className="agent-waiting-mark" title={`waiting for you: ${agent.waiting}`}>needs you</span>
+        ) : null}
       </span>
       <span
         onClick={() => { if (paneTab !== 'term') viewer.setActive(sid, 'term'); }}

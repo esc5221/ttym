@@ -66,6 +66,9 @@ body {
 .agent-sleep-mark.sleeping { color: #8aa2ff; }
 .agent-sleep-mark.waking { color: var(--warn); display: inline-block; animation: agent-spin 1s linear infinite; }
 .agent-sleep-mark.failed { color: var(--err); }
+.agent-waiting-mark { font-size: 10px; font-family: var(--mono); font-weight: 700; flex-shrink: 0; color: var(--bg0); background: var(--warn); border-radius: 3px; padding: 0 4px; line-height: 14px; animation: agent-waiting-pulse 1.6s ease-in-out infinite; }
+@keyframes agent-waiting-pulse { 50% { opacity: .55; } }
+.agent-waiting-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex-shrink: 0; animation: agent-waiting-pulse 1.6s ease-in-out infinite; }
 .agent-sleep-pill {
   position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5;
   display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 999px;
