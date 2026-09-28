@@ -298,7 +298,9 @@ async function awaitResult(port: number, sessionId: number, interaction: any, ra
     screen = typeof res?.screen === 'string' ? res.screen : null;
   }
   const clean = (text: string | null) => (text === null ? null : raw ? text : stripAnsi(text));
+  const agent = await isAgentSession(port, sessionId);
   return {
+    agent,
     interaction: interaction ? {
       id: interaction.id,
       status: interaction.status,
@@ -321,14 +323,18 @@ async function awaitResult(port: number, sessionId: number, interaction: any, ra
  * 한 줄 앞에 붙인다. 답하는 법은 적지 않는다 — 받는 쪽은 평소처럼 답하고, 그 말을 그대로 읽어 온다.
  * 줄바꿈 없이 같은 줄: TUI 입력창에 LF를 쓰면 에이전트마다 다르게 먹는다.
  */
+/** 에이전트(Claude Code·Codex)가 붙은 적 있는 세션인가 — 훅이 서버 meta에 그 세션 id를 남긴다. */
+async function isAgentSession(port: number, sessionId: number): Promise<boolean> {
+  const meta = await fetchJson(port, `/api/sessions/${sessionId}/meta`).catch(() => null);
+  return Boolean(meta && (meta.claudeSessionId || meta.claudeLastSessionId || meta.codexSessionId || meta.codexLastSessionId));
+}
+
 async function senderPrefix(port: number, ownArgs: string[], targetSessionId: number): Promise<string> {
   if (ownArgs.includes('--no-from')) return '';
   const sid = parseInt(process.env.TTYM_SESSION_ID ?? '', 10);
   if (!Number.isFinite(sid)) return '';
   // 에이전트에게만. 셸 통합 없는 셸에 붙이면 머리말이 명령의 일부로 실행된다(`[` 명령).
-  // 에이전트가 붙은 적 있는 세션만 서버 meta에 그 세션 id가 남는다.
-  const meta = await fetchJson(port, `/api/sessions/${targetSessionId}/meta`).catch(() => null);
-  if (!meta || !(meta.claudeSessionId || meta.claudeLastSessionId || meta.codexSessionId || meta.codexLastSessionId)) return '';
+  if (!await isAgentSession(port, targetSessionId)) return '';
   const list = await fetchJson(port, '/api/workspaces').catch(() => null);
   const workspaces = Array.isArray(list) ? list : (list?.workspaces ?? []);
   for (const ws of workspaces) {
@@ -386,7 +392,8 @@ async function resumeAwait(port: number, iid: string, timeoutMs: number, raw: bo
 function reportAwaitStatus(result: any, timeoutMs: number) {
   if (result.interaction?.status === 'pending') {
     console.error(`timeout: still running after ${timeoutMs}ms — keep waiting: ttym await --id ${result.interaction.id}`);
-    console.error('  (no turn-end signal from a plain terminal? drive it with send and read it with ttym screen)');
+    // 에이전트면 일부러 짧게 끊은 것(티켓)일 수 있다. 끝 신호가 없는 터미널일 때만 다른 길을 알려준다.
+    if (!result.agent) console.error('  (no agent on that pane to signal the end: drive it with send and read it with ttym screen)');
     process.exit(EXIT.TIMEOUT);
   } else if (result.interaction?.status === 'failed') {
     console.error('agent ended the turn without answering');
