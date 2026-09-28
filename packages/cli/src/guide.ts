@@ -55,6 +55,14 @@ You are notified when the command exits, with bob's answer as its output. While 
 background task runs, ttym will not put you to sleep. Several awaits to different
 members can run in parallel; each finishes on its own.
 
+  No background notifications (Codex, scripts): hand off and take a ticket.
+    ttym await :bob --timeout 1000 -- "the task"     exits 124 at once; stderr
+                                                      names the id; bob keeps working
+    ... do other work ...
+    ttym await --id int_xxx --timeout 1800000         collect the answer when you
+                                                      are ready (returns at once if
+                                                      bob already finished)
+
 ## Choosing how much to read
 
   quick fact / yes-no             the answer alone

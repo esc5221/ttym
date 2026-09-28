@@ -111,6 +111,7 @@ describe('agent turn — codex rollout', () => {
     const outline = renderOutline(events);
     expect(outline).toContain('→ exec: ls -1 | wc -l');
     expect(outline).toContain('→ apply_patch: /p/a.py');
+    expect(renderOutline(parseTurn(ROLLOUT.replace('{cmd:"ls -1 | wc -l"', "{cmd:'ls -1 | wc -l'"), 0, Infinity, 'T2'))).toContain('→ exec: ls -1 | wc -l');
     // exec 한 번 안의 패치와 명령이 둘 다 보인다
     expect(outline).toContain('→ exec: apply_patch b.py ; uvx pytest');
     expect(renderFull(events)).toContain('⤷ result\nScript completed');

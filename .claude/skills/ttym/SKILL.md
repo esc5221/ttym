@@ -62,8 +62,17 @@ Set `--timeout` to what the work deserves, not to a safe-looking number. Forty
 minutes is `2400000`. A timeout that fires early does not stop the agent; it
 only stops you from hearing about it.
 
-For anything long, run the `await` in the background and keep working. You will
-be told when it lands.
+For anything long, do not sit blocked on it:
+
+- Claude Code: run the `await` with the Bash tool's `run_in_background`. You are
+  told when it lands, and ttym will not put you to sleep while it runs.
+- Anything without background notifications (Codex, a script): take a ticket.
+  `ttym await <addr> --timeout 1000 -- "…"` returns at once with exit 124 and the
+  interaction id on stderr while the agent keeps working. Later,
+  `ttym await --id <id> --timeout <ms>` collects the answer, at once if it is
+  already done.
+
+`ttym guide agents` has the details for the binary you are running.
 
 ## Reading the result
 

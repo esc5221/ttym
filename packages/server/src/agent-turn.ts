@@ -178,7 +178,8 @@ function codexCustomInput(name: string, input: unknown): Record<string, unknown>
   const text = typeof input === 'string' ? input : JSON.stringify(input ?? '');
   const files = [...new Set([...text.matchAll(/\*\*\* (?:Update|Add|Delete) File: ([^\n"\\]+)/g)].map((m) => m[1].trim()))];
   if (name === 'apply_patch') return { file_path: files[0], files, patch: text };
-  const cmds = [...text.matchAll(/cmd:\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1].replace(/\\"/g, '"').replace(/\\n/g, '\n'));
+  // cmd:"…" 또는 cmd:'…' — 모델이 따옴표를 그때그때 고른다(둘 다 실측).
+  const cmds = [...text.matchAll(/cmd:\s*(["'])((?:(?!\1)[^\\]|\\.)*)\1/g)].map((m) => m[2].replace(/\\(["'])/g, '$1').replace(/\\n/g, '\n'));
   const parts = [...(files.length ? [`apply_patch ${files.map((f) => f.split('/').pop()).join(', ')}`] : []), ...cmds];
   return { ...(parts.length ? { command: parts.join(' ; ') } : {}), ...(files.length ? { files } : {}), script: text };
 }
