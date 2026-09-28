@@ -45,6 +45,8 @@ export interface SleepState {
   error?: string;
   /** Bytes of input waiting to be written once awake (waking only). */
   queued?: number;
+  /** Bytes of input thrown away because the queue was full — shown, never silent. */
+  dropped?: number;
 }
 
 export interface ProcInfo { pid: number; ppid: number; rss: number; command: string }
@@ -97,6 +99,12 @@ export const TICK_MS = 60_000;
 const SLEEP_BATCH = 3;
 const QUEUE_MAX_BYTES = 64 * 1024;
 
+/**
+ * 텍스트와 그 뒤의 Enter(CR) 사이에 두는 간격. 둘이 한 번의 PTY 읽기에 들어가면 TUI가
+ * 붙여넣기로 보고 CR을 줄바꿈으로 삼킨다. await(server.ts)와 wake 큐 재생이 같은 값을 쓴다.
+ */
+export const SUBMIT_GAP_MS = 75;
+
 /** Auto-sleep when the config key was never written. On, at half an hour. */
 export const SLEEP_AFTER_DEFAULT_MS = 30 * 60_000;
 
@@ -131,18 +139,39 @@ export function isPassiveInput(data: Buffer): boolean {
  */
 export function resumeArgsFrom(command: string): string[] {
   const tokens = command.trim().split(/\s+/).slice(1);
-  // Codex names the session as a subcommand: `codex resume <id> …`. Drop both.
-  if (tokens[0] === 'resume') { tokens.shift(); if (tokens[0] && !tokens[0].startsWith('-')) tokens.shift(); }
+  // Codex names the session as a subcommand: `codex resume <id> …` / `codex fork <id> …`. Drop both.
+  if (tokens[0] === 'resume' || tokens[0] === 'fork') { tokens.shift(); if (tokens[0] && !tokens[0].startsWith('-')) tokens.shift(); }
   const out: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i]!;
     if (t === '--resume' || t === '-r' || t === '--session-id') { i++; continue; }
     if (t === '--continue' || t === '--last') continue;
+    // --fork-session은 "이 resume에서 새 세션으로 갈라져라"다. 남기면 wake마다 새 id로 갈라지고,
+    // 메시지 없이 다시 재우면 transcript가 없는 id가 남아 다음 wake가 대화를 못 찾는다(F-3).
+    if (t === '--fork-session') continue;
     // Claude's -c is --continue; Codex's -c is a config override that takes a value.
     if (t === '-c') { if (tokens[i + 1]?.includes('=')) { out.push(t, tokens[++i]!); } continue; }
     out.push(t);
   }
   return dedupeFlags(out);
+}
+
+/**
+ * 대화형 에이전트인가. `claude auth login`·`codex login` 같은 서브커맨드와 `claude -p`는
+ * 같은 바이너리지만 재우고 되살릴 대화가 없다. 에이전트로 잡으면 그 인자가 resume 플래그로
+ * 저장돼 wake가 로그인 흐름을 다시 띄웠다(PLAYBOOK F-6). 첫 인자가 알려진 서브커맨드면 아니다.
+ * 자유 문장 프롬프트(`claude "fix it"`)는 대화형이라 허용 목록이 아니라 거부 목록으로 가른다.
+ */
+const NON_INTERACTIVE = {
+  claude: new Set(['auth', 'mcp', 'config', 'doctor', 'update', 'upgrade', 'install', 'setup-token', 'plugin', 'plugins', 'migrate-installer', 'agents']),
+  codex: new Set(['login', 'logout', 'mcp', 'mcp-server', 'exec', 'e', 'apply', 'a', 'completion', 'debug', 'sandbox', 'app', 'app-server', 'cloud', 'features', 'help']),
+};
+export function isInteractiveAgent(command: string, kind: 'claude' | 'codex'): boolean {
+  const tokens = command.trim().split(/\s+/).slice(1);
+  if (kind === 'claude' && (tokens.includes('-p') || tokens.includes('--print'))) return false;
+  const first = tokens.find((t) => !t.startsWith('-'));
+  // 첫 인자가 플래그의 값일 수도 있다(`codex -m gpt login`처럼은 쓰지 않는다) — 맨 앞 토큰만 본다.
+  return !(first !== undefined && tokens[0] === first && NON_INTERACTIVE[kind].has(first));
 }
 
 function shellQuote(arg: string): string {
@@ -163,7 +192,7 @@ export function findAgentProcess(procs: ProcInfo[], shellPid: number): (ProcInfo
     for (const child of byParent.get(pid) ?? []) {
       const argv0 = child.command.trim().split(/\s+/)[0] ?? '';
       const m = AGENT_RE.exec(argv0);
-      if (m) return { ...child, kind: m[2] as 'claude' | 'codex' };
+      if (m && isInteractiveAgent(child.command, m[2] as 'claude' | 'codex')) return { ...child, kind: m[2] as 'claude' | 'codex' };
       if (depth < 2) queue.push({ pid: child.pid, depth: depth + 1 });
     }
   }
@@ -424,10 +453,11 @@ export class AgentSleeper {
     await this.deps.sessions.setMeta(id, { agentSleep: null });
     this.deps.onState(id, null);
     // The queue, in order, with a beat between entries so a prompt and its CR are not
-    // read as one paste (the same lottery the interactions path avoids).
+    // read as one paste — the same gap the interactions path uses (it was 30 ms here
+    // against 75 ms there; a queued Enter sometimes did not submit, PLAYBOOK F-4).
     for (const chunk of cur.queue) {
       session.write(chunk);
-      await this.delay(30);
+      await this.delay(SUBMIT_GAP_MS);
     }
     this.deps.log(`WAKE session=${id} ready in ${Math.round((this.now() - cur.wakeStartedAt) / 100) / 10}s, wrote ${cur.queuedBytes}B`);
     return { ok: true };
@@ -449,6 +479,12 @@ export class AgentSleeper {
       if (!cur || cur.state.state === 'failed') return false;
       if (isPassiveInput(data)) return true; // swallowed, no wake
       if (cur.queuedBytes + data.length <= QUEUE_MAX_BYTES) { cur.queue.push(data); cur.queuedBytes += data.length; }
+      else {
+        // 버리는 건 어쩔 수 없지만 몰래 버리지는 않는다 — 친 글자가 사라진 이유가 화면과 로그에 남는다.
+        cur.state = { ...cur.state, dropped: (cur.state.dropped ?? 0) + data.length };
+        this.deps.log(`SLEEP session=${id} queue full (${QUEUE_MAX_BYTES}B): dropped ${data.length}B`);
+        this.deps.onState(id, cur.state);
+      }
       if (cur.state.state === 'sleeping') void this.wake(id, 'input');
       return true;
     };

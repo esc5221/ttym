@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentSleeper, busyChildOf, findAgentProcess, isPassiveInput, parseSleepAfter, resumeArgsFrom, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, busyChildOf, findAgentProcess, isInteractiveAgent, isPassiveInput, parseSleepAfter, resumeArgsFrom, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
 import type { Session } from './session.js';
 
 /**
@@ -116,7 +116,7 @@ describe('helpers', () => {
     expect(resumeArgsFrom('claude --resume abc --dangerously-skip-permissions')).toEqual(['--dangerously-skip-permissions']);
     // wake 를 여러 번 거친 pane 의 argv — 쌓인 중복은 저장할 때 하나로
     expect(resumeArgsFrom('claude --resume abc --dangerously-skip-permissions --dangerously-skip-permissions --fork-session --dangerously-skip-permissions'))
-      .toEqual(['--fork-session', '--dangerously-skip-permissions']);
+      .toEqual(['--dangerously-skip-permissions']); // --fork-session도 빠진다 (F-3)
     expect(resumeArgsFrom('claude -c')).toEqual([]);
     expect(resumeArgsFrom('claude --session-id x -r y --verbose')).toEqual(['--verbose']);
     expect(resumeArgsFrom('claude')).toEqual([]);
@@ -420,5 +420,23 @@ describe('restart', () => {
     expect(st.sleeping).toHaveLength(1);
     expect(st.reclaimedBytes).toBe(300 * 1048576);
     sleeper2.stop();
+  });
+});
+
+describe('which agent processes can sleep', () => {
+  const SHELL = 100;
+  it('a claude or codex subcommand is not a conversation (F-6)', () => {
+    expect(findAgentProcess([{ pid: 7, ppid: SHELL, rss: 1, command: 'claude auth login' }], SHELL)).toBeNull();
+    expect(findAgentProcess([{ pid: 8, ppid: SHELL, rss: 1, command: 'codex login' }], SHELL)).toBeNull();
+    expect(isInteractiveAgent('claude -p "summarize"', 'claude')).toBe(false);
+    expect(isInteractiveAgent('codex exec "run tests"', 'codex')).toBe(false);
+    expect(isInteractiveAgent('claude --dangerously-skip-permissions', 'claude')).toBe(true);
+    expect(isInteractiveAgent('claude "fix the auth bug"', 'claude')).toBe(true);
+    expect(isInteractiveAgent('codex resume 01a0 --full-auto', 'codex')).toBe(true);
+  });
+
+  it('resume does not fork again on every wake (F-3)', () => {
+    expect(resumeArgsFrom('claude --resume abc --fork-session --dangerously-skip-permissions')).toEqual(['--dangerously-skip-permissions']);
+    expect(resumeArgsFrom('codex fork 01a0 --full-auto')).toEqual(['--full-auto']);
   });
 });
