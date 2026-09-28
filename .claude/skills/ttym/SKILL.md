@@ -40,9 +40,11 @@ the 80x24 default folds their output into something neither of you can read.
 Agents differ in ways that matter:
 
 ```
-claude   ready in 3-5s   ttym await works    no cwd flag of its own → --cwd is the only way
-codex    ready at once   ttym await works    has -C, but --cwd is clearer
-zsh      ready at once   no await            drive with send, poll with screen
+claude   ready in 3-5s   await → its answer + turn    no cwd flag of its own → --cwd is the only way
+codex    ready at once   await → its answer + turn    has -C, but --cwd is clearer
+zsh      ready at once   await runs the text as a command and returns its output
+                         (needs shell integration; without it await only times out —
+                          drive it with send, read it with screen)
 ```
 
 ## Handing over work
@@ -88,9 +90,13 @@ With `--json`, `reason` says what happened:
 
 ```
 done      finished; output is the answer
-timeout   still running — the session is fine, you stopped waiting
+timeout   still running — the session is fine, you stopped waiting.
+          output is null; screen holds what the pane shows right now
 failed    the turn ended without an answer
 ```
+
+`output` is only ever an answer. Do not read `screen` as one — it is a
+progress view, whatever was on the pane when the wait ended.
 
 Without `--json`, a timeout exits 124 with nothing on stdout. Pick the same
 request back up with `ttym await --id <interaction>` instead of asking again —
