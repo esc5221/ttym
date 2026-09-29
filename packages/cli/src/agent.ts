@@ -7,7 +7,8 @@ import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 import { dedupeFlags } from '@ttym/protocol';
-import { resolveCurrentWorkspace, findWorkspaceBySessionId, listWorkspaces, resolveAddress } from './addresses.js';
+import { resolveCurrentWorkspace, findWorkspaceBySessionId, listWorkspaces, resolveAddress, resolveWorkspace, ensureDefaultWorkspace, createWorkspaceMember } from './addresses.js';
+import { findConversation, runningCopies } from './conversations.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
 // ───── Agent Integration ─────
 
@@ -60,7 +61,7 @@ export const AGENTS = {
   },
   codex: {
     name: 'Codex CLI (experimental)',
-    settingsPath: resolve(process.env.HOME || '/tmp', '.codex', 'hooks.json'),
+    settingsPath: resolve(process.env.CODEX_HOME || resolve(process.env.HOME || '/tmp', '.codex'), 'hooks.json'),
     metaKey: 'codexSessionId',
     lastMetaKey: 'codexLastSessionId',
     hooks: [
@@ -108,8 +109,17 @@ export function buildResumeArgs(options) {
 }
 
 
+function shellWord(arg: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
+}
+
+/** 설치 위치와 무관하게 알아본다 — 레포·release 설치본·worktree의 ttym이 각자 다른 절대경로를 쓴다. */
+function hookScriptOf(command: string): string {
+  return (command.trim().split(/\s+/)[0] ?? '').split('/').pop() ?? '';
+}
+
 function isttymHook(command, cfg) {
-  return cfg.hooks.some((hook) => command === hook.command)
+  return cfg.hooks.some((hook) => command === hook.command || (hookScriptOf(command).startsWith('ttym-') && hookScriptOf(command) === hookScriptOf(hook.command) && command.trim().split(/\s+/).slice(1).join(' ') === hook.command.trim().split(/\s+/).slice(1).join(' ')))
     || (cfg.metaKey === 'claudeSessionId'
       && command.includes('TTYM_SESSION_ID')
       && (command.includes('--claude-session') || command.includes('--clear-claude-session')))
@@ -192,6 +202,34 @@ function agentUninstall(cfg) {
   }
   writeFileSync(cfg.settingsPath, JSON.stringify(settings, null, 2) + '\n');
   console.log(`${cfg.name} hook uninstalled`);
+}
+
+/**
+ * 훅이 없으면 ttym은 pane의 에이전트를 모른다 — 연결(resume)·await·sleep 전부. 그런데 실패는
+ * "no agent session linked" 한 줄로만 나와서 원인을 알 수 없었다(외부 사용자 피드백). 원인과
+ * 고치는 명령을 같이 말한다.
+ */
+function hookHint(): string[] {
+  const missing = Object.entries(AGENTS).filter(([, cfg]) => !isHookInstalled(cfg)).map(([key]) => key);
+  if (missing.length === 0) return [];
+  return [
+    `hooks not installed for: ${missing.join(', ')} — ttym links a pane to its agent through them.`,
+    ...missing.map((key) => `  run: ttym agent install ${key}`),
+    '  agents started before the hooks were installed stay unlinked; restart them, or bring one in with',
+    '  ttym agent adopt <conversation-id>',
+    ...(missing.includes('codex') ? ['  codex asks once to trust the new hooks ("Hooks need review") on its next start.'] : []),
+  ];
+}
+
+/** 같은 대화가 이미 돌고 있으면 멈춘다 — 두 곳에서 이어 쓰면 기록이 갈라진다. --force면 경고만. */
+function refuseIfRunning(conv, force: boolean) {
+  const copies = runningCopies(conv).filter((c) => c.pid !== process.pid);
+  if (copies.length === 0) return;
+  const lines = [`this ${conv.kind} conversation is already running:`, ...copies.map((c) => `  pid ${c.pid}  ${c.detail}`)];
+  if (force) { for (const l of lines) console.error(`warning: ${l}`); return; }
+  for (const l of lines) console.error(l);
+  console.error('stop that one first, or pass --force to run a second copy anyway');
+  process.exit(EXIT.FAIL);
 }
 
 function resolveAgent(name) {
@@ -291,6 +329,7 @@ export async function cmdAgent() {
       }
       if (!found) {
         console.log('no agent session linked');
+        for (const l of hookHint()) console.log(l);
         return;
       }
     } catch {
@@ -326,6 +365,7 @@ export async function cmdAgent() {
       targetSessionId = meta?.[cfg.metaKey] || meta?.[cfg.lastMetaKey];
       if (!targetSessionId) {
         console.error(`no ${cfg.name} session linked to this ttym session`);
+        for (const l of hookHint()) console.error(l);
         process.exit(EXIT.NOT_FOUND);
       }
       targetCfg = cfg;
@@ -349,9 +389,13 @@ export async function cmdAgent() {
       }
       if (!targetCfg) {
         console.error('no agent session linked to this ttym session');
+        for (const l of hookHint()) console.error(l);
         process.exit(EXIT.NOT_FOUND);
       }
     }
+    const kind = targetCfg === AGENTS.codex ? 'codex' : 'claude';
+    const conv = findConversation(targetSessionId, kind);
+    if (conv) refuseIfRunning(conv, extraArgs.includes('--force'));
 
     // 설정 창에서 정한 기본 플래그. 서버가 없으면 그냥 없는 셈 치고 간다 —
     // resume 자체는 위에서 meta 를 받아온 뒤라 여기까지 왔으면 대개 살아 있다.
@@ -366,7 +410,7 @@ export async function cmdAgent() {
       baseArgs: targetCfg.resumeArgs(targetSessionId),
       config: configFlags,
       env: targetCfg.resumeFlagsEnv ? process.env[targetCfg.resumeFlagsEnv] : '',
-      extra: extraArgs,
+      extra: extraArgs.filter((a) => a !== '--force'),
     });
     console.log(`resuming ${targetCfg.name}: ${args.join(' ')}`);
     const child = spawn(args[0], args.slice(1), {
@@ -374,6 +418,52 @@ export async function cmdAgent() {
       env: { ...process.env, ...(targetCfg.resumeEnv || {}) },
     });
     child.on('exit', (code) => process.exit(code ?? 0));
+    return;
+  }
+
+  // ── adopt <conversation-id> ──
+  // 밖(다른 터미널·tmux)에서 돌던 대화를 ttym pane으로 가져온다. 새 pane을 그 대화의 cwd에 만들고
+  // 셸에서 resume을 친다 — 셸 위라서 나중에 sleep/wake도 된다. 원래 프로세스가 살아 있으면 멈춘다.
+  if (action === 'adopt') {
+    const id = process.argv[4];
+    const args = process.argv.slice(5);
+    if (!id || id.startsWith('-')) {
+      console.error('usage: ttym agent adopt <conversation-id> [--name <member>] [--to <workspace>] [--force]');
+      console.error('  finds the Claude Code or Codex conversation, opens a pane in its folder and resumes it there');
+      process.exit(EXIT.USAGE);
+    }
+    const conv = findConversation(id);
+    if (!conv) {
+      console.error(`no Claude Code or Codex conversation with id ${id}`);
+      console.error('  looked in ~/.claude/projects and $CODEX_HOME/sessions (default ~/.codex/sessions)');
+      process.exit(EXIT.NOT_FOUND);
+    }
+    const force = args.includes('--force');
+    refuseIfRunning(conv, force);
+    const port = getPort();
+    await ensureCompatibleServer(port);
+    const to = readOption(args, '--to');
+    const workspace = to ? await resolveWorkspace(port, to)
+      : process.env.TTYM_SESSION_ID ? await resolveCurrentWorkspace(port) : await ensureDefaultWorkspace(port);
+    const cfg = AGENTS[conv.kind];
+    let configFlags = '';
+    try { configFlags = (await fetchJson(port, '/api/config'))?.values?.[cfg.resumeFlagsConfig] || ''; } catch {}
+    const resume = buildResumeArgs({ baseArgs: cfg.resumeArgs(conv.id), config: configFlags, env: process.env[cfg.resumeFlagsEnv] || '' });
+    const envPrefix = Object.entries(('resumeEnv' in cfg ? cfg.resumeEnv : {}) as Record<string, string>).map(([k, v]) => `${k}=${v}`);
+    const line = [...envPrefix, ...resume].map(shellWord).join(' ');
+    const { member, session } = await createWorkspaceMember(port, workspace, {
+      name: readOption(args, '--name') || undefined,
+      role: 'agent',
+      cwd: conv.cwd && existsSync(conv.cwd) ? conv.cwd : undefined,
+      cols: 170, rows: 50,
+    });
+    await fetchPost(port, `/api/sessions/${session.id}/send`, { data: `${line}\n` });
+    const addr = `${workspace.name}:${member.name}`;
+    if (hasFlag('--json')) return printOutput({ member: addr, sessionId: session.id, kind: conv.kind, conversation: conv.id, cwd: conv.cwd, command: line }, true);
+    console.log(`adopted ${conv.kind} ${conv.id} into ${addr} (#${session.id})`);
+    if (conv.cwd && !existsSync(conv.cwd)) console.log(`  its folder is gone (${conv.cwd}); started in the default folder`);
+    console.log(`  ${line}`);
+    if (!isHookInstalled(cfg)) for (const l of hookHint()) console.log(l);
     return;
   }
 
@@ -392,6 +482,9 @@ export async function cmdAgent() {
   console.log('                        config keys. TTYM_CLAUDE_RESUME_FLAGS /');
   console.log('                        TTYM_CODEX_RESUME_FLAGS override them for one shell.');
   console.log('  info [session-id]     Show linked agent sessions');
+  console.log('  adopt <conversation-id> [--name n] [--to ws] [--force]');
+  console.log('                        Bring a Claude Code or Codex conversation that ran elsewhere into a new');
+  console.log('                        pane (its folder, resumed). Refuses while that conversation still runs.');
   console.log('  sleep|wake <addr>     Put a pane\'s agent to sleep (process gone, screen kept,');
   console.log('                        any input resumes it) / wake it now. <addr> = ws:name|:name|#id');
   console.log('                        auto sleep is on (30m) unless config agent-sleep-after = off. never while the');
