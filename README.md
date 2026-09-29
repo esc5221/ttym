@@ -582,3 +582,7 @@ uses to bootstrap a server when none is running.
   membership model
 - [docs/remote-access.md](docs/remote-access.md) — Tailscale, Cloudflare
   Tunnel + Access, SSH, LAN; how remote login works
+
+## License
+
+MIT. See [LICENSE](LICENSE).

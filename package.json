@@ -1,6 +1,7 @@
 {
   "name": "ttym",
   "private": true,
+  "license": "MIT",
   "description": "Web terminal multiplexer \u2014 single WebSocket, multiple PTY sessions",
   "scripts": {
     "test": "vitest run",

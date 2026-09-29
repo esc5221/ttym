@@ -521,3 +521,7 @@ ditto packages/desktop/src-tauri/target/release/bundle/macos/ttym.app /Applicati
 - [docs/architecture.md](docs/architecture.md) — 계층, holder 프로토콜, wire 포맷, meta 소유권, 작업 지도, 운영 위생
 - [docs/adr-0001-membership.md](docs/adr-0001-membership.md) — workspace 멤버십 모델
 - [docs/remote-access.md](docs/remote-access.md) — Tailscale, Cloudflare Tunnel + Access, SSH, LAN, 원격 로그인 동작
+
+## 라이선스
+
+MIT. [LICENSE](LICENSE) 참고.
