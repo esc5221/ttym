@@ -191,6 +191,12 @@ export async function shellAwait(port, sessionId, command, timeoutMs) {
   // 제출되지 않아 await 가 타임아웃까지 멈췄다. 이때는 에이전트 경로(interaction)로 간다.
   const last = probe.commands?.[0];
   if (last && last.endedAt == null) return null;
+  // 잠든 에이전트도 에이전트다. 재우면 에이전트 프로세스가 내려가 마지막 명령이 끝난 것으로
+  // 보이고, 셸 프롬프트로 오판해 텍스트+LF로 보냈다 — 깨어난 에이전트 입력창에 글자만 남고
+  // 제출되지 않아 await가 timeout까지 멈췄다(2026-09-29 실측, Codex pane). 서버의 interaction
+  // 경로는 깨운 뒤 CR로 제출한다.
+  const meta = await fetchJson(port, `/api/sessions/${sessionId}/meta`).catch(() => null);
+  if (meta?.agentSleep) return null;
   return fetchRequest(port, 'POST', `/api/sessions/${sessionId}/commands`, { command, timeoutMs }, timeoutMs + 15_000);
 }
 
