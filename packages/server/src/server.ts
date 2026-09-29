@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
+import headless from '@xterm/headless';
 import { readTurn, renderFull, renderOutline } from './agent-turn.js';
 import { InteractionStore, turnRange, type StopReport } from './interaction.js';
 import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
@@ -242,6 +243,30 @@ export interface TtymServer {
 // ───── HTTP API ─────
 
 let bootSafeMode = false;
+
+/** 충돌 메시지 → 기계가 읽는 code. null이면 충돌이 아니다(400). */
+function conflictCode(message: string): string | null {
+  if (/member name .*already exists|name already (exists|taken)/i.test(message)) return 'member_name_taken';
+  if (/already belongs to workspace/.test(message)) return 'session_in_other_workspace';
+  if (/workspace name .*already exists/.test(message)) return 'workspace_name_taken';
+  if (/already exists/.test(message)) return 'already_exists';
+  return null;
+}
+
+/**
+ * 저장된 화면(ANSI)을 임시 터미널에 그려 평문 행으로. 잠든 pane의 화면은 살아 있는 버퍼에 없다.
+ * 저장된 화면에는 폭이 없고, 자는 동안 다른 뷰어가 PTY 크기를 바꿀 수 있다 — 지금 폭에 그리면
+ * 줄이 접힌다. 행마다 줄바꿈이 있으니 넉넉한 폭에 그리고 행 끝 공백을 버린다.
+ */
+async function renderText(ansi: string, cols: number, rows: number): Promise<string> {
+  const term = new headless.Terminal({ cols, rows, allowProposedApi: true });
+  await new Promise<void>((r) => term.write(ansi, () => r()));
+  const buf = term.buffer.active;
+  const out: string[] = [];
+  for (let i = 0; i < term.rows; i++) out.push(buf.getLine(buf.viewportY + i)?.translateToString(true) ?? '');
+  term.dispose();
+  return out.join('\n').replace(/\s+$/, '');
+}
 
 const PROMPT_PIECE_BYTES = 512;
 const PROMPT_PIECE_GAP_MS = 20;
@@ -738,7 +763,15 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     if (!session || session.isDead) { json(404, { error: 'not found' }); return true; }
     // A sleeping agent's pane reports the agent's last screen, as the viewers see it.
     const frozen = session.frozenView();
-    json(200, { screen: frozen ? frozen.snapshot : session.snapshot(), ...(sleeper?.stateOf(id) ? { sleep: sleeper.stateOf(id) } : null) });
+    const sleepInfo = sleeper?.stateOf(id) ? { sleep: sleeper.stateOf(id) } : null;
+    // ?format=text — 화면에 보이는 행 그대로의 평문. ANSI를 정규식으로 벗기면 공백이 커서 이동으로
+    // 인코딩된 곳이 붙어 버린다(스크립트 쓰는 쪽이 겪음). 터미널 버퍼에서 행을 읽는다.
+    if (url.searchParams.get('format') === 'text') {
+      const text = frozen ? renderText(frozen.snapshot, Math.max(session.cols, 500), session.rows) : Promise.resolve(session.screenText());
+      text.then((screen) => json(200, { screen, format: 'text', ...sleepInfo })).catch(() => json(500, { error: 'render failed' }));
+      return true;
+    }
+    json(200, { screen: frozen ? frozen.snapshot : session.snapshot(), ...sleepInfo });
     return true;
   }
 
@@ -1050,8 +1083,17 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
   // ───── Workspace API ─────
 
   // GET /api/workspaces
+  // 멤버마다 세션이 살아 있는지 싣는다. 끝난 세션의 멤버는 일부러 남긴다 — 화면이 그 자리에
+  // restart/close를 띄운다 — 그래서 밖에서 쓰는 쪽은 목록만 보고는 죽은 멤버를 가릴 수 없었다.
+  const withStatus = (ws: ReturnType<typeof workspaceStore.get>) => ws && ({
+    ...ws,
+    members: ws.members.map((m) => {
+      const session = manager.get(m.sessionId);
+      return { ...m, status: !session ? 'gone' : session.isDead ? 'exited' : 'running' };
+    }),
+  });
   if (path === '/api/workspaces' && req.method === 'GET') {
-    json(200, workspaceStore.list());
+    json(200, workspaceStore.list().map((ws) => withStatus(ws)));
     return true;
   }
 
@@ -1150,7 +1192,8 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         json(201, ws);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'invalid body';
-        json(message.includes('already exists') ? 409 : 400, { error: message });
+        const code = conflictCode(message);
+        json(code ? 409 : 400, { error: message, ...(code ? { code } : null) });
       }
     });
     return true;
@@ -1164,7 +1207,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     if (req.method === 'GET') {
       const ws = workspaceStore.get(wsId);
       if (!ws) { json(404, { error: 'not found' }); return true; }
-      json(200, ws);
+      json(200, withStatus(ws));
       return true;
     }
 
@@ -1178,7 +1221,8 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
           json(200, ws);
         } catch (error) {
           const message = error instanceof Error ? error.message : 'invalid body';
-          json(message.includes('already exists') ? 409 : 400, { error: message });
+          const code = conflictCode(message);
+        json(code ? 409 : 400, { error: message, ...(code ? { code } : null) });
         }
       });
       return true;
@@ -1318,7 +1362,10 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         log(`WORKSPACE MEMBER ADD id=${wsId} session=${sessionId} name=${name}`);
         json(201, ws);
       } catch (error) {
-        json(400, { error: error instanceof Error ? error.message : 'invalid body' });
+        // 충돌은 409와 기계가 읽는 code로 — 문구를 문자열 비교하던 쪽이 있었다.
+        const message = error instanceof Error ? error.message : 'invalid body';
+        const code = conflictCode(message);
+        json(code ? 409 : 400, { error: message, ...(code ? { code } : null) });
       }
     });
     return true;

@@ -890,6 +890,14 @@ export class Session {
     return rows.join('\n');
   }
 
+  /** The visible screen as plain rows — what `ttym screen` shows, without escape codes. */
+  screenText(): string {
+    const buf = this.term.buffer.active;
+    const rows: string[] = [];
+    for (let i = 0; i < this.term.rows; i++) rows.push(buf.getLine(buf.viewportY + i)?.translateToString(true) ?? '');
+    return rows.join('\n').replace(/\s+$/, '');
+  }
+
   /** Seed headless xterm with a previously saved snapshot (for reboot restore) */
   seedSnapshot(ansi: string): void {
     this.resetSyncEmissionState('seed snapshot');

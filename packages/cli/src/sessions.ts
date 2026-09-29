@@ -166,6 +166,18 @@ function renderScreen(screen: string): string {
   return hasFlag('--raw') ? screen : stripAnsi(screen);
 }
 
+/**
+ * 화면 한 장. --raw가 아니면 서버가 터미널 버퍼에서 읽은 평문(format=text)을 받는다 —
+ * ANSI를 정규식으로 벗기면 커서 이동으로 그린 공백이 사라져 단어가 붙었다("Doyouwanttoproceed?").
+ * 옛 서버는 format을 모르고 ANSI를 준다; 그때만 벗긴다.
+ */
+async function fetchScreen(port: number, sessionId: number): Promise<string> {
+  const raw = hasFlag('--raw');
+  const result = await fetchJson(port, `/api/sessions/${sessionId}/screen${raw ? '' : '?format=text'}`);
+  const screen = result?.screen ?? '';
+  return result?.format === 'text' ? (screen.endsWith('\n') || !screen ? screen : `${screen}\n`) : renderScreen(screen);
+}
+
 export async function cmdScreenAddr() {
   const args = process.argv.slice(3);
   const token = args[0];
@@ -179,8 +191,7 @@ export async function cmdScreenAddr() {
     const targets = await resolveMatches(port, args[1] ?? '');
     const screens = [];
     for (const target of targets) {
-      const result = await fetchJson(port, `/api/sessions/${target.sessionId}/screen`);
-      screens.push({ target: target.label, screen: renderScreen(result?.screen ?? '') });
+      screens.push({ target: target.label, screen: await fetchScreen(port, target.sessionId) });
     }
     if (hasFlag('--json')) return printOutput(screens, true);
     for (const entry of screens) {
@@ -190,8 +201,7 @@ export async function cmdScreenAddr() {
     return;
   }
   const target = await resolveAddress(port, token);
-  const result = await fetchJson(port, `/api/sessions/${target.sessionId}/screen`);
-  const screen = renderScreen(result?.screen ?? '');
+  const screen = await fetchScreen(port, target.sessionId);
   if (hasFlag('--json')) return printOutput({ target: target.label, screen }, true);
   process.stdout.write(screen);
 }
@@ -294,7 +304,7 @@ async function awaitResult(port: number, sessionId: number, interaction: any, ra
   const output = interaction?.transcript ?? null;
   let screen: string | null = null;
   if (output === null) {
-    const res = await fetchJson(port, `/api/sessions/${sessionId}/screen`).catch(() => null);
+    const res = await fetchJson(port, `/api/sessions/${sessionId}/screen${raw ? '' : '?format=text'}`).catch(() => null);
     screen = typeof res?.screen === 'string' ? res.screen : null;
   }
   const clean = (text: string | null) => (text === null ? null : raw ? text : stripAnsi(text));

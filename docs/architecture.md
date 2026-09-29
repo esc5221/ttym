@@ -81,19 +81,39 @@ DATA 프레임은 **방향에 따라 모양이 다르다.** 디코더도 방향�
 
 ## interaction (에이전트 request/response)
 
-`ttym await`은 화면 덤프가 아니라 **이번 턴의 transcript**를 돌려준다.
+`ttym await`은 화면 덤프가 아니라 **그 턴에 에이전트가 한 말**을 돌려준다.
 
 ```
-제출     서버가 xterm marker로 버퍼 위치를 잡고 프롬프트+CR 전송
+제출     서버가 xterm marker로 버퍼 위치를 잡고 프롬프트를 512바이트 조각으로(20ms 간격) 쓴 뒤 CR.
+         한 번에 쓰면 macOS PTY가 ~1KB만 받고 나머지는 holder가 나중에 써서, Claude가 가끔
+         앞 조각을 버렸다. 잠든 에이전트면 깨운 뒤 쓴다
 완료     에이전트 Stop hook → POST /api/internal/sessions/:id/stop
+         훅이 Stop 입력의 last_assistant_message·transcript_path(Codex는 turn_id도)를 그대로 넘긴다
          StopFailure·SessionEnd도 등록 — 실패한 턴은 timeout이 아니라 즉시 정리
-추출     marker부터 커서까지의 렌더된 행. marker가 스크롤아웃되면
-         (line=-1) null — 엉뚱한 구간을 정답처럼 주지 않는다
-타임아웃  interaction은 pending으로 남고 id로 이어받는다 (202 + Location)
+답       훅이 준 마지막 답 → 없으면 transcript에서 이 턴의 마지막 text → 없으면 marker부터의 화면 행
+turn     transcript를 다시 읽어 요약(시간·도구·수정 파일)과 ttym turn(outline/full)을 만든다
+         (agent-turn.ts — Claude는 시간 범위, Codex는 task_started~task_complete)
+타임아웃  interaction은 pending으로 남고 id로 이어받는다 (202 + Location, ttym await --id).
+         끝난 것은 6시간 보관
 ```
 
 행 번호 대신 xterm marker를 쓰는 이유: 행 번호는 스크롤백이 밀린 뒤에도
 범위 안에 남아 **남의 출력을 조용히 가리킨다.**
+
+## HTTP API — 밖에서 쓸 때 알아둘 것
+
+```
+POST /api/sessions {cmd,cwd,cols,rows,verify}
+    verify:true면 2초 기다린다 — 그 안에 PTY가 끝나면(잘못된 명령) 400과 함께 정리한다.
+    살아 있는지는 2초가 지나야 알 수 있어서 "살아 있으면 즉시"는 불가능하다. 빠른 생성이
+    필요하면 verify를 빼고, 끝났는지는 워크스페이스 멤버의 status로 본다
+GET  /api/sessions/:id/screen[?format=text]
+    기본은 ANSI 스냅샷. format=text는 터미널 버퍼의 행 그대로(공백 보존). 잠든 pane은 잠들 때 화면
+GET  /api/workspaces[/:id]
+    멤버마다 status: running | exited | gone. 끝난 세션의 멤버는 일부러 남는다 —
+    웹이 그 자리에 restart/close를 띄운다
+409  충돌은 code로 읽는다: member_name_taken · session_in_other_workspace · workspace_name_taken
+```
 
 ## meta 소유권
 
