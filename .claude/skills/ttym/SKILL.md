@@ -140,5 +140,10 @@ ttym workspace info --current --json   # everyone in this workspace, with state
 ttym screen <addr>                     # what is that one doing
 ```
 
+A Claude Code or Codex conversation that ran outside ttym (another terminal,
+tmux) comes in with `ttym agent adopt <conversation-id>`: a new pane in its
+folder, resumed. It refuses while that conversation is still running somewhere,
+and names the pid — two copies of one conversation split its history.
+
 Look before you spawn. The session you need may already exist, and a second
 agent in the same repository will fight the first one over the same files.
