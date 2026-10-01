@@ -17,7 +17,7 @@ import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAdd
 
 // ───── Main ─────
 
-// mini%78 · mini/ws:name · --host mini — 다른 머신의 세션이면 그 머신의 ttym이 실행한다(hosts.ts).
+// box%78 · box/ws:name · --host box — 다른 머신의 세션이면 그 머신의 ttym이 실행한다(hosts.ts).
 const remote = splitRemote(process.argv.slice(2), readHosts());
 if (remote) {
   if ('error' in remote) {

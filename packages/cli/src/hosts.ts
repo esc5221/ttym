@@ -7,14 +7,14 @@ import { HOME_DIR } from './common.js';
 /**
  * 다른 머신의 ttym을 이 머신에서 부른다.
  *
- *   ttym screen mini%78                      그 머신의 세션 78
- *   ttym await mini/video2audio:term-78 -- "…"
- *   ttym --host mini workspace info          명령 전체를 그 머신에서
+ *   ttym screen box%78                      그 머신의 세션 78
+ *   ttym await box/api:term-78 -- "…"
+ *   ttym --host box workspace info          명령 전체를 그 머신에서
  *
- * 이름은 ~/.ttym/hosts.json 에 둔다: { "mini": { "ssh": "mini" } }.
+ * 이름은 ~/.ttym/hosts.json 에 둔다: { "box": { "ssh": "box" } }.
  * 명령은 ssh로 그 머신의 ttym이 실행한다. HTTP로 그 서버에 직접 붙지 않는 이유: await의 답과
  * 세션 기록(transcript)은 그 머신의 디스크에 있고, 그 서버의 원격 인증 게이트를 건드리지 않아도 된다.
- * ttym이 출력하는 목록의 %78은 mini%78로 바꿔서, 받은 주소를 그대로 다음 명령에 쓸 수 있게 한다.
+ * ttym이 출력하는 목록의 %78은 box%78로 바꿔서, 받은 주소를 그대로 다음 명령에 쓸 수 있게 한다.
  * 화면·명령 출력·에이전트의 답은 내용이라 바꾸지 않는다.
  */
 
@@ -35,7 +35,7 @@ const HOST_ADDR = /^([A-Za-z][\w-]*)\/([^/]*:.*)$/;
 
 /**
  * argv에서 다른 머신을 가리키는 주소를 찾아, 그 머신 이름과 그 머신 기준으로 고친 argv를 돌려준다.
- * `--` 뒤(보낼 글자)는 건드리지 않는다 — 프롬프트 속 "mini%78"까지 바꾸면 보낸 말이 달라진다.
+ * `--` 뒤(보낼 글자)는 건드리지 않는다 — 프롬프트 속 "box%78"까지 바꾸면 보낸 말이 달라진다.
  * 이 머신의 명령이면 null.
  */
 export function splitRemote(argv: string[], hosts: Hosts): { host: string; args: string[] } | { error: string } | null {
@@ -69,7 +69,7 @@ export function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/** 원격 출력 속 %78을 mini%78로. 앞에 글자·%·/ 가 붙은 것(URL 인코딩, 이미 붙은 이름)은 그대로. */
+/** 원격 출력 속 %78을 box%78로. 앞에 글자·%·/ 가 붙은 것(URL 인코딩, 이미 붙은 이름)은 그대로. */
 export function qualify(text: string, host: string): string {
   return text.replace(/(?<![\w%/])%(\d{1,4})(?!\w)/g, `${host}%$1`);
 }

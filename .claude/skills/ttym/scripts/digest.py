@@ -9,8 +9,8 @@ when the question needs something else.
   digest.py --since 24h        only sessions active in the last 24 hours
   digest.py --last 1305 1257   the full last answer of these sessions
   digest.py --grep "keyword"   sessions whose transcript mentions it, with counts
-  digest.py --hosts            also every machine in ~/.ttym/hosts.json (over ssh), ids as mini%78
-  digest.py --last mini%78     a session on another machine
+  digest.py --hosts            also every machine in ~/.ttym/hosts.json (over ssh), ids as box%78
+  digest.py --last box%78     a session on another machine
 """
 import argparse, glob, json, os, re, shlex, subprocess, sys, time, urllib.request
 from datetime import datetime
@@ -257,7 +257,7 @@ def show(rows):
 # ── other machines ─────────────────────────────────────────────────────────
 # Transcripts live on the machine that ran the agent, so the digest of another
 # machine runs there: this script goes over ssh on stdin and its session ids
-# come back named, %78 → mini%78. Only the header lines are renamed; quoted
+# come back named, %78 → box%78. Only the header lines are renamed; quoted
 # requests and answers are left as written.
 
 def read_hosts():
@@ -288,7 +288,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--port', type=int, default=int(os.environ.get('PORT') or os.environ.get('TTYM_PORT') or 7690))
     ap.add_argument('--since', help='only sessions active within this window: 30m, 6h, 2d')
-    ap.add_argument('--last', nargs='+', metavar='ID', help='print the full last answer of these sessions (78, %%78, mini%%78)')
+    ap.add_argument('--last', nargs='+', metavar='ID', help='print the full last answer of these sessions (78, %%78, box%%78)')
     ap.add_argument('--grep', metavar='TEXT', help='sessions whose transcript contains TEXT')
     ap.add_argument('--hosts', action='store_true', help='also every machine in ~/.ttym/hosts.json')
     args = ap.parse_args()
