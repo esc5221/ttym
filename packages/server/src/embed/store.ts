@@ -119,6 +119,15 @@ export class GrantStore {
     return () => this.endListeners.delete(listener);
   }
 
+  /**
+   * Re-check every grant. Expiry has its own timer, but a removed consumer or a
+   * rotated key is only noticed by alive() — a silent socket would keep its grant
+   * until its next frame. server.ts runs this every few seconds.
+   */
+  sweep(): void {
+    for (const grant of [...this.byId.values()]) this.alive(grant);
+  }
+
   /** For tests and status. */
   size(): number { return this.byId.size; }
 

@@ -144,6 +144,7 @@ ttym embed consumer list | rotate <id> | remove <id>
 ```
 
 - 서버: packages/server/src/embed/ (store·authorize·http). 패널·SDK: packages/web/embed/ → web/dist/embed/v1.
+- grant 발급·폐기는 admin 리스너에서만: 기본 `~/.ttym/embed.sock`, `TTYM_EMBED_ADMIN=host:port|경로|off`.
 - grant 연결은 /embed/v1/ws만 쓴다. 기존 /ws·웹앱은 필터를 거치지 않는다. push는 전부 server.ts `sendPush` 하나로.
 - 새 CMD를 추가하면 embed/authorize.ts INBOUND에 행을 넣어야 grant 연결에서 쓸 수 있다(없으면 embed.test.ts가 실패).
 - 소비처는 전용 인스턴스에 붙인다 — 탭 셸이 루프백 무인증 API로 같은 인스턴스 전체에 닿기 때문.

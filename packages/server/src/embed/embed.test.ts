@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import WebSocket from 'ws';
+import { request as httpRequest } from 'node:http';
 import { CMD, checkGrantRequest, type EmbedConsumer } from '@ttym/protocol';
 import { createServer, type TtymServer } from '../server.js';
 import { decode, encode, toBuffer } from '../protocol.js';
@@ -125,13 +126,18 @@ describe('embed over the wire', () => {
 
   const api = (path: string, init: RequestInit & { headers?: Record<string, string> } = {}) =>
     fetch(`http://127.0.0.1:${port}${path}`, init);
-  const mint = async (access: unknown, ttlMs?: number) => {
-    const r = await api('/api/embed/v1/grants', {
-      method: 'POST', headers: { authorization: `Bearer ${KEY}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ subject: 'kim', access, ...(ttlMs ? { ttlMs } : {}) }),
+  /** The admin listener: a unix socket in the test home. */
+  const admin = (method: string, path: string, headers: Record<string, string> = {}, body?: string, extra: Record<string, string> = {}) =>
+    new Promise<{ status: number; body: any }>((done, fail) => {
+      const req = httpRequest({ socketPath: `${home}/embed.sock`, method, path, headers: { ...headers, ...extra } }, (r) => {
+        let data = ''; r.on('data', (c) => (data += c)); r.on('end', () => done({ status: r.statusCode ?? 0, body: data ? JSON.parse(data) : null }));
+      });
+      req.on('error', fail);
+      req.end(body);
     });
-    return { status: r.status, body: await r.json() };
-  };
+  const mint = (access: unknown, ttlMs?: number) => admin('POST', '/api/embed/v1/grants',
+    { authorization: `Bearer ${KEY}`, 'content-type': 'application/json' },
+    JSON.stringify({ subject: 'kim', access, ...(ttlMs ? { ttlMs } : {}) }));
   const tabs = (grant: string, method = 'GET', path = '', body?: unknown) => api(`/api/embed/v1/workspaces/dock/tabs${path}`, {
     method, headers: { authorization: `Bearer ${grant}`, origin: ORIGIN, 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -176,8 +182,14 @@ describe('embed over the wire', () => {
   });
 
   it('mints only with the consumer key, and only inside the registration', async () => {
-    const noKey = await api('/api/embed/v1/grants', { method: 'POST', body: '{}' });
-    expect(noKey.status).toBe(401);
+    expect((await admin('POST', '/api/embed/v1/grants', {}, '{}')).status).toBe(401);
+    // Never on the main port, whatever a proxy forwards.
+    const onMain = await api('/api/embed/v1/grants', { method: 'POST', headers: { authorization: `Bearer ${KEY}`, 'content-type': 'application/json' }, body: JSON.stringify({ access: [{ workspace: 'dock', caps: ['terminal.read'] }] }) });
+    expect(onMain.status).toBe(404);
+    expect((await onMain.json()).code).toBe('admin_listener');
+    // And the admin listener answers nothing else.
+    expect((await admin('GET', '/api/version')).status).toBe(404);
+    expect((await admin('GET', '/api/embed/v1/grant')).status).toBe(404);
     expect((await mint([{ workspace: 'other', caps: ['terminal.read'] }])).status).toBe(400);
     const ok = await mint([{ workspace: 'dock', caps: ['terminal.read', 'terminal.write', 'tabs.write'], profile: 'sh' }]);
     expect(ok.status).toBe(201);
@@ -248,11 +260,89 @@ describe('embed over the wire', () => {
     const c = await embedSocket(g.grant);
     c.send(0, CMD.LIST);
     await c.next((f) => f.cmd === CMD.LIST);
-    const del = await api(`/api/embed/v1/grants/${g.id}`, { method: 'DELETE', headers: { authorization: `Bearer ${KEY}` } });
+    const del = await admin('DELETE', `/api/embed/v1/grants/${g.id}`, { authorization: `Bearer ${KEY}` });
     expect(del.status).toBe(200);
     expect((await c.waitClosed())?.code).toBe(4401);
     expect((await tabs(g.grant)).status).toBe(401);
   });
+
+  it('every command aimed at a session outside the grant leaves that session untouched', async () => {
+    const outside = await (await api('/api/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd: ['/bin/sh'], cols: 80, rows: 24 }) })).json();
+    const { body: g } = await mint([{ workspace: 'dock', caps: ['terminal.read', 'terminal.write', 'tabs.write'], profile: 'sh' }]);
+    await tabs(g.grant);
+    const c = await embedSocket(g.grant);
+    c.send(0, CMD.LIST);
+    await c.next((f) => f.cmd === CMD.LIST);
+    for (const value of Object.values(CMD)) {
+      if (value === CMD.HELLO || value === CMD.LIST) continue;
+      const payload = value === CMD.DATA ? Buffer.from('echo PWNED\n')
+        : value === CMD.RESIZE ? Buffer.from([10, 0, 5, 0])
+        : Buffer.from(JSON.stringify({ fromSeq: 0, seq: 1, cmd: ['/bin/sh'], cols: 10, rows: 5 }));
+      c.ws.send(encode(outside.id, value, payload));
+    }
+    await new Promise((r) => setTimeout(r, 600));
+    const info = await (await api(`/api/sessions/${outside.id}`)).json();
+    expect(info.cols).toBe(80); // not resized
+    const screen = (await (await api(`/api/sessions/${outside.id}/screen?format=text`)).json()).screen;
+    expect(screen).not.toContain('PWNED');
+    // still alive and not stopped: it runs a command we send the ordinary way
+    await api(`/api/sessions/${outside.id}/send`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ data: 'echo ALIVE\n' }) });
+    await new Promise((r) => setTimeout(r, 500));
+    expect((await (await api(`/api/sessions/${outside.id}/screen?format=text`)).json()).screen).toContain('ALIVE');
+    // nothing of that session came down the grant socket
+    expect(c.frames.some((f) => f.sessionId === outside.id && f.cmd !== CMD.ATTACH)).toBe(false);
+    expect(c.closed).toBeNull();
+  });
+
+  it('a frame before HELLO, or a grant from another consumer\'s origin, closes the socket', async () => {
+    const outside = await (await api('/api/sessions', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cmd: ['/bin/sh'] }) })).json();
+    const early = await open(`ws://127.0.0.1:${port}/embed/v1/ws`, ORIGIN);
+    clients.push(early);
+    early.ws.send(encode(outside.id, CMD.DATA, Buffer.from('echo EARLY\n')));
+    expect((await early.waitClosed())?.code).toBe(4401);
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await (await api(`/api/sessions/${outside.id}/screen?format=text`)).json()).screen).not.toContain('EARLY');
+
+    // A second consumer on another origin: app's grant over that origin is refused.
+    writeFileSync(`${home}/embed-consumers.json`, JSON.stringify({
+      app: { keyHash: sha256(KEY), origins: [ORIGIN], workspaces: ['dock'], maxTtlMs: 3_600_000, profiles: { sh: { cmd: ['/bin/sh'], maxTabs: 3, keepOne: true } } },
+      other: { keyHash: sha256('other-key-0123456789abcdef'), origins: ['https://other.example.test'], workspaces: ['elsewhere'], maxTtlMs: 3_600_000, profiles: {} },
+    }));
+    const { body: g } = await mint([{ workspace: 'dock', caps: ['terminal.read'] }]);
+    const cross = await open(`ws://127.0.0.1:${port}/embed/v1/ws`, 'https://other.example.test');
+    clients.push(cross);
+    cross.send(0, CMD.HELLO, { grant: g.grant });
+    expect((await cross.waitClosed())?.code).toBe(4401);
+    // And over HTTP.
+    const r = await api('/api/embed/v1/workspaces/dock/tabs', { method: 'POST', headers: { authorization: `Bearer ${g.grant}`, origin: 'https://other.example.test', 'content-type': 'application/json' }, body: '{}' });
+    expect(r.status).toBe(403);
+  });
+
+  it('rotating the key ends its grants — an idle socket too — and the old grant stays dead', async () => {
+    const { body: g } = await mint([{ workspace: 'dock', caps: ['terminal.read'] }]);
+    const c = await embedSocket(g.grant);
+    c.send(0, CMD.LIST);
+    await c.next((f) => f.cmd === CMD.LIST);
+    writeFileSync(`${home}/embed-consumers.json`, JSON.stringify({
+      app: { keyHash: sha256('rotated-key-0123456789abcdef'), origins: [ORIGIN], workspaces: ['dock'], maxTtlMs: 3_600_000, profiles: {} },
+    }));
+    // No frame from the client: the sweep has to notice.
+    expect((await c.waitClosed(8000))?.code).toBe(4401);
+    expect((await tabs(g.grant)).status).toBe(401);
+    const again = await embedSocket(g.grant);
+    expect((await again.waitClosed())?.code).toBe(4401);
+  }, 15_000);
+
+  it('a grant past its expiry is refused on reconnect', async () => {
+    const { body: g } = await mint([{ workspace: 'dock', caps: ['terminal.read'] }], 10_000);
+    const c = await embedSocket(g.grant);
+    c.send(0, CMD.LIST);
+    await c.next((f) => f.cmd === CMD.LIST);
+    expect((await c.waitClosed(12_000))?.code).toBe(4401);
+    const again = await embedSocket(g.grant);
+    expect((await again.waitClosed())?.code).toBe(4401);
+    expect((await tabs(g.grant)).status).toBe(401);
+  }, 20_000);
 
   it('closing a tab ends its shell and drops it from open grant sockets', async () => {
     const { body: g } = await mint([{ workspace: 'dock', caps: ['terminal.read', 'terminal.write', 'tabs.write'], profile: 'sh' }]);
@@ -265,6 +355,8 @@ describe('embed over the wire', () => {
     const after = await (await tabs(g.grant, 'DELETE', `/${first}`)).json();
     expect(after.tabs.map((t: { sid: number }) => t.sid)).toEqual([created.tab.sid]);
     await c.next((f) => f.cmd === CMD.DESTROY && f.sessionId === first);
+    c.send(first, CMD.ATTACH, { fromSeq: 0 });
+    expect(json(await c.next((f) => f.cmd === CMD.ATTACH && f.sessionId === first)).ok).toBe(false);
     expect((await tabs(g.grant, 'PATCH', `/${created.tab.sid}`, { name: 'bad name' })).status).toBe(400);
     // The ordinary app socket still sees everything — the filter is for grant sockets only.
     const app = await open(`ws://127.0.0.1:${port}/ws`);

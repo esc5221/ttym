@@ -13,7 +13,8 @@
  * These paths skip the remote gate (remote/http.ts): a consumer's proxy forwards
  * them with its own Host and Origin, and the key or grant here is the check.
  */
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { chmodSync, unlinkSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 import { checkGrantRequest, type EmbedAccess, type EmbedCap, type EmbedTab, type SpawnProfile } from '@ttym/protocol';
@@ -212,30 +213,47 @@ function onWorkspace(access: readonly EmbedAccess[], wsId: string): { caps: Set<
 
 // ── routing ──
 
-/** True when the request was an embed path (answered here, one way or another). */
-export function handleEmbedHttp(req: IncomingMessage, res: ServerResponse, deps: EmbedDeps): boolean {
+/**
+ * True when the request was an embed path (answered here, one way or another).
+ *
+ * `admin` is the separate listener (server.ts, TTYM_EMBED_ADMIN — a unix socket by
+ * default). Minting and revoking answer only there, so a proxy that forwards the
+ * main port, however carelessly, never exposes them; everything else answers only
+ * on the main port.
+ */
+export function handleEmbedHttp(req: IncomingMessage, res: ServerResponse, deps: EmbedDeps, admin = false): boolean {
   const url = new URL(req.url || '/', 'http://x');
   const path = url.pathname;
-  if (!isEmbedPath(path)) return false;
-  if (!path.startsWith(EMBED_API_PREFIX)) { serveEmbedStatic(req, res, path, deps); return true; }
+  if (!isEmbedPath(path)) {
+    if (admin) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end('{"error":"the embed admin listener serves /api/embed/v1/grants only"}'); return true; }
+    return false;
+  }
+  if (!path.startsWith(EMBED_API_PREFIX)) {
+    if (admin) { res.writeHead(404); res.end(); return true; }
+    serveEmbedStatic(req, res, path, deps);
+    return true;
+  }
 
   const json = (status: number, body: unknown) => {
     const payload = JSON.stringify(body);
     res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload), 'Cache-Control': 'no-store', Connection: 'close' });
     res.end(payload);
   };
-  route(req, path, deps).then(([status, body]) => json(status, body), (e) => {
+  route(req, path, deps, admin).then(([status, body]) => json(status, body), (e) => {
     if (e instanceof HttpError) json(e.status, { error: e.message, ...(e.code ? { code: e.code } : {}) });
     else { deps.log('EMBED error', e); json(500, { error: 'internal error' }); }
   });
   return true;
 }
 
-async function route(req: IncomingMessage, path: string, deps: EmbedDeps): Promise<[number, unknown]> {
+async function route(req: IncomingMessage, path: string, deps: EmbedDeps, admin: boolean): Promise<[number, unknown]> {
   const rest = path.slice(EMBED_API_PREFIX.length);
+  const isGrants = rest === 'grants' || rest.startsWith('grants/');
+  if (isGrants && !admin) throw new HttpError(404, 'mint and revoke on the embed admin listener (~/.ttym/embed.sock by default; TTYM_EMBED_ADMIN)', 'admin_listener');
+  if (!isGrants && admin) throw new HttpError(404, 'the embed admin listener serves /api/embed/v1/grants only');
 
-  // ── consumer-authenticated: mint and revoke ──
-  if (rest === 'grants' || rest.startsWith('grants/')) {
+  // ── consumer-authenticated, admin listener only: mint and revoke ──
+  if (isGrants) {
     const key = bearer(req);
     const who = key ? deps.consumers.byKey(key) : null;
     if (!who) throw new HttpError(401, 'consumer key required (Authorization: Bearer <key>)', 'consumer_key');
@@ -325,3 +343,35 @@ function describe(access: readonly EmbedAccess[]): string {
 }
 
 export type { Grant };
+
+/** Where the admin listener goes, from TTYM_EMBED_ADMIN. */
+export function embedAdminAddress(env: string | undefined, home: string): { path: string } | { host: string; port: number } | null {
+  const v = env?.trim();
+  if (v === 'off') return null;
+  if (!v) return { path: resolve(home, 'embed.sock') };
+  const m = v.match(/^\[?([^\]]+?)\]?:(\d+)$/);
+  if (m && !v.startsWith('/')) return { host: m[1]!, port: parseInt(m[2]!, 10) };
+  return { path: resolve(v) };
+}
+
+export async function listenEmbedAdmin(deps: EmbedDeps, log: (...a: unknown[]) => void, env = process.env.TTYM_EMBED_ADMIN, home = deps.consumers.path.replace(/\/[^/]+$/, '')): Promise<Server | null> {
+  const addr = embedAdminAddress(env, home);
+  if (!addr) return null;
+  const server = createHttpServer((req, res) => { handleEmbedHttp(req, res, deps, true); });
+  try {
+    if ('path' in addr) {
+      try { unlinkSync(addr.path); } catch {}
+      await new Promise<void>((ok, fail) => { server.once('error', fail); server.listen(addr.path, () => ok()); });
+      chmodSync(addr.path, 0o600);
+      log(`EMBED admin listener ${addr.path}`);
+    } else {
+      await new Promise<void>((ok, fail) => { server.once('error', fail); server.listen(addr.port, addr.host, () => ok()); });
+      log(`EMBED admin listener ${addr.host}:${addr.port}`);
+    }
+    return server;
+  } catch (e) {
+    // A busy socket path or port must not keep ttym from starting; embedding just has no mint.
+    log(`EMBED admin listener failed: ${(e as Error).message}`);
+    return null;
+  }
+}

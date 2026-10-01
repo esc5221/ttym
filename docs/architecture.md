@@ -122,13 +122,16 @@ GET  /api/workspaces[/:id]
 ```
 등록      ~/.ttym/embed-consumers.json (ttym embed consumer …). id → 키 해시·출처·워크스페이스·실행 프로필.
           서버는 mtime이 바뀌면 다시 읽는다. 지우거나 키를 바꾸면 그 소비처의 grant가 끝난다
-grant     POST /api/embed/v1/grants (소비처 키). 메모리에만, 토큰은 해시로. 범위마다 권한
-          (terminal.read · terminal.write · tabs.write). 등록 밖의 요청은 400 — 줄여서 주지 않는다
+grant     POST /api/embed/v1/grants (소비처 키) — admin 리스너에서만(기본 <home>/embed.sock,
+          TTYM_EMBED_ADMIN). 메인 포트에서는 404라 프록시가 실수로 넘겨도 열리지 않는다.
+          메모리에만, 토큰은 해시로. 범위마다 권한(terminal.read · terminal.write · tabs.write).
+          등록 밖의 요청은 400. 3초마다 sweep — 소비처 삭제·키 교체가 조용한 소켓도 닫는다
 WS        /embed/v1/ws. 첫 프레임 HELLO에 grant가 없으면 아무것도 처리하지 않는다 (루프백도).
           수신 프레임은 authorizeInbound, push는 sendPush 안의 filterOutbound (embed/authorize.ts)
           — 표에 없는 CMD는 거부. AGENT·VIEW·CONFIG push는 grant 연결에 안 간다
 탭        /api/embed/v1/workspaces/:ws/tabs. 탭 = 워크스페이스 멤버. 워크스페이스마다 직렬화
 패널      packages/web/embed → web/dist/embed/v1 (상대경로 빌드). sdk.js가 iframe으로 띄운다
+패널 경로  /embed/v1/*는 상대경로만, 결과가 루트 하위인지 확인, 정해진 확장자만 (//etc/hosts 사고)
 gate      /embed/v1/*·/api/embed/v1/*는 remote gate(허용 호스트·로그인 쿠키)를 건너뛴다.
           소비처 프록시가 자기 Host·Origin으로 넘기므로, 거기서는 키·grant가 검사다
 ```

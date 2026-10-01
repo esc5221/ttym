@@ -25,7 +25,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { RemoteStore } from './remote/store.js';
 import { gate, gateUpgrade, type RemoteContext } from './remote/http.js';
 import { ConsumerStore, GrantStore, type Grant } from './embed/store.js';
-import { handleEmbedHttp, EMBED_WS_PATH, workspaceOfFn } from './embed/http.js';
+import { handleEmbedHttp, EMBED_WS_PATH, workspaceOfFn, listenEmbedAdmin } from './embed/http.js';
 import { authorizeInbound, canWrite, filterList, filterOutbound, outOfScope } from './embed/authorize.js';
 
 let mapRefreshInFlight = false;
@@ -1610,6 +1610,8 @@ export async function createServer(port: number): Promise<TtymServer> {
     }
   }
 
+  const grantSweep = setInterval(() => grants.sweep(), 3_000);
+  grantSweep.unref();
   grants.onEnd((grant, why) => {
     for (const [client, conn] of embedConns) {
       if (conn.grant?.id !== grant.id) continue;
@@ -2390,6 +2392,12 @@ export async function createServer(port: number): Promise<TtymServer> {
   httpServer.requestTimeout = 10000;
 
   await new Promise<void>((resolve) => httpServer.listen(port, bindHost, resolve));
+
+  // The embed admin listener: grant mint and revoke, nothing else (embed/http.ts).
+  // TTYM_EMBED_ADMIN = a socket path (default <home>/embed.sock), host:port for a
+  // consumer in another container, or "off".
+  const embedAdmin = await listenEmbedAdmin(embedDeps, log);
+
   // Hooks address the server that owns their session — not a hardcoded 7690.
   const boundPort = (httpServer.address() as { port: number } | null)?.port ?? port;
   remote.port = boundPort;
@@ -2423,6 +2431,8 @@ export async function createServer(port: number): Promise<TtymServer> {
     close: async () => {
       sleeper?.stop();
       grants.close();
+      clearInterval(grantSweep);
+      embedAdmin?.close();
       markCleanExit();
       clearInterval(agentExpirySweep);
       clearInterval(heartbeat);

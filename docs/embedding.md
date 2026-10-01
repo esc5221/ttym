@@ -4,10 +4,10 @@ Put a ttym terminal panel inside your own web app. ttym serves the panel and
 decides what it can reach; your app decides who may open it.
 
 ```
-your backend   POST /api/embed/v1/grants  (consumer key)  → ttym   "this user, workspace X, 30 minutes"
-browser        <iframe src=".../embed/v1/#g=<grant>">     → ttym   panel: tabs + terminal
-               WebSocket .../embed/v1/ws  (grant in the first frame)  reaches X's members only
-your proxy     forwards /embed/v1/* and /api/embed/v1/* to ttym, nothing else
+your backend   POST /api/embed/v1/grants on ttym's admin socket (consumer key)   "this user, workspace X, 5 minutes"
+browser        <iframe src=".../embed/v1/#g=<grant>">                → ttym     panel: tabs + terminal
+               WebSocket .../embed/v1/ws  (grant in the first frame)          reaches X's members only
+your proxy     forwards /embed/v1/*, /api/embed/v1/grant, /api/embed/v1/workspaces/* — behind your login
 ```
 
 ## Before you start: run a ttym just for the app
@@ -58,8 +58,25 @@ ttym embed consumer remove studio     # its grants end now
 
 ## 2. Mint a grant in your backend
 
+Minting and revoking answer only on ttym's **admin listener**, never on the port
+the browser reaches. A proxy that forwards too much still cannot expose them.
+
+| `TTYM_EMBED_ADMIN` | Admin listener |
+|---|---|
+| unset | unix socket `<TTYM_HOME>/embed.sock` (mode 0600) — for a backend on the same machine |
+| `host:port` | TCP, for a backend in another container, e.g. `0.0.0.0:7701` on the container network. Never publish it. |
+| `off` | none — this instance mints nothing |
+
 After your app has decided this request may open a terminal (login, office
 network, admin role — whatever your app requires):
+
+```sh
+curl --unix-socket ~/.ttym-studio/embed.sock http://ttym/api/embed/v1/grants \
+  -H "Authorization: Bearer $TTYM_EMBED_KEY" -H 'Content-Type: application/json' \
+  -d '{"subject":"kim@example.com","ttlMs":300000,"access":[{"workspace":"studio","caps":["terminal.read","terminal.write","tabs.write"],"profile":"default"}]}'
+```
+
+The request body in full:
 
 ```http
 POST /api/embed/v1/grants
@@ -68,7 +85,7 @@ Content-Type: application/json
 
 {
   "subject": "kim@example.com",
-  "ttlMs": 1800000,
+  "ttlMs": 300000,
   "access": [
     { "workspace": "studio", "caps": ["terminal.read", "terminal.write", "tabs.write"], "profile": "default" }
   ]
@@ -95,25 +112,41 @@ profile, a longer TTL — is a 400 with the reason, never a narrower grant.
 not stored.
 
 Grants live in ttym's memory: a restart ends them all, and the panel asks your
-backend for a new one. To end one early:
+backend for a new one. To end one early (on the admin listener too):
 
 ```http
 DELETE /api/embed/v1/grants/<id>
 Authorization: Bearer <consumer key>
 ```
 
+**How long.** Keep grants short — 5 minutes is a good default. The SDK asks your
+grant route again before each one ends, so the person keeps working, and your
+route re-applies its checks every time: someone who signed out or left the office
+network loses the panel within one TTL. A grant also lives in page memory, so a
+script injected into your page could carry it off; a short TTL bounds that, and
+keeping the WebSocket behind your login (step 3) stops it being used elsewhere.
+
+ttym re-checks grants every few seconds, so `consumer remove` or `rotate` closes
+idle sockets too, not only busy ones.
+
 Open panels on it close within a moment (WebSocket close 4401) and ask for a
 new grant; if your backend refuses, the panel says the session has ended.
 
-## 3. Proxy two paths to ttym
+## 3. Proxy three paths to ttym, behind your login
 
 The browser talks to ttym through your origin. Forward **only** these, path
 prefix stripped, WebSocket upgrades included:
 
 ```
-/<prefix>/embed/v1/*        → ttym /embed/v1/*
-/<prefix>/api/embed/v1/*    → ttym /api/embed/v1/*
+/<prefix>/embed/v1/*                  → ttym /embed/v1/*            panel, sdk.js, the WebSocket
+/<prefix>/api/embed/v1/grant          → ttym /api/embed/v1/grant    what a grant reaches
+/<prefix>/api/embed/v1/workspaces/*   → ttym /api/embed/v1/workspaces/*   tabs
 ```
+
+Put them behind the same login your app uses (Caddy `forward_auth`, Cloudflare
+Access, an nginx `auth_request`) — the WebSocket upgrade included. ttym checks the
+grant either way; your login on the socket is what stops a grant carried off the
+page from working on another network or after the person signed out.
 
 Caddy:
 
@@ -122,11 +155,14 @@ handle_path /studio/embed/v1/* {
 	rewrite * /embed/v1{uri}
 	reverse_proxy 127.0.0.1:7700
 }
-handle_path /studio/api/embed/v1/* {
-	rewrite * /api/embed/v1{uri}
+@ttym_api path /studio/api/embed/v1/grant /studio/api/embed/v1/workspaces/*
+handle @ttym_api {
+	uri strip_prefix /studio
 	reverse_proxy 127.0.0.1:7700
 }
 ```
+
+(`forward_auth` before these, as for the rest of your app.)
 
 nginx:
 
@@ -137,11 +173,13 @@ location /studio/embed/v1/ {
   proxy_set_header Upgrade $http_upgrade;
   proxy_set_header Connection "upgrade";
 }
-location /studio/api/embed/v1/ { proxy_pass http://127.0.0.1:7700/api/embed/v1/; }
+location = /studio/api/embed/v1/grant  { proxy_pass http://127.0.0.1:7700/api/embed/v1/grant; }
+location /studio/api/embed/v1/workspaces/ { proxy_pass http://127.0.0.1:7700/api/embed/v1/workspaces/; }
 ```
 
 Do not forward ttym's `/ws` or other `/api/*` paths. Those are the owner's
-interface and trust loopback callers, which your proxy is.
+interface and trust loopback callers, which your proxy is. Forwarding
+`/api/embed/v1/grants` by mistake does nothing — it answers 404 on the main port.
 
 ## 4. Mount the panel
 
@@ -219,7 +257,7 @@ renew its grant, so it stops when the grant ends.
 
 ## Tab API
 
-The panel uses these; call them yourself only if you draw your own terminal.
+The panel uses these (main port); call them yourself only if you draw your own terminal.
 `Authorization: Bearer <grant>`; from a browser, Origin must be a registered one.
 
 ```http
@@ -251,7 +289,7 @@ After that:
 
 | Surface | Promise |
 |---|---|
-| `/api/embed/v1/*`, the grant and tab shapes | Fields are only added. A removal or change of meaning goes to `/v2`. |
+| `/api/embed/v1/*`, the grant and tab shapes | Fields are only added. A removal or change of meaning goes to `/v2`. Mint and revoke stay on the admin listener. |
 | `sdk.js`: mount options, methods, events | Only added. A breaking change is a new path (`/embed/v2/`). |
 | Fragment keys | Only added. |
 | Capability names | Meanings never change. A new capability is never added to existing registrations or grants. |
