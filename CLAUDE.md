@@ -22,6 +22,8 @@ docs/              architecture.md · adr-0001-membership.md (docs/local/은 비
 
 CLI 문법(콜론 주소가 유일한 문법): `ttym new <name>` · `ttym split <ws:name> <name>` ·
 `ttym send|await|screen <ws:name|:name|%id>`. 자세한 것은 docs/architecture.md.
+다른 머신의 세션은 `mini%78` · `mini/ws:name` · `ttym --host mini <명령>` — 이름은 `~/.ttym/hosts.json`,
+그 머신의 ttym이 ssh로 실행한다(packages/cli/src/hosts.ts).
 
 서버 기본 포트: 7690. PID/로그: `~/.ttym/`
 

@@ -12,9 +12,21 @@ import { cmdRemote } from './remote.js';
 import { cmdUpgrade, cmdVersion } from './upgrade.js';
 import { cmdOpen, cmdView } from './viewer.js';
 import { cmdGuide } from './guide.js';
+import { readHosts, runRemote, splitRemote } from './hosts.js';
 import { cmdNew, cmdSplit, cmdSendAddr, cmdResizeAddr, cmdKillAddr, cmdScreenAddr, cmdAwaitAddr, cmdTurn, cmdCommandsAddr, cmdOutputAddr } from './sessions.js';
 
 // ───── Main ─────
+
+// mini%78 · mini/ws:name · --host mini — 다른 머신의 세션이면 그 머신의 ttym이 실행한다(hosts.ts).
+const remote = splitRemote(process.argv.slice(2), readHosts());
+if (remote) {
+  if ('error' in remote) {
+    console.error(remote.error);
+    process.exit(EXIT.USAGE);
+  } else {
+    process.exit(await runRemote(remote.host, readHosts()[remote.host], remote.args));
+  }
+}
 
 const cmd = process.argv[2];
 
@@ -25,7 +37,7 @@ function printHelp() {
   console.log('  attach <ws[/member]>         Attach (prefix: C-b, C-b ? for keys). Creation asks; --new skips the ask');
   console.log('  new <name> [--cwd <dir>] [--size <cols>x<rows>] [-- cmd]  Create a session in the default workspace');
   console.log('  split <addr> <name> [--cwd <dir>] [--size <cols>x<rows>] [-- cmd]  Split beside a member (addr: ws:name | :name)');
-  console.log('  send <addr> -- "data"        Send bytes (addr: ws:name | :name | %id)');
+  console.log('  send <addr> -- "data"        Send bytes (addr: ws:name | :name | %id; on another machine: host%id | host/ws:name)');
   console.log('  screen <addr>                Read the screen');
   console.log('  resize <addr> <cols> <rows>  Resize a session');
   console.log('  kill <addr>                  Kill a session (holder included)');
@@ -47,6 +59,7 @@ function printHelp() {
   console.log('  upgrade [--check|--rollback|--force]  Swap in the latest release (or a new build), sessions stay alive');
   console.log('  version [--json]             CLI + server versions');
   console.log('  start / stop / restart / log Server lifecycle (start is one-shot; entry verbs autostart)');
+  console.log('  --host <name> <command>      Run the command on another machine (names in ~/.ttym/hosts.json, reached by ssh)');
   console.log('  help                         This text');
 }
 
