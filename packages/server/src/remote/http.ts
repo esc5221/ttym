@@ -15,6 +15,7 @@ import { classify, hostAllowed, originAllowed, parseCookies, normalizeHost, viaH
 import type { RemoteStore } from './store.js';
 import { SESSION_TTL_MS } from './store.js';
 import { resolveIdentity, mayCarryIdentity, defaultIdentityDeps, type IdentityDeps } from './identity.js';
+import { isEmbedPath, EMBED_WS_PATH } from '../embed/http.js';
 
 export const COOKIE = 'ttym_session';
 
@@ -90,6 +91,11 @@ function gateInner(req: IncomingMessage, res: ServerResponse, ctx: RemoteContext
   const path = (req.url || '/').split('?')[0]!;
   const allow = ctx.store.allowHosts;
 
+  // Embedding (ADR-0002): a consumer's proxy forwards these with its own Host and
+  // Origin. They carry a consumer key or a grant, and embed/http.ts checks that —
+  // a login cookie or an allow-listed Host would not mean anything here.
+  if (isEmbedPath(path)) return false;
+
   if (!hostAllowed(caller, allow)) {
     ctx.log(`REMOTE refuse host=${caller.hostname} reason=${caller.reason} ${req.method} ${path}`);
     res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -143,6 +149,8 @@ function gateInner(req: IncomingMessage, res: ServerResponse, ctx: RemoteContext
 
 /** Same decision for a WebSocket upgrade. Resolves null to accept, or [code, message]. */
 export async function gateUpgrade(req: IncomingMessage, ctx: RemoteContext): Promise<[number, string] | null> {
+  // The grant socket authenticates in its first frame (server.ts, embed/).
+  if ((req.url || '/').split('?')[0] === EMBED_WS_PATH) return null;
   const caller = classify(req, ctx.store.allowHosts);
   const allow = ctx.store.allowHosts;
   if (!hostAllowed(caller, allow)) return [403, 'host not allowed'];

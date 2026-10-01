@@ -194,3 +194,8 @@ export interface ScreenTail {
   cols: number;
   rows: ScreenRun[][];
 }
+export {
+  EMBED_API_VERSION, EMBED_SDK_VERSION, EMBED_CAPS, DEFAULT_GRANT_TTL_MS, DEFAULT_MAX_TTL_MS, ORIGIN_RE, EMBED_ID_RE,
+  parseConsumers, checkGrantRequest, capsOn, grantWorkspaces,
+} from './embed.js';
+export type { EmbedCap, SpawnProfile, EmbedConsumer, EmbedConsumers, EmbedAccess, EmbedGrantRequest, EmbedGrantResponse, EmbedTab } from './embed.js';

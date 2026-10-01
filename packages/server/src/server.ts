@@ -24,11 +24,14 @@ import { execFile } from 'node:child_process';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { RemoteStore } from './remote/store.js';
 import { gate, gateUpgrade, type RemoteContext } from './remote/http.js';
+import { ConsumerStore, GrantStore, type Grant } from './embed/store.js';
+import { handleEmbedHttp, EMBED_WS_PATH, workspaceOfFn } from './embed/http.js';
+import { authorizeInbound, canWrite, filterList, filterOutbound, outOfScope } from './embed/authorize.js';
 
 let mapRefreshInFlight = false;
 import { readFileSync as readFileSyncFs, writeFileSync as writeFileSyncFs, unlinkSync, chmodSync, mkdirSync } from 'node:fs';
 import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
-import { API_VERSION, MIN_API_VERSION, PRODUCT_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch, type ScreenRun } from '@ttym/protocol';
+import { API_VERSION, MIN_API_VERSION, PRODUCT_VERSION, EMBED_API_VERSION, EMBED_SDK_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch, type ScreenRun } from '@ttym/protocol';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
@@ -425,7 +428,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
 
   // GET /api/version — lets a client refuse an incompatible server
   if (path === '/api/version' && req.method === 'GET') {
-    json(200, { apiVersion: API_VERSION, minApiVersion: MIN_API_VERSION, version: PRODUCT_VERSION, role: 'ttym-server', ...(bootSafeMode ? { safeMode: true } : {}) });
+    json(200, { apiVersion: API_VERSION, minApiVersion: MIN_API_VERSION, version: PRODUCT_VERSION, role: 'ttym-server', embed: { api: EMBED_API_VERSION, sdk: EMBED_SDK_VERSION }, ...(bootSafeMode ? { safeMode: true } : {}) });
     return true;
   }
 
@@ -1528,6 +1531,12 @@ export async function createServer(port: number): Promise<TtymServer> {
   // Idle agents sleep; the first key wakes them. See agent-sleep.ts.
   let sleeper: AgentSleeper | null = null;
 
+  // Embedding in other apps (docs/adr-0002-embed.md, embed/).
+  const embedConsumers = new ConsumerStore(resolve(getHomeDir(), 'embed-consumers.json'), log);
+  const grants = new GrantStore(embedConsumers);
+  const workspaceOf = workspaceOfFn(workspaceStore);
+  const embedDeps = { consumers: embedConsumers, grants, manager, workspaces: workspaceStore, webDist: DEMO_DIST_DIR, log };
+
   const httpServer = createHttpServer((req, res) => {
     const g = gate(req, res, remote);
     if (g === 'handled') return;
@@ -1540,6 +1549,7 @@ export async function createServer(port: number): Promise<TtymServer> {
   });
   function route(req: IncomingMessage, res: ServerResponse) {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
+    if (handleEmbedHttp(req, res, embedDeps)) return;
     // /view/<cap>/… before the SPA catch-all, which would otherwise answer with index.html.
     if (handleViewContent(req, res, (req.url || '/').split('?')[0]!, { store: viewerStore })) return;
     if (handleHttpApi(manager, workspaceStore, interactions, configStore, req, res, broadcastAgentState, broadcastConfig, viewer, sleeper ?? undefined)) return;
@@ -1547,14 +1557,65 @@ export async function createServer(port: number): Promise<TtymServer> {
     res.writeHead(404);
     res.end('not found');
   }
+  // Two sockets on one server: /ws (the app, CLI) and /embed/v1/ws (grant connections).
+  // One WebSocketServer routing by path — two servers each claiming the upgrade
+  // event would abort each other's handshakes.
   const wss = new WebSocketServer({
-    server: httpServer, path: '/ws',
+    server: httpServer,
     verifyClient: (info, done) => {
+      const pathname = (info.req.url || '/').split('?')[0];
+      if (pathname === EMBED_WS_PATH) {
+        // Browsers always send Origin on a WebSocket. Which consumer it is comes with
+        // the grant in the first frame; here it only has to be one of theirs.
+        const origin = info.req.headers.origin;
+        if (typeof origin !== 'string' || !embedConsumers.allOrigins().includes(origin)) {
+          log(`EMBED refuse ws origin=${origin ?? '(none)'}`);
+          done(false, 403, 'origin not registered');
+          return;
+        }
+        done(true);
+        return;
+      }
+      if (pathname !== '/ws') { done(false, 404, 'not found'); return; }
       gateUpgrade(info.req, remote).then(
         (refused) => { if (refused) done(false, refused[0], refused[1]); else done(true); },
         () => done(false, 500, 'gate error'),
       );
     },
+  });
+
+  /** Grant connections: the grant, the Origin they opened with, and how to drop sessions the grant stopped reaching. */
+  interface EmbedConn { grant: Grant | null; origin: string; revalidate: () => void }
+  const embedConns = new Map<WebSocket, EmbedConn>();
+
+  /**
+   * Every server push goes through here. App connections get the event as is;
+   * grant connections get what filterOutbound lets through (embed/authorize.ts).
+   */
+  function sendPush(cmd: number, event: unknown) {
+    let plain: Uint8Array | null = null;
+    for (const client of wss.clients) {
+      if (client.readyState !== WebSocket.OPEN) continue;
+      const embed = embedConns.get(client);
+      let frame: Uint8Array;
+      if (embed) {
+        if (!embed.grant) continue;
+        const narrowed = filterOutbound(embed.grant.access, cmd, event);
+        if (narrowed === null) continue;
+        frame = encode(0, cmd, jsonPayload(narrowed));
+      } else {
+        frame = plain ??= encode(0, cmd, jsonPayload(event));
+      }
+      try { client.send(frame); } catch {}
+    }
+  }
+
+  grants.onEnd((grant, why) => {
+    for (const [client, conn] of embedConns) {
+      if (conn.grant?.id !== grant.id) continue;
+      log(`EMBED close grant=${grant.id} ${why}`);
+      try { client.close(4401, `grant ${why}`); } catch {}
+    }
   });
 
   // Keepalive. A viewer whose tab is hidden sends PAUSE_VIEW, so its socket
@@ -1681,12 +1742,7 @@ export async function createServer(port: number): Promise<TtymServer> {
       waiting: agentWaiting.get(sessionId) ?? null,
     };
     lastAnnouncedActive.set(sessionId, event.active);
-    const frame = encode(0, CMD.AGENT, jsonPayload(event));
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) {
-        try { client.send(frame); } catch {}
-      }
-    }
+    sendPush(CMD.AGENT, event);
   }
 
   // ── map 요약 주기: 서버 내장 타이머 ──
@@ -1742,40 +1798,52 @@ export async function createServer(port: number): Promise<TtymServer> {
   armMapTimer(configStore.get());
 
   // Viewer tabs push the moment `ttym open` lands — whole state, never a diff.
-  viewerStore.onChange((event) => {
-    const frame = encode(0, CMD.VIEW, jsonPayload(event));
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) {
-        try { client.send(frame); } catch {}
-      }
-    }
-  });
+  viewerStore.onChange((event) => sendPush(CMD.VIEW, event));
 
   function broadcastConfig(values: Record<string, string>) {
     armMapTimer(values); // 설정이 바뀌면 즉시 재장전 — 재시작 불필요
     sleeper?.configure(values);
-    const frame = encode(0, CMD.CONFIG, jsonPayload({ values }));
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) {
-        try { client.send(frame); } catch {}
-      }
-    }
+    sendPush(CMD.CONFIG, { values });
   }
 
   const unsubscribeWorkspaceChanges = workspaceStore.onChange((event) => {
-    const frame = encode(0, CMD.WORKSPACE, jsonPayload(event));
-    for (const client of wss.clients) {
-      if (client.readyState === WebSocket.OPEN) {
-        try { client.send(frame); } catch {}
-      }
-    }
+    // A tab closed or moved out: grant connections stop reaching it now, not at their next frame.
+    for (const conn of embedConns.values()) conn.revalidate();
+    sendPush(CMD.WORKSPACE, event);
   });
 
-  wss.on('connection', (ws: WebSocket) => {
+  wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     alive.set(ws, true);
     ws.on('pong', () => alive.set(ws, true));
     const viewerId = randomUUID();
     const clientSessions = new Set<number>();
+    // A grant connection until its HELLO proves otherwise: nothing is processed or pushed before.
+    const embed: EmbedConn | null = (req.url || '/').split('?')[0] === EMBED_WS_PATH
+      ? { grant: null, origin: String(req.headers.origin ?? ''), revalidate: () => revalidateEmbed() }
+      : null;
+    if (embed) {
+      embedConns.set(ws, embed);
+      // A socket that never says HELLO is not left holding a slot.
+      const helloTimer = setTimeout(() => { if (!embed.grant) { try { ws.close(4401, 'no grant'); } catch {} } }, 10_000);
+      helloTimer.unref?.();
+      ws.once('close', () => clearTimeout(helloTimer));
+    }
+
+    /** Detach every session this grant connection no longer reaches. */
+    function revalidateEmbed() {
+      if (!embed?.grant) return;
+      for (const sid of outOfScope(embed.grant.access, clientSessions, workspaceOf)) {
+        manager.get(sid)?.removeViewer(viewerId);
+        cleanupBatcher(sid);
+        clientSessions.delete(sid);
+        geometryUnsubs.get(sid)?.();
+        geometryUnsubs.delete(sid);
+        viewerAcks.get(viewerId)?.delete(sid);
+        minAckTrim(manager, sid);
+        log(`EMBED out-of-scope session=${sid} grant=${embed.grant.id}`);
+        safeSend(ws, encode(sid, CMD.DESTROY));
+      }
+    }
     const batchers = new Map<number, SessionBatcher>();
     const exitWired = new Set<number>(); // prevent duplicate onExit per session
     // 기하 변경을 이 연결의 viewer에게 밀어주는 구독 — 연결 종료 시 해지
@@ -2061,6 +2129,34 @@ export async function createServer(port: number): Promise<TtymServer> {
       if (!frame) return;
       const { sessionId, cmd, payload } = frame;
 
+      // Grant connections (ADR-0002 D3·D4): the first frame is HELLO with the grant;
+      // after that every frame is checked against it — expiry and revocation included.
+      if (embed) {
+        if (!embed.grant) {
+          const hello = cmd === CMD.HELLO ? parseJson<{ grant?: string }>(payload) : null;
+          const grant = grants.lookup(hello?.grant);
+          const consumer = grant ? embedConsumers.get(grant.consumerId) : undefined;
+          if (!grant || !consumer || !consumer.origins.includes(embed.origin)) {
+            log(`EMBED refuse ws ${grant ? `grant=${grant.id} origin=${embed.origin}` : 'no or bad grant'}`);
+            try { ws.close(4401, 'grant required'); } catch {}
+            return;
+          }
+          embed.grant = grant;
+          log(`EMBED open grant=${grant.id} consumer=${grant.consumerId} subject=${grant.subject || '-'} viewer=${viewerId.slice(0, 8)}`);
+          return;
+        }
+        if (!grants.alive(embed.grant)) return; // onEnd closes the socket
+        if (!authorizeInbound(embed.grant.access, cmd, sessionId, workspaceOf)) {
+          if (cmd === CMD.ATTACH) safeSend(ws, encode(sessionId, CMD.ATTACH, jsonPayload({ ok: false, error: 'not in this grant' })));
+          return;
+        }
+        if (cmd === CMD.LIST) {
+          safeSend(ws, encode(0, CMD.LIST, jsonPayload(filterList(embed.grant.access, manager.list(), workspaceOf))));
+          return;
+        }
+        if (cmd === CMD.HELLO) return;
+      }
+
       switch (cmd) {
         case CMD.HELLO:
           log('HELLO');
@@ -2120,7 +2216,10 @@ export async function createServer(port: number): Promise<TtymServer> {
             break;
           }
 
-          const mode = meta?.mode === 'readonly' ? 'readonly' as const : 'readwrite' as const;
+          // A grant without terminal.write attaches read-only whatever it asked for —
+          // a readwrite attach resizes the PTY.
+          const mode = meta?.mode === 'readonly' || (embed?.grant && !canWrite(embed.grant.access, sessionId, workspaceOf))
+            ? 'readonly' as const : 'readwrite' as const;
 
           // readwrite viewer만 resize 가능. borrow를 실어 왔으면 장부에 적는다 —
           // 그래야 그 뷰어가 떠날 때 이전 기하로 돌아간다. zen이 재부착으로
@@ -2269,6 +2368,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     });
 
     ws.on('close', () => {
+      embedConns.delete(ws);
       log(`WS close viewer=${viewerId.slice(0, 8)} - detaching ${clientSessions.size} sessions`);
       manager.detachViewer(viewerId, clientSessions);
       const ackedSessions = [...(viewerAcks.get(viewerId)?.keys() ?? [])];
@@ -2322,6 +2422,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     httpServer,
     close: async () => {
       sleeper?.stop();
+      grants.close();
       markCleanExit();
       clearInterval(agentExpirySweep);
       clearInterval(heartbeat);
