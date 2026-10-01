@@ -9,8 +9,10 @@ when the question needs something else.
   digest.py --since 24h        only sessions active in the last 24 hours
   digest.py --last 1305 1257   the full last answer of these sessions
   digest.py --grep "keyword"   sessions whose transcript mentions it, with counts
+  digest.py --hosts            also every machine in ~/.ttym/hosts.json (over ssh), ids as mini%78
+  digest.py --last mini%78     a session on another machine
 """
-import argparse, glob, json, os, re, subprocess, time, urllib.request
+import argparse, glob, json, os, re, shlex, subprocess, sys, time, urllib.request
 from datetime import datetime
 
 HOME = os.path.expanduser('~')
@@ -252,16 +254,73 @@ def show(rows):
         print(f"   ends  : {s['ends_with']} · {s['size'] // 1024}KB")
 
 
+# ── other machines ─────────────────────────────────────────────────────────
+# Transcripts live on the machine that ran the agent, so the digest of another
+# machine runs there: this script goes over ssh on stdin and its session ids
+# come back named, %78 → mini%78. Only the header lines are renamed; quoted
+# requests and answers are left as written.
+
+def read_hosts():
+    home = os.path.expanduser(os.environ.get('TTYM_HOME') or '~/.ttym')
+    try:
+        with open(os.path.join(home, 'hosts.json')) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+HEADER = re.compile(r'^(── )?%(\d+)')
+
+
+def run_on(host, entry, argv):
+    remote = 'exec "$SHELL" -lc ' + shlex.quote(' '.join(shlex.quote(a) for a in ['python3', '-', *argv]))
+    with open(os.path.abspath(__file__), 'rb') as script:
+        out = subprocess.run(['ssh', entry['ssh'], remote], stdin=script, capture_output=True, text=True)
+    if out.returncode != 0:
+        print(f'── {host}: ssh failed ({out.returncode}) {out.stderr.strip()[:200]}')
+        return
+    for line in out.stdout.splitlines():
+        print(HEADER.sub(lambda m: f"{m.group(1) or ''}{host}%{m.group(2)}", line))
+
+
 def main():
     global API
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--port', type=int, default=int(os.environ.get('PORT') or os.environ.get('TTYM_PORT') or 7690))
     ap.add_argument('--since', help='only sessions active within this window: 30m, 6h, 2d')
-    ap.add_argument('--last', nargs='+', type=int, metavar='ID', help='print the full last answer of these sessions')
+    ap.add_argument('--last', nargs='+', metavar='ID', help='print the full last answer of these sessions (78, %%78, mini%%78)')
     ap.add_argument('--grep', metavar='TEXT', help='sessions whose transcript contains TEXT')
+    ap.add_argument('--hosts', action='store_true', help='also every machine in ~/.ttym/hosts.json')
     args = ap.parse_args()
     API = f'http://127.0.0.1:{args.port}'
+    hosts = read_hosts()
 
+    # Ids on other machines go to those machines; the rest stay here.
+    if args.last:
+        here, there = [], {}
+        for raw in args.last:
+            name, _, num = raw.rpartition('%')
+            if name and name in hosts:
+                there.setdefault(name, []).append(num)
+            else:
+                here.append(int(num))
+        for name, nums in there.items():
+            run_on(name, hosts[name], ['--last', *nums])
+        if not here:
+            return
+        args.last = here
+    elif args.hosts:
+        passthrough = [a for a in sys.argv[1:] if a != '--hosts']
+        print(f'## this machine')
+        local(args)
+        for name, entry in hosts.items():
+            print(f'\n## {name}')
+            run_on(name, entry, passthrough)
+        return
+    local(args)
+
+
+def local(args):
     rows = collect()
     if args.since:
         n, unit = float(args.since[:-1]), args.since[-1]

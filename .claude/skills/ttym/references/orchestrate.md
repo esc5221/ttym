@@ -19,7 +19,13 @@ digest.py                    every session, most recent first
 digest.py --since 24h        only the ones active recently
 digest.py --last 1305 1257   full last answer of these sessions
 digest.py --grep "keyword"   which sessions' transcripts mention it
+digest.py --hosts            the same for every machine in ~/.ttym/hosts.json
+digest.py --last mini%78     a session on another machine
 ```
+
+Each machine keeps its own transcripts, so another machine's digest runs on
+that machine: `--hosts` sends the script over ssh and names its sessions
+`mini%78`. Treat them like local ones; `ttym await mini%78 -- "…"` reaches them.
 
 Where the facts come from, if you write your own:
 

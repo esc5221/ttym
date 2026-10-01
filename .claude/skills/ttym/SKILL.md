@@ -21,6 +21,12 @@ not `#1297` — `#` reads as a PR or issue number, and in a shell an unquoted
 link: hover shows that session's last lines, click opens it in a new tab.
 The CLI still accepts `#1297` for old scripts; do not write it.
 
+Sessions on another machine are `mini%78` or `mini/ws:name`, and
+`ttym --host mini <command>` runs a whole command there. The names come from
+`~/.ttym/hosts.json` (`{ "mini": { "ssh": "mini" } }`); the command runs on that
+machine over ssh, so send, await, screen and sleep behave as they do locally.
+Write sessions of other machines with their name in reports too: `mini%78`.
+
 ## Is this the right tool
 
 ```
