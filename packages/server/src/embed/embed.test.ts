@@ -164,6 +164,17 @@ describe('embed over the wire', () => {
     delete process.env.TTYM_HOME;
   });
 
+  it('the panel route serves only its own files — no absolute or escaping paths', async () => {
+    const http = await import('node:http');
+    const get = (path: string) => new Promise<number>((done) => {
+      http.get({ host: '127.0.0.1', port, path }, (r) => { r.resume(); done(r.statusCode ?? 0); });
+    });
+    for (const p of ['/embed/v1//etc/hosts', '/embed/v1//etc/passwd', '/embed/v1/fonts//etc/hosts', '/embed/v1/%2Fetc%2Fhosts',
+      '/embed/v1/..%2F..%2Fpackage.json', '/embed/v1/../../package.json', '/embed/v1/fonts/../../../package.json', '/embed/v1/\\etc\\hosts']) {
+      expect([400, 404], p).toContain(await get(p));
+    }
+  });
+
   it('mints only with the consumer key, and only inside the registration', async () => {
     const noKey = await api('/api/embed/v1/grants', { method: 'POST', body: '{}' });
     expect(noKey.status).toBe(401);

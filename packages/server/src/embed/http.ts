@@ -15,7 +15,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { extname, resolve } from 'node:path';
+import { extname, resolve, sep } from 'node:path';
 import { checkGrantRequest, type EmbedAccess, type EmbedCap, type EmbedTab, type SpawnProfile } from '@ttym/protocol';
 import type { ConsumerStore, Grant, GrantStore } from './store.js';
 import type { SessionManager } from '../session-manager.js';
@@ -101,13 +101,14 @@ function serveEmbedStatic(req: IncomingMessage, res: ServerResponse, path: strin
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
   if (path === '/embed/v1') { res.writeHead(301, { Location: 'v1/' }); res.end(); return; }
   const rest = path.slice(EMBED_PAGE_PREFIX.length);
-  if (rest.includes('..') || rest.includes('\0')) { res.writeHead(400); res.end('invalid path'); return; }
+  // resolve() restarts at an absolute segment: `/embed/v1//etc/hosts` would read /etc/hosts.
+  // So: a relative path only, and the result must stay under the directory it was joined to.
+  if (rest.startsWith('/') || rest.includes('\\') || rest.includes('..') || rest.includes('\0')) { res.writeHead(400); res.end('invalid path'); return; }
   // Fonts are the main app's (packages/web/public); the panel asks for them relative to itself.
-  const file = rest === '' || rest === 'index.html'
-    ? resolve(deps.webDist, 'embed/v1/index.html')
-    : rest.startsWith('fonts/') || rest === 'ttym-glyphs.woff2'
-      ? resolve(deps.webDist, rest)
-      : resolve(deps.webDist, 'embed/v1', rest);
+  const fromRoot = rest.startsWith('fonts/') || rest === 'ttym-glyphs.woff2';
+  const root = fromRoot ? resolve(deps.webDist) : resolve(deps.webDist, 'embed/v1');
+  const file = rest === '' ? resolve(root, 'index.html') : resolve(root, rest);
+  if (!file.startsWith(root + sep) || !(extname(file) in MIME)) { res.writeHead(404); res.end('not found'); return; }
   const origins = deps.consumers.allOrigins();
   void readFile(file).then((body) => {
     const isHtml = file.endsWith('.html');
