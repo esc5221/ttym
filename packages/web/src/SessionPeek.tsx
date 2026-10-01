@@ -5,9 +5,11 @@ import type { ScreenRun, ScreenTail } from '@ttym/api';
 import { setSessionLinkHandler } from '@ttym/ui';
 import { xterm256Color } from '@ttym/vt';
 import { API_BASE, sessionWorkspaceMembership, type AgentState, type Workspace } from './app-shared.js';
+import { routeToHash } from './route.js';
 
 /**
- * 터미널 글자 속 `%1297`에 마우스를 올리면 그 세션 화면의 아래 몇 줄을 띄운다. 누르면 새 탭.
+ * 터미널 글자 속 `%1297`에 마우스를 올리면 그 세션 화면의 아래 몇 줄을 띄운다. 누르면 새 탭에서
+ * 그 세션이 속한 workspace의 zen으로 연다.
  *
  * 터미널을 붙이지 않고 서버가 들고 있는 화면을 읽기만 한다(`/screen?format=tail`). 붙이면
  * 그 세션의 크기를 이 창이 바꾸거나, 같은 탭에 이미 떠 있는 pane과 터미널 객체를 다툰다.
@@ -29,6 +31,9 @@ export function SessionPeek({ workspaces, agentStates }: { workspaces: Workspace
   const showTimer = useRef<number | undefined>(undefined);
   const hideTimer = useRef<number | undefined>(undefined);
   const overPopover = useRef(false);
+  // 핸들러는 한 번만 건다. 누른 순간의 workspace 목록은 ref로 읽는다.
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
 
   useEffect(() => {
     const clear = () => { window.clearTimeout(showTimer.current); window.clearTimeout(hideTimer.current); };
@@ -36,8 +41,12 @@ export function SessionPeek({ workspaces, agentStates }: { workspaces: Workspace
       open: (sid) => {
         clear();
         setAnchor(null);
-        // 지금 주소 그대로 쓴다 — getSessionUrl은 공유용이라 http에서 lan 주소로 바꿔 버린다.
-        window.open(`${location.origin}${location.pathname}#s/${sid}`, '_blank', 'noopener');
+        // workspace에 속한 세션이면 그 workspace의 zen으로 연다 — Esc 한 번에 workspace 전체로
+        // 나갈 수 있고, zen은 폭을 빌렸다가 떠날 때 돌려준다. 속한 곳이 없으면 세션 단독 화면.
+        // 주소는 지금 것 그대로 쓴다 — getSessionUrl은 공유용이라 http에서 lan 주소로 바꿔 버린다.
+        const ws = sessionWorkspaceMembership(workspacesRef.current).get(sid)?.workspace;
+        const hash = ws ? routeToHash({ page: 'workspace', id: ws.id, zen: sid }) : routeToHash({ page: 'session', id: sid });
+        window.open(`${location.origin}${location.pathname}#${hash}`, '_blank', 'noopener');
       },
       hover: (sid, event) => {
         clear();
