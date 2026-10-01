@@ -22,6 +22,11 @@ export async function getSessionScreen(base: BaseUrl, sessionId: number): Promis
   return data?.screen ?? '';
 }
 
+/** 다른 머신의 이름과 웹 주소 — 서버가 ~/.ttym/hosts.json 에서 읽는다. */
+export function getHosts(base: BaseUrl): Promise<{ hosts: Array<{ name: string; url: string }> }> {
+  return request(base, '/api/hosts');
+}
+
 /** 화면 아래 `rows`줄을 색과 함께 — 호버 미리보기. 읽기만 하므로 그 세션의 터미널 크기는 그대로다. */
 export function getSessionScreenTail(base: BaseUrl, sessionId: number, rows = 12): Promise<ScreenTail> {
   return request(base, `/api/sessions/${sessionId}/screen?format=tail&rows=${rows}`);

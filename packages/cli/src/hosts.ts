@@ -11,14 +11,15 @@ import { HOME_DIR } from './common.js';
  *   ttym await box/api:term-78 -- "…"
  *   ttym --host box workspace info          명령 전체를 그 머신에서
  *
- * 이름은 ~/.ttym/hosts.json 에 둔다: { "box": { "ssh": "box" } }.
+ * 이름은 ~/.ttym/hosts.json 에 둔다: { "box": { "ssh": "box", "url": "https://box.example.com" } }. url은 웹에서 링크를 열 때만 쓴다.
  * 명령은 ssh로 그 머신의 ttym이 실행한다. HTTP로 그 서버에 직접 붙지 않는 이유: await의 답과
  * 세션 기록(transcript)은 그 머신의 디스크에 있고, 그 서버의 원격 인증 게이트를 건드리지 않아도 된다.
  * ttym이 출력하는 목록의 %78은 box%78로 바꿔서, 받은 주소를 그대로 다음 명령에 쓸 수 있게 한다.
  * 화면·명령 출력·에이전트의 답은 내용이라 바꾸지 않는다.
  */
 
-export interface HostEntry { ssh: string }
+/** ssh: CLI가 명령을 넘길 때 쓴다. url: 그 머신의 웹 주소 — 있으면 터미널 속 box%78을 눌러 거기서 열 수 있다. */
+export interface HostEntry { ssh: string; url?: string }
 export type Hosts = Record<string, HostEntry>;
 
 export function readHosts(): Hosts {

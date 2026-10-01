@@ -1093,6 +1093,15 @@ function App() {
     return () => { cancelled = true; window.clearInterval(fallback); unsubscribe?.(); };
   }, [connected, workspaces.map((w) => w.id + ':' + layoutToSessionIds(w.layout).join('.')).join('|')]);
 
+  // 세션 단독 화면(#s/번호)은 주변 workspace로 돌아갈 길이 없다. 그 세션이 workspace에 속해 있으면
+  // 그 workspace의 zen으로 간다 — 터미널 속 box%78 링크가 다른 머신의 웹을 이 주소로 열기 때문이다.
+  // 뒤로 가기가 다시 #s로 되돌아오지 않게 주소를 갈아끼운다.
+  useEffect(() => {
+    if (route.page !== 'session') return;
+    const ws = sessionWorkspaceMembership(workspaces).get(route.id)?.workspace;
+    if (ws) navigate({ page: 'workspace', id: ws.id, zen: route.id }, { replace: true });
+  }, [route, workspaces]);
+
   // ── 탭 넘침: 탭 구간만 가로 스크롤 (스크롤바 없음, 양끝 페이드가 힌트) ──
   const tabScrollerRef = useRef<HTMLDivElement | null>(null);
   const [tabFade, setTabFade] = useState({ left: false, right: false });

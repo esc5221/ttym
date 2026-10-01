@@ -23,7 +23,8 @@ The CLI still accepts `#1297` for old scripts; do not write it.
 
 Sessions on another machine are `box%78` or `box/ws:name`, and
 `ttym --host box <command>` runs a whole command there. The names come from
-`~/.ttym/hosts.json` (`{ "box": { "ssh": "box" } }`); the command runs on that
+`~/.ttym/hosts.json` (`{ "box": { "ssh": "box", "url": "https://box.example.com" } }`; `url` is
+only for the web UI, where `box%78` in a terminal opens that session on the other machine); the command runs on that
 machine over ssh, so send, await, screen and sleep behave as they do locally.
 Write sessions of other machines with their name in reports too: `box%78`.
 

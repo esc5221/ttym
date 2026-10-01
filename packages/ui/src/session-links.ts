@@ -8,14 +8,18 @@ import type { IBufferLine, ILink, ILinkProvider, Terminal as XTerm } from '@xter
  * 앱의 라우트를 모른다. 핸들러가 없으면 링크를 만들지 않는다.
  */
 
-/** 앞이 글자·%·/ 이면 아니다(`a%20b`, URL 인코딩). 뒤가 글자면 아니다(`%10s` printf 서식). */
-export const SESSION_REF = /(?<![\w%/])%(\d{1,4})(?!\w)/g;
+/** `%1297`, 다른 머신이면 `box%1297`. 앞이 글자·%·/ 이면 아니다(`a%20b`, URL 인코딩).
+ *  뒤가 글자면 아니다(`%10s` printf 서식). 이름이 알려진 머신이 아니면 링크가 아니다(provider에서 거른다). */
+export const SESSION_REF = /(?<![\w%/-])(?:([A-Za-z][\w-]*))?%(\d{1,4})(?!\w)/g;
 
 export interface SessionLinkHandler {
-  open(sessionId: number, event: MouseEvent): void;
+  /** `host`는 다른 머신의 세션일 때만 있다. */
+  open(sessionId: number, event: MouseEvent, host?: string): void;
   /** 마우스가 링크 위에 올라왔다 — 미리보기를 띄울 자리. */
-  hover?(sessionId: number, event: MouseEvent): void;
-  leave?(sessionId: number, event: MouseEvent): void;
+  hover?(sessionId: number, event: MouseEvent, host?: string): void;
+  leave?(sessionId: number, event: MouseEvent, host?: string): void;
+  /** 링크로 쳐 줄 다른 머신 이름. 비어 있으면 `box%78`은 링크가 아니다. */
+  hosts?(): ReadonlySet<string>;
 }
 
 let handler: SessionLinkHandler | null = null;
@@ -50,15 +54,17 @@ export function sessionLinkProvider(term: XTerm): ILinkProvider {
       for (const m of text.matchAll(SESSION_REF)) {
         const start = m.index!;
         const end = start + m[0].length - 1;
-        const sessionId = parseInt(m[1], 10);
+        const host = m[1];
+        const sessionId = parseInt(m[2], 10);
         if (!sessionId) continue;
+        if (host && !handler?.hosts?.().has(host)) continue;
         links.push({
           range: { start: { x: col[start] + 1, y }, end: { x: col[end] + 1, y } },
           text: m[0],
           decorations: { underline: true, pointerCursor: true },
-          activate: (event) => handler?.open(sessionId, event),
-          hover: (event) => handler?.hover?.(sessionId, event),
-          leave: (event) => handler?.leave?.(sessionId, event),
+          activate: (event) => handler?.open(sessionId, event, host),
+          hover: (event) => handler?.hover?.(sessionId, event, host),
+          leave: (event) => handler?.leave?.(sessionId, event, host),
         });
       }
       callback(links.length ? links : undefined);

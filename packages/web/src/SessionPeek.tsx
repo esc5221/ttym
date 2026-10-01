@@ -34,13 +34,29 @@ export function SessionPeek({ workspaces, agentStates }: { workspaces: Workspace
   // 핸들러는 한 번만 건다. 누른 순간의 workspace 목록은 ref로 읽는다.
   const workspacesRef = useRef(workspaces);
   workspacesRef.current = workspaces;
+  // 다른 머신의 이름 → 웹 주소 (~/.ttym/hosts.json, 서버가 알려 준다). box%78을 링크로 칠지 정한다.
+  const hostUrls = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    let alive = true;
+    api.getHosts(API_BASE).then((r) => {
+      if (alive) hostUrls.current = new Map(r.hosts.map((h) => [h.name, h.url]));
+    }, () => {});
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     const clear = () => { window.clearTimeout(showTimer.current); window.clearTimeout(hideTimer.current); };
     setSessionLinkHandler({
-      open: (sid) => {
+      hosts: () => new Set(hostUrls.current.keys()),
+      open: (sid, _event, host) => {
         clear();
         setAnchor(null);
+        // 다른 머신의 세션은 그 머신의 웹에서 연다. 속한 workspace의 zen으로 가는 건 그쪽 웹이 한다(#s/번호).
+        if (host) {
+          const base = hostUrls.current.get(host);
+          if (base) window.open(`${base}/#${routeToHash({ page: 'session', id: sid })}`, '_blank', 'noopener');
+          return;
+        }
         // workspace에 속한 세션이면 그 workspace의 zen으로 연다 — Esc 한 번에 workspace 전체로
         // 나갈 수 있고, zen은 폭을 빌렸다가 떠날 때 돌려준다. 속한 곳이 없으면 세션 단독 화면.
         // 주소는 지금 것 그대로 쓴다 — getSessionUrl은 공유용이라 http에서 lan 주소로 바꿔 버린다.
@@ -48,8 +64,10 @@ export function SessionPeek({ workspaces, agentStates }: { workspaces: Workspace
         const hash = ws ? routeToHash({ page: 'workspace', id: ws.id, zen: sid }) : routeToHash({ page: 'session', id: sid });
         window.open(`${location.origin}${location.pathname}#${hash}`, '_blank', 'noopener');
       },
-      hover: (sid, event) => {
+      hover: (sid, event, host) => {
         clear();
+        // 다른 머신 세션의 미리보기는 아직 없다. 같은 번호의 이 머신 세션을 보여 주면 안 된다.
+        if (host) return;
         const next = { sid, x: event.clientX, y: event.clientY };
         showTimer.current = window.setTimeout(() => setAnchor(next), SHOW_DELAY_MS);
       },

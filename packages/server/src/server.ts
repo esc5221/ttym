@@ -429,6 +429,20 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
+  // GET /api/hosts — 다른 머신의 이름과 웹 주소(~/.ttym/hosts.json). 웹이 터미널 속 box%78을 링크로 만든다.
+  // ssh 접속 정보는 CLI만 쓰므로 내보내지 않는다.
+  if (path === '/api/hosts' && req.method === 'GET') {
+    let hosts: Array<{ name: string; url: string }> = [];
+    try {
+      const raw = JSON.parse(readFileSyncFs(resolve(getHomeDir(), 'hosts.json'), 'utf8')) as Record<string, { url?: unknown }>;
+      hosts = Object.entries(raw)
+        .filter(([, entry]) => typeof entry?.url === 'string' && /^https?:\/\//.test(entry.url as string))
+        .map(([name, entry]) => ({ name, url: (entry.url as string).replace(/\/+$/, '') }));
+    } catch {}
+    json(200, { hosts });
+    return true;
+  }
+
   // GET /api/sessions
   if (path === '/api/sessions' && req.method === 'GET') {
     json(200, manager.list());
