@@ -11,8 +11,15 @@ reason to reach for it: work you start here keeps running after you stop
 watching.
 
 Sessions are addressed with a colon: `ws:name`, `:name` inside your own
-workspace, or `#id`. `ttym --help` has the grammar. This file has the judgement
-calls it cannot make for you.
+workspace, or `%id` (`%1297`). `ttym --help` has the grammar. This file has the
+judgement calls it cannot make for you.
+
+When you mention a session to the user or in a report, write it as `%1297`,
+optionally followed by its address: `%1297 (server:term-1297)`. Not "pane 1297",
+not `#1297` — `#` reads as a PR or issue number, and in a shell an unquoted
+`#1297` starts a comment. In the ttym web UI, `%1297` in terminal output is a
+link: hover shows that session's last lines, click opens it in a new tab.
+The CLI still accepts `#1297` for old scripts; do not write it.
 
 ## Is this the right tool
 
