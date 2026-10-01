@@ -1,6 +1,6 @@
 ---
 name: ttym
-description: Run other coding agents as persistent terminal sessions and delegate work to them. Use when a task wants a second agent working in parallel, a long job that must survive this conversation, work in a different directory or git worktree, or when you need to read or drive a session someone else started. Triggers — "ttym", "spawn an agent", "have codex do it", "run it in parallel", "in another session", "background agent", "delegate this", "hand it off", "worktree agent". Not for running a command and reading its output; that is a plain shell call.
+description: Run other coding agents as persistent terminal sessions and delegate work to them. Use when a task wants a second agent working in parallel, a long job that must survive this conversation, work in a different directory or git worktree, when you need to read or drive a session someone else started, or when the user wants the state of all their sessions and what is waiting on them. Triggers — "ttym", "spawn an agent", "have codex do it", "run it in parallel", "in another session", "background agent", "delegate this", "hand it off", "worktree agent", "what are my sessions doing", "what is waiting on me", "orchestrate". Not for running a command and reading its output; that is a plain shell call.
 ---
 
 # ttym
@@ -154,3 +154,11 @@ and names the pid — two copies of one conversation split its history.
 
 Look before you spawn. The session you need may already exist, and a second
 agent in the same repository will fight the first one over the same files.
+
+## Orchestrating many sessions
+
+When the user wants the picture across all their sessions — what is running,
+what waits on them, what went stale — or wants decisions carried to the agents
+doing the work, follow `references/orchestrate.md`. It reads state from the
+server and the transcripts instead of asking each agent, and
+`scripts/digest.py` does the first pass.
