@@ -169,3 +169,17 @@ what waits on them, what went stale — or wants decisions carried to the agents
 doing the work, follow `references/orchestrate.md`. It reads state from the
 server and the transcripts instead of asking each agent, and
 `scripts/digest.py` does the first pass.
+
+## Putting a ttym panel in another app
+
+When the user wants a terminal inside their own web app, that is `ttym embed`,
+not a session you spawn. Read `docs/embedding.md` in the ttym repo; it covers
+the four steps (register the app, mint a grant in its backend, proxy two paths,
+mount `sdk.js`). Two things to get right:
+
+- Run a separate ttym instance for the app (`TTYM_HOME=… PORT=… ttym start`, or a
+  container), never the user's own. A shell in an embedded tab can call that
+  instance's local API.
+- Ask the user who may open the panel before writing the grant route. ttym
+  enforces the grant; deciding who gets one is the app's job.
+

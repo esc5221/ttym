@@ -147,6 +147,24 @@ Off this machine, every request needs an allowed host and a login.
 Cloudflare Tunnel, SSH and the details are in
 [docs/remote-access.md](docs/remote-access.md).
 
+## Inside another app
+
+Another web app can show a ttym panel (tabs and terminal) in its own page.
+The app's backend asks ttym for a grant for one person; the panel reaches only
+the workspaces or sessions in that grant, read-only if the grant says so.
+
+```bash
+ttym embed consumer add studio --origin https://studio.example.com \
+  --workspace studio --profile default='zsh -l' --keep-one
+```
+
+```html
+<script src="/studio/embed/v1/sdk.js"></script>
+<script>TtymEmbed.mount(el, { base: '/studio', grant: () => fetch('/studio/grant').then((r) => r.json()) })</script>
+```
+
+Registering, minting, proxying and the SDK are in [docs/embedding.md](docs/embedding.md).
+
 ## CLI reference
 
 ### Addresses
