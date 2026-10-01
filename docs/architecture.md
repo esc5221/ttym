@@ -115,6 +115,27 @@ GET  /api/workspaces[/:id]
 409  충돌은 code로 읽는다: member_name_taken · session_in_other_workspace · workspace_name_taken
 ```
 
+## 임베드 (다른 앱 안의 패널)
+
+소비처 앱이 자기 화면에 ttym 패널을 넣는 경로. 쓰는 법은 docs/embedding.md.
+
+```
+등록      ~/.ttym/embed-consumers.json (ttym embed consumer …). id → 키 해시·출처·워크스페이스·실행 프로필.
+          서버는 mtime이 바뀌면 다시 읽는다. 지우거나 키를 바꾸면 그 소비처의 grant가 끝난다
+grant     POST /api/embed/v1/grants (소비처 키). 메모리에만, 토큰은 해시로. 범위마다 권한
+          (terminal.read · terminal.write · tabs.write). 등록 밖의 요청은 400 — 줄여서 주지 않는다
+WS        /embed/v1/ws. 첫 프레임 HELLO에 grant가 없으면 아무것도 처리하지 않는다 (루프백도).
+          수신 프레임은 authorizeInbound, push는 sendPush 안의 filterOutbound (embed/authorize.ts)
+          — 표에 없는 CMD는 거부. AGENT·VIEW·CONFIG push는 grant 연결에 안 간다
+탭        /api/embed/v1/workspaces/:ws/tabs. 탭 = 워크스페이스 멤버. 워크스페이스마다 직렬화
+패널      packages/web/embed → web/dist/embed/v1 (상대경로 빌드). sdk.js가 iframe으로 띄운다
+gate      /embed/v1/*·/api/embed/v1/*는 remote gate(허용 호스트·로그인 쿠키)를 건너뛴다.
+          소비처 프록시가 자기 Host·Origin으로 넘기므로, 거기서는 키·grant가 검사다
+```
+
+grant가 막는 것은 패널이 닿는 범위다. 탭 안의 셸은 ttym을 띄운 OS 사용자로 돌고 루프백
+무인증 API를 부를 수 있으므로, 소비처마다 전용 인스턴스를 둔다.
+
 ## meta 소유권
 
 ```

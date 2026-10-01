@@ -17,7 +17,8 @@ packages/api/      HTTP 클라이언트 (@ttym/api)
 packages/shared/   도메인 규칙 — layout 트리 연산 (@ttym/shared)
 holder/            Rust PTY holder (세션당 1개, detached, 서버 생존과 무관)
 scripts/           빌드·hook·fixture 캡처 스크립트
-docs/              architecture.md · adr-0001-membership.md (docs/local/은 비추적 산출물)
+docs/              architecture.md · adr-0001-membership.md · embedding.md · remote-access.md
+                   (docs/local/은 비추적 산출물)
 ```
 
 CLI 문법(콜론 주소가 유일한 문법): `ttym new <name>` · `ttym split <ws:name> <name>` ·
@@ -131,6 +132,21 @@ ttym view close (<target> | --id <vid> | --all)
 - 상태: `~/.ttym/<runtime>/viewer.json` (server/src/viewer/). meta annotation이 아니다 — PATCH로 우회 못 하게.
   push는 CMD.VIEW(0x11), 전체 스냅샷. active 탭·pane/full·스크롤은 클라이언트(localStorage).
 - 콘텐츠는 `/view/<cap>/…` (cap = 128bit 토큰, GET/HEAD, 읽기 전용 CORS). 제어는 `/api/sessions/:id/views`.
+
+## 임베드 (`ttym embed`)
+
+다른 웹앱에 ttym 패널을 넣는다. 소비처는 키로 grant를 받고, 패널은 그 grant가 닿는 워크스페이스·세션만 본다.
+사용법·API·SDK는 docs/embedding.md, 구조는 docs/architecture.md "임베드".
+
+```sh
+ttym embed consumer add <id> --origin <url> --workspace <ws> --profile default='zsh -l' [--keep-one]
+ttym embed consumer list | rotate <id> | remove <id>
+```
+
+- 서버: packages/server/src/embed/ (store·authorize·http). 패널·SDK: packages/web/embed/ → web/dist/embed/v1.
+- grant 연결은 /embed/v1/ws만 쓴다. 기존 /ws·웹앱은 필터를 거치지 않는다. push는 전부 server.ts `sendPush` 하나로.
+- 새 CMD를 추가하면 embed/authorize.ts INBOUND에 행을 넣어야 grant 연결에서 쓸 수 있다(없으면 embed.test.ts가 실패).
+- 소비처는 전용 인스턴스에 붙인다 — 탭 셸이 루프백 무인증 API로 같은 인스턴스 전체에 닿기 때문.
 
 ## 에이전트 절전 (agent sleep)
 
