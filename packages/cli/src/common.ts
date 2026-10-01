@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync } from 'no
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
 import { createRequire as moduleRequire } from 'node:module';
 import process from 'node:process';
 import { WebSocket as WsWebSocket } from 'ws';
@@ -145,6 +146,39 @@ export async function fetchRequest(port, method, path, body = undefined, timeout
 }
 
 /**
+ * 서버가 답을 붙잡고 있는 요청(await, --id 이어받기, 셸 명령 대기)용.
+ *
+ * Node 내장 fetch는 응답 헤더를 300초 안에 못 받으면 연결을 끊고(UND_ERR_HEADERS_TIMEOUT),
+ * 그 기본값을 바꿀 방법이 fetch 쪽에 없다. 그래서 --timeout을 300초보다 길게 준 await가
+ * 5분째에 "cannot reach ttym server"로 죽었다 — 서버도 에이전트도 멀쩡한데. 여기서는
+ * node:http로 보내고, 시간 제한은 부른 쪽이 준 timeoutMs 하나뿐이다.
+ * 결과 모양은 fetchRequest와 같다: 2xx가 아니어도 JSON 본문을 돌려준다.
+ */
+export function fetchLong(port, method, path, body = undefined, timeoutMs = HTTP_TIMEOUT_MS) {
+  return new Promise<any>((resolveBody, reject) => {
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const req = httpRequest(`${apiBase(port)}${path}`, {
+      method,
+      headers: payload === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+    }, (res) => {
+      let text = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { text += chunk; });
+      res.on('end', () => {
+        clearTimeout(timer);
+        if (!text) return resolveBody(undefined);
+        try { resolveBody(JSON.parse(text)); } catch { resolveBody(null); }
+      });
+      res.on('error', (err) => { clearTimeout(timer); reject(err); });
+    });
+    const timer = setTimeout(() => req.destroy(Object.assign(new Error(`request timed out after ${timeoutMs}ms`), { name: 'TimeoutError' })), timeoutMs);
+    req.on('error', (err) => { clearTimeout(timer); reject(err); });
+    if (payload !== undefined) req.write(payload);
+    req.end();
+  });
+}
+
+/**
  * Refuse to run against a server speaking a different API version.
  *
  * A v2 CLI against a v3 server ran for hours during the last swap with no way
@@ -197,7 +231,7 @@ export async function shellAwait(port, sessionId, command, timeoutMs) {
   // 경로는 깨운 뒤 CR로 제출한다.
   const meta = await fetchJson(port, `/api/sessions/${sessionId}/meta`).catch(() => null);
   if (meta?.agentSleep) return null;
-  return fetchRequest(port, 'POST', `/api/sessions/${sessionId}/commands`, { command, timeoutMs }, timeoutMs + 15_000);
+  return fetchLong(port, 'POST', `/api/sessions/${sessionId}/commands`, { command, timeoutMs }, timeoutMs + 15_000);
 }
 
 /** CSI·OSC·제어문자 제거 — 개행·탭은 살린다. 명령 출력의 사람용 기본 표시. */

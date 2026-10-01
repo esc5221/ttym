@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
-import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, ensureCompatibleServer, shellAwait, stripAnsi, cleanShellOutput, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
+import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPatch, fetchPost, fetchDelete, fetchRequest, fetchLong, ensureCompatibleServer, shellAwait, stripAnsi, cleanShellOutput, hasFlag, readOption, printOutput, encodeFrame, encodeDataFrame, decodeFrame, parseFrameJson, CMD, encoder, decoder, HOME_DIR, PID_FILE, LOG_FILE, SERVER_JS, HOLDER_BIN, HTTP_TIMEOUT_MS, ATTACH_RETRY_MS, DETACH_KEY } from './common.js';
 import { resolveAddress, resolveMatches, ensureDefaultWorkspace, createWorkspaceMember, requireMember, resolveWorkspace, patchSessionMeta, memberAddress } from './addresses.js';
 import { ensureServerRunning } from './lifecycle.js';
 // 이 파일은 C4b 분할로 main.ts에서 나왔다 — 동작 이동 없음, 구조 이동만.
@@ -285,7 +285,7 @@ function awaitReason(status: string | null): 'done' | 'timeout' | 'failed' | 'un
  * 부르는 쪽은 같은 필드에서 둘 중 무엇을 받았는지 구분할 수 없었다.
  */
 async function awaitInteraction(port: number, sessionId: number, prompt: string, timeoutMs: number, raw: boolean) {
-  const response = await fetchRequest(port, 'POST', `/api/sessions/${sessionId}/interactions`, {
+  const response = await fetchLong(port, 'POST', `/api/sessions/${sessionId}/interactions`, {
     prompt: prompt.replace(/[\r\n]+$/, ''),
     timeoutMs,
     submit: 'cr',
@@ -388,7 +388,7 @@ async function resumeAwait(port: number, iid: string, timeoutMs: number, raw: bo
   const found = await fetchJson(port, `/api/interactions/${encodeURIComponent(iid)}`).catch(() => null);
   if (!found?.interaction) { console.error(`no interaction ${iid} (the server keeps them for a while after they settle)`); process.exit(EXIT.NOT_FOUND); }
   const sid = found.interaction.sessionId;
-  const waited = await fetchRequest(port, 'GET', `/api/sessions/${sid}/interactions/${encodeURIComponent(iid)}?wait=${timeoutMs}`, undefined, timeoutMs + 15_000);
+  const waited = await fetchLong(port, 'GET', `/api/sessions/${sid}/interactions/${encodeURIComponent(iid)}?wait=${timeoutMs}`, undefined, timeoutMs + 15_000);
   const result = await awaitResult(port, sid, waited?.interaction ?? found.interaction, raw);
   if (hasFlag('--json')) return printOutput({ target: `%${sid}`, ...result }, true);
   reportAwaitStatus(result, timeoutMs);
