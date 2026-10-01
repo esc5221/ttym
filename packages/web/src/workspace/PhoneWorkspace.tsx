@@ -124,7 +124,7 @@ function ListView({ sessionIds, memberNames, sessionCwds, onOpen, onSplit }: Pho
                 />
               ) : null}
               <span style={{ color: color ?? 'var(--text)', fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
-                {memberNames[sid] || `#${sid}`}
+                {memberNames[sid] || `%${sid}`}
               </span>
               {(viewer.states[sid]?.items.length ?? 0) > 0 ? (
                 // 이 pane에 `ttym open`으로 열린 파일이 있다 — 열면 탭 줄에 선다.
@@ -251,7 +251,7 @@ function FocusView({
           />
         ) : null}
         <span style={{ color: color ?? 'var(--text)', fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
-          {memberNames[sid] || `#${sid}`}
+          {memberNames[sid] || `%${sid}`}
         </span>
         {cwd ? (
           <span style={{

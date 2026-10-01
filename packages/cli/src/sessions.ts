@@ -61,7 +61,7 @@ export async function cmdNew() {
     workspace: updated.name,
   };
   if (asJson) return printOutput(result, true);
-  console.log(`${result.address}  #${session.id}`);
+  console.log(`${result.address}  %${session.id}`);
 }
 
 export async function cmdSplit() {
@@ -96,7 +96,7 @@ export async function cmdSplit() {
     sessionId: data.session.id,
   };
   if (asJson) return printOutput(result, true);
-  console.log(`${result.address}  #${data.session.id}`);
+  console.log(`${result.address}  %${data.session.id}`);
 }
 
 export async function cmdSendAddr() {
@@ -105,7 +105,7 @@ export async function cmdSendAddr() {
   const payload = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
   const token = args[0];
   if (!token || !payload) {
-    console.error('usage: ttym send <ws:name|:name|#id | --match "expr"> -- "data"');
+    console.error('usage: ttym send <ws:name|:name|%id | --match "expr"> -- "data"');
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
@@ -130,28 +130,28 @@ export async function cmdResizeAddr() {
   const cols = parseInt(process.argv[4], 10);
   const rows = parseInt(process.argv[5], 10);
   if (!token || !Number.isInteger(cols) || !Number.isInteger(rows) || cols <= 0 || rows <= 0) {
-    console.error('usage: ttym resize <ws:name|:name|#id> <cols> <rows>');
+    console.error('usage: ttym resize <ws:name|:name|%id> <cols> <rows>');
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
   const target = await resolveAddress(port, token);
   await fetchPost(port, `/api/sessions/${target.sessionId}/resize`, { cols, rows });
   if (hasFlag('--json')) return printOutput({ ok: true, sessionId: target.sessionId, cols, rows }, true);
-  console.log(`resized #${target.sessionId} to ${cols}x${rows}`);
+  console.log(`resized %${target.sessionId} to ${cols}x${rows}`);
 }
 
 /** 계약 조항 "비대화형 종료": ttym kill <addr> — 세션과 holder까지 끝낸다. */
 export async function cmdKillAddr() {
   const token = process.argv[3];
   if (!token) {
-    console.error('usage: ttym kill <ws:name|:name|#id>');
+    console.error('usage: ttym kill <ws:name|:name|%id>');
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
   const target = await resolveAddress(port, token);
   await fetchDelete(port, `/api/sessions/${target.sessionId}`);
   if (hasFlag('--json')) return printOutput({ ok: true, sessionId: target.sessionId }, true);
-  console.log(`killed #${target.sessionId}`);
+  console.log(`killed %${target.sessionId}`);
 }
 
 /**
@@ -182,7 +182,7 @@ export async function cmdScreenAddr() {
   const args = process.argv.slice(3);
   const token = args[0];
   if (!token) {
-    console.error('usage: ttym screen <ws:name|:name|#id | --match \"expr\"> [--raw] [--json]');
+    console.error('usage: ttym screen <ws:name|:name|%id | --match \"expr\"> [--raw] [--json]');
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
@@ -210,7 +210,7 @@ export async function cmdCommandsAddr() {
   const args = process.argv.slice(3);
   const token = args[0];
   if (!token) {
-    console.error('usage: ttym commands <ws:name|:name|#id> [--limit N] [--json]');
+    console.error('usage: ttym commands <ws:name|:name|%id> [--limit N] [--json]');
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
@@ -239,7 +239,7 @@ export async function cmdOutputAddr() {
   const args = process.argv.slice(3);
   const token = args[0];
   if (!token) {
-    console.error('usage: ttym output <ws:name|:name|#id> [--cmd N] [--raw] [--json]');
+    console.error('usage: ttym output <ws:name|:name|%id> [--cmd N] [--raw] [--json]');
     process.exit(EXIT.USAGE);
   }
   const port = getPort();
@@ -248,7 +248,7 @@ export async function cmdOutputAddr() {
   const which = readOption(args, '--cmd') || 'last';
   const result = await fetchJson(port, `/api/sessions/${target.sessionId}/commands/${which}/output`).catch(() => null);
   if (!result || result.error) {
-    console.error(`no such command in #${target.sessionId} — see: ttym commands ${token}`);
+    console.error(`no such command in %${target.sessionId} — see: ttym commands ${token}`);
     process.exit(EXIT.NOT_FOUND);
   }
   const output = hasFlag('--raw') ? result.output : cleanShellOutput(result.output);
@@ -352,7 +352,7 @@ async function senderPrefix(port: number, ownArgs: string[], targetSessionId: nu
     // 받는 쪽이 그대로 복사해 되물을 수 있는 주소 — memberAddress의 ws/name은 주소 문법이 아니다.
     if (m) return `[ttym · from ${ws.name}:${m.name}] `;
   }
-  return `[ttym · from #${sid}] `;
+  return `[ttym · from %${sid}] `;
 }
 
 function formatDuration(ms: number | null): string {
@@ -390,7 +390,7 @@ async function resumeAwait(port: number, iid: string, timeoutMs: number, raw: bo
   const sid = found.interaction.sessionId;
   const waited = await fetchRequest(port, 'GET', `/api/sessions/${sid}/interactions/${encodeURIComponent(iid)}?wait=${timeoutMs}`, undefined, timeoutMs + 15_000);
   const result = await awaitResult(port, sid, waited?.interaction ?? found.interaction, raw);
-  if (hasFlag('--json')) return printOutput({ target: `#${sid}`, ...result }, true);
+  if (hasFlag('--json')) return printOutput({ target: `%${sid}`, ...result }, true);
   reportAwaitStatus(result, timeoutMs);
   printAwaitText(result, ownArgs.includes('--bare'));
 }
@@ -446,7 +446,7 @@ export async function cmdAwaitAddr() {
     return resumeAwait(port, resumeId, parseInt(readOption(ownArgs, '--timeout') || '120000', 10), ownArgs.includes('--raw'), ownArgs);
   }
   if (!token || !prompt) {
-    console.error('usage: ttym await <ws:name|:name|#id | --match \"expr\"> [--timeout ms] [--raw] [--bare] [--no-from] -- "prompt"');
+    console.error('usage: ttym await <ws:name|:name|%id | --match \"expr\"> [--timeout ms] [--raw] [--bare] [--no-from] -- "prompt"');
     console.error('       ttym await --id <interaction> [--timeout ms]     keep waiting on one that timed out');
     process.exit(EXIT.USAGE);
   }

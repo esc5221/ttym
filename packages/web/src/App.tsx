@@ -9,6 +9,7 @@ import { apiAddStream, apiDeleteWorkspace, apiRemoveStream, apiRenameStream, api
 import { StripMenu, attachDropdownStyle, attachDropdownTitleStyle, attachDropdownItemStyle } from './StripMenu.js';
 import { DashboardPage } from './DashboardPage.js';
 import { MapPage } from './MapPage.js';
+import { SessionPeek } from './SessionPeek.js';
 import { SettingsModal } from './SettingsModal.js';
 import { WorkspacePage } from './workspace/WorkspacePage.js';
 
@@ -25,7 +26,7 @@ function SessionPage({ mux, sessionId, localEchoEnabled }: { mux: TerminalMux; s
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={toolbarStyle}>
         <span style={{ color: 'var(--text-soft)', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span>session #{sessionId}</span>
+          <span>session %{sessionId}</span>
           <button
             onClick={async () => copySessionUrl(sessionId)}
             style={miniLinkBtnStyle}
@@ -49,7 +50,7 @@ function ViewerPage({ mux, sessionId }: { mux: TerminalMux; sessionId: number })
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={toolbarStyle}>
         <span style={{ color: 'var(--text-soft)', fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-          <span>session #{sessionId}</span>
+          <span>session %{sessionId}</span>
           <button
             onClick={async () => copySessionUrl(sessionId)}
             style={miniLinkBtnStyle}
@@ -1589,6 +1590,7 @@ function App() {
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         {page}
       </div>
+      <SessionPeek workspaces={workspaces} agentStates={agentStates} />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { WebFontsAddon } from '@xterm/addon-web-fonts';
 import type { IDisposable } from '@xterm/xterm';
+import { sessionLinkProvider } from './session-links.js';
 import { LocalEchoController, type TerminalMux, type ActionHandler } from '@ttym/vt';
 
 export type LocalEchoSetting = boolean | 'tolerant';
@@ -417,6 +418,7 @@ export class TerminalHost {
         this.term.loadAddon(this.webFonts);
       } catch {}
     try { this.term.loadAddon(new WebLinksAddon()); } catch {}
+      try { this.term.registerLinkProvider(sessionLinkProvider(this.term)); } catch {}
       try { this.term.loadAddon(new ClipboardAddon()); } catch {}
       this.syncWrapperSizing();
       this.fitNow();

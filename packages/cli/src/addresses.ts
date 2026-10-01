@@ -40,7 +40,7 @@ export async function resolveCurrentWorkspace(port) {
   const workspaces = await listWorkspaces(port);
   const workspace = findWorkspaceBySessionId(workspaces, sessionId);
   if (!workspace) {
-    console.error(`current session #${sessionId} is not assigned to a workspace`);
+    console.error(`current session %${sessionId} is not assigned to a workspace`);
     process.exit(EXIT.NOT_FOUND);
   }
   return workspace;
@@ -85,7 +85,7 @@ export async function resolveAttachTarget(port, token, options: Record<string, a
     const sessionId = parseInt(normalized, 10);
     return {
       sessionId,
-      label: `#${sessionId}`,
+      label: `%${sessionId}`,
       workspace: null,
       member: null,
     };
@@ -332,20 +332,22 @@ export async function resolveMatches(port, expr) {
 
 export async function resolveAddress(port, token) {
   if (!token) {
-    console.error('address required: ws:name, :name, or #id');
+    console.error('address required: ws:name, :name, or %id');
     process.exit(EXIT.USAGE);
   }
-  if (token.startsWith('#')) {
+  // %1297이 세션 번호다(tmux의 pane id와 같은 꼴). #1297도 받는다 — 예전 문법이고 스크립트에
+  // 남아 있다. #은 셸에서 따옴표 없이 쓰면 주석이 되고 PR 번호와 모양이 같아서 표시는 %로 한다.
+  if (token.startsWith('%') || token.startsWith('#')) {
     const sessionId = parseInt(token.slice(1), 10);
     if (isNaN(sessionId)) {
       console.error(`not a session id: ${token}`);
       process.exit(EXIT.USAGE);
     }
-    return { sessionId, label: `#${sessionId}`, workspace: null, member: null };
+    return { sessionId, label: `%${sessionId}`, workspace: null, member: null };
   }
   const colon = token.indexOf(':');
   if (colon === -1) {
-    console.error(`not an address: ${token} (expected ws:name, :name, or #id)`);
+    console.error(`not an address: ${token} (expected ws:name, :name, or %id)`);
     process.exit(EXIT.USAGE);
   }
   const wsToken = token.slice(0, colon);

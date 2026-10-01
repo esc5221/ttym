@@ -174,3 +174,23 @@ export { isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from './meta.js
 export type { ViewKind, ViewRenderer, ViewPresentation, ViewItem, ViewOpenRequest, ViewerState, ViewChangeEvent } from './viewer.js';
 export { VIEW_MAX_TABS } from './viewer.js';
 export { dedupeFlags } from './resume-args.js';
+
+/** 화면 아래쪽 몇 줄을 색과 함께 — 호버 미리보기용 (`GET /api/sessions/:id/screen?format=tail`).
+ *  색은 '#rrggbb'(24bit), 'p<0-255>'(팔레트 번호), 'inv-fg'/'inv-bg'(기본 글자색·배경색을 뒤집은 칸).
+ *  팔레트와 기본색은 테마를 아는 쪽(클라이언트)이 푼다. */
+export interface ScreenRun {
+  t: string;
+  fg?: string;
+  bg?: string;
+  b?: 1;
+  i?: 1;
+  u?: 1;
+  d?: 1;
+}
+
+export interface ScreenTail {
+  format: 'tail';
+  /** 서버가 들고 있는 터미널 폭. 미리보기는 이 폭을 기준으로 글자 크기를 줄인다. */
+  cols: number;
+  rows: ScreenRun[][];
+}

@@ -23,8 +23,8 @@ export function ViewerOverlay({ sid, name, state, activeId, onSelect, onClose, o
   return createPortal(
     <div className="viewer-overlay">
       <div className="viewer-overlay-bar">
-        <span style={{ color: 'var(--text)', fontWeight: 700 }}>{name || `#${sid}`}</span>
-        <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>#{sid} · viewer</span>
+        <span style={{ color: 'var(--text)', fontWeight: 700 }}>{name || `%${sid}`}</span>
+        <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>%{sid} · viewer</span>
       </div>
       <div className="viewer-overlay-stage">
         <ViewerPanel

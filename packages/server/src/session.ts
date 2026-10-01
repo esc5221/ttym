@@ -8,6 +8,8 @@ import { createRequire as nodeCreateRequire } from 'node:module';
 import headless from '@xterm/headless';
 const { Terminal } = headless;
 import { SerializeAddon } from '@xterm/addon-serialize';
+import type { ScreenRun } from '@ttym/protocol';
+import { screenTail } from './screen-tail.js';
 import { OutputRing } from './output-ring.js';
 import { SyncBlockFilter } from './sync-block.js';
 import { CommandIndex } from './command-index.js';
@@ -888,6 +890,11 @@ export class Session {
     }
     while (rows.length > 0 && rows[rows.length - 1] === '') rows.pop();
     return rows.join('\n');
+  }
+
+  /** 보이는 화면의 아래 `max`줄(내용 있는 마지막 줄 기준), 색과 함께 — 호버 미리보기. */
+  screenTail(max: number): ScreenRun[][] {
+    return screenTail(this.term, max);
   }
 
   /** The visible screen as plain rows — what `ttym screen` shows, without escape codes. */

@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import headless from '@xterm/headless';
+import { screenTail } from './screen-tail.js';
 import { readTurn, renderFull, renderOutline } from './agent-turn.js';
 import { InteractionStore, turnRange, type StopReport } from './interaction.js';
 import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
@@ -27,7 +28,7 @@ import { gate, gateUpgrade, type RemoteContext } from './remote/http.js';
 let mapRefreshInFlight = false;
 import { readFileSync as readFileSyncFs, writeFileSync as writeFileSyncFs, unlinkSync, chmodSync, mkdirSync } from 'node:fs';
 import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
-import { API_VERSION, MIN_API_VERSION, PRODUCT_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from '@ttym/protocol';
+import { API_VERSION, MIN_API_VERSION, PRODUCT_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch, type ScreenRun } from '@ttym/protocol';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
@@ -266,6 +267,15 @@ async function renderText(ansi: string, cols: number, rows: number): Promise<str
   for (let i = 0; i < term.rows; i++) out.push(buf.getLine(buf.viewportY + i)?.translateToString(true) ?? '');
   term.dispose();
   return out.join('\n').replace(/\s+$/, '');
+}
+
+/** 자는 pane의 얼린 화면에서 아래 줄을 읽는다. renderText와 같은 이유로 폭을 넉넉히 잡는다. */
+async function renderTail(ansi: string, cols: number, rows: number, max: number): Promise<ScreenRun[][]> {
+  const term = new headless.Terminal({ cols, rows, allowProposedApi: true });
+  await new Promise<void>((r) => term.write(ansi, () => r()));
+  const out = screenTail(term, max);
+  term.dispose();
+  return out;
 }
 
 const PROMPT_PIECE_BYTES = 512;
@@ -769,6 +779,13 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     if (url.searchParams.get('format') === 'text') {
       const text = frozen ? renderText(frozen.snapshot, Math.max(session.cols, 500), session.rows) : Promise.resolve(session.screenText());
       text.then((screen) => json(200, { screen, format: 'text', ...sleepInfo })).catch(() => json(500, { error: 'render failed' }));
+      return true;
+    }
+    // ?format=tail&rows=N — 아래 N줄을 색과 함께(ScreenTail). 읽기만 하므로 터미널 크기·입력에 영향이 없다.
+    if (url.searchParams.get('format') === 'tail') {
+      const max = Math.min(50, Math.max(1, parseInt(url.searchParams.get('rows') ?? '', 10) || 12));
+      const rows = frozen ? renderTail(frozen.snapshot, Math.max(session.cols, 500), session.rows, max) : Promise.resolve(session.screenTail(max));
+      rows.then((r) => json(200, { format: 'tail', cols: session.cols, rows: r, ...sleepInfo })).catch(() => json(500, { error: 'render failed' }));
       return true;
     }
     json(200, { screen: frozen ? frozen.snapshot : session.snapshot(), ...sleepInfo });
@@ -1397,6 +1414,9 @@ export async function createServer(port: number): Promise<TtymServer> {
   const viewerStore = new ViewerStore(manager.runtimeDir);
   await viewerStore.load();
   const viewerService = new ViewerService(viewerStore);
+  manager.setIdReferenced((id) =>
+    viewerStore.get(id) !== null ||
+    workspaceStore.list().some((ws) => ws.members.some((m) => m.sessionId === id)));
   const viewer = { store: viewerStore, service: viewerService };
   const markCleanExit = () => {
     try {

@@ -39,10 +39,10 @@ async function resolveTargetSession(port: number, ownArgs: string[]): Promise<{ 
   }
   const sid = process.env.TTYM_SESSION_ID;
   if (!sid || isNaN(parseInt(sid, 10))) {
-    console.error('run inside a ttym pane, or say which one: --to <ws:name|:name|#id>');
+    console.error('run inside a ttym pane, or say which one: --to <ws:name|:name|%id>');
     process.exit(EXIT.USAGE);
   }
-  return { sessionId: parseInt(sid, 10), label: `#${sid}` };
+  return { sessionId: parseInt(sid, 10), label: `%${sid}` };
 }
 
 /** Positional arguments only — option values (--to X, --root X) are not targets. */

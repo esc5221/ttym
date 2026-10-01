@@ -182,7 +182,7 @@ export async function cmdStatus() {
       console.log(`sessions: ${sessions.length}`);
       for (const s of sessions) {
         const status = s.status === 'attached' ? 'attached' : s.status === 'dead' ? 'dead' : 'detached';
-        console.log(`  #${s.id} [${status}] ${s.cmd.join(' ')} (${s.cols}x${s.rows})`);
+        console.log(`  %${s.id} [${status}] ${s.cmd.join(' ')} (${s.cols}x${s.rows})`);
       }
     }
   } catch {

@@ -76,7 +76,7 @@ export function ZenView({ sid, name, cwd, cols, fontFamily, baseFontSize, onExit
       {/* 나란히 볼 때는 바를 숨기지 않는다 — 흐름에 두면 높이가 고정이라 rows도 안 흔들린다. */}
       <div className="zen-top" style={split ? { flexShrink: 0 } : zenTopZoneStyle}>
         <div className={`zen-bar${hintOpen || split ? ' zen-bar-show' : ''}`} style={zenBarStyle}>
-          <span style={{ color: 'var(--text)', fontWeight: 700 }}>{name || `#${sid}`}</span>
+          <span style={{ color: 'var(--text)', fontWeight: 700 }}>{name || `%${sid}`}</span>
           {cwd ? <span style={{ color: 'var(--cwd)', fontSize: 11 }}>{formatCwd(cwd)}</span> : null}
           {split ? null : <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{cols} cols</span>}
           <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}>

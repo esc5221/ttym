@@ -1,4 +1,5 @@
 import { request, type BaseUrl } from './transport.js';
+import type { ScreenTail } from '@ttym/protocol';
 import type { SessionAnnotations, SessionInfo, SessionMeta, SessionRuntime } from './types.js';
 
 export function listSessions(base: BaseUrl): Promise<SessionInfo[]> {
@@ -19,6 +20,11 @@ export function destroySession(base: BaseUrl, sessionId: number): Promise<void> 
 export async function getSessionScreen(base: BaseUrl, sessionId: number): Promise<string> {
   const data = await request<{ screen: string }>(base, `/api/sessions/${sessionId}/screen`);
   return data?.screen ?? '';
+}
+
+/** 화면 아래 `rows`줄을 색과 함께 — 호버 미리보기. 읽기만 하므로 그 세션의 터미널 크기는 그대로다. */
+export function getSessionScreenTail(base: BaseUrl, sessionId: number, rows = 12): Promise<ScreenTail> {
+  return request(base, `/api/sessions/${sessionId}/screen?format=tail&rows=${rows}`);
 }
 
 export function getSessionMeta(base: BaseUrl, sessionId: number): Promise<SessionMeta> {

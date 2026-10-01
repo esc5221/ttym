@@ -142,8 +142,8 @@ export async function cmdCurrent() {
   };
   if (asJson) return printOutput(result, true);
   console.log(`workspace: ${result.workspace.address}`);
-  if (result.member) console.log(`member:    ${result.member.name} (#${result.member.sessionId})`);
-  console.log(`session:   #${result.sessionId}`);
+  if (result.member) console.log(`member:    ${result.member.name} (%${result.member.sessionId})`);
+  console.log(`session:   %${result.sessionId}`);
 }
 
 export async function cmdWorkspace() {
@@ -186,7 +186,7 @@ export async function cmdWorkspace() {
     if (asJson) return printOutput(result, true);
     console.log(`${result.address} (${result.workspaceId})`);
     for (const member of result.members) {
-      console.log(`  - ${member.name}  #${member.sessionId}  [${member.status}] ${member.cmd.join(' ')}`);
+      console.log(`  - ${member.name}  %${member.sessionId}  [${member.status}] ${member.cmd.join(' ')}`);
     }
     return;
   }
@@ -275,7 +275,7 @@ export async function cmdWorkspace() {
         session,
       };
       if (asJson) return printOutput(result, true);
-      console.log(`added ${result.member.address} -> #${session.id}`);
+      console.log(`added ${result.member.address} -> %${session.id}`);
     } catch (e) {
       if (asJson) return printOutput({ error: e.message }, true);
       console.error(`workspace add failed: ${e.message}`);
@@ -299,7 +299,7 @@ export async function cmdWorkspace() {
     }
     const result = { ok: true, action, workspace: `${workspace.name}`, member: member.name, sessionId: member.sessionId };
     if (asJson) return printOutput(result, true);
-    console.log(`${action}d ${workspace.name}/${member.name} (#${member.sessionId})`);
+    console.log(`${action}d ${workspace.name}/${member.name} (%${member.sessionId})`);
     return;
   }
 

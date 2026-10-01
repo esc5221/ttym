@@ -7,7 +7,7 @@ import { sleepTitle } from './sleep-text.js';
 import { paneView, useWorkspaceSessions } from './session-context.js';
 
 /**
- * grid pane의 헤더 한 줄 — 터미널 탭(이름·#id·cwd), 뷰어 탭, 오른쪽 액션 버튼.
+ * grid pane의 헤더 한 줄 — 터미널 탭(이름·%id·cwd), 뷰어 탭, 오른쪽 액션 버튼.
  *
  * 헤더를 끌어 다른 pane 헤더에 놓으면 둘이 자리를 바꾼다. 본문은 SessionBody다.
  */
@@ -75,7 +75,7 @@ export function PaneHeader({ sid, name, cwd, isFocused, dead, zoomed, fit, U, dr
       onDrop={(e) => { e.preventDefault(); if (dragging !== null && dragging !== sid) onSwapWith(dragging); onDragEnd(); }}
       title="drag: swap"
     >
-      {/* 터미널 탭 = 이름·#id (절대 안 줄어든다) + cwd (탭에 자리를 먼저 내준다). 두 형제로 나눈
+      {/* 터미널 탭 = 이름·%id (절대 안 줄어든다) + cwd (탭에 자리를 먼저 내준다). 두 형제로 나눈
           이유: 한 덩어리로 두면 flex가 덩어리째 줄여 이름까지 사라진다 — 탭 10개에서 실측. */}
       <span
         className={`pane-tab pane-tab-term${paneTab === 'term' ? ' on' : ''}`}
@@ -102,9 +102,9 @@ export function PaneHeader({ sid, name, cwd, isFocused, dead, zoomed, fit, U, dr
         ) : null}
 
         <span style={{ color: agentColor ?? (isFocused ? 'var(--text)' : 'var(--text-soft)'), fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
-          {name || `#${sid}`}
+          {name || `%${sid}`}
         </span>
-        {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)', flexShrink: 0 }}>#{sid}</span> : null}
+        {name ? <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)', flexShrink: 0 }}>%{sid}</span> : null}
         {/* permission 프롬프트·대화상자에서 멈춘 에이전트. 안 보이면 일하는 중과 구별이 안 된다. */}
         {agent?.waiting && !asleep ? (
           <span className="agent-waiting-mark" title={`waiting for you: ${agent.waiting}`}>needs you</span>

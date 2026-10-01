@@ -6,5 +6,7 @@ export { LayoutView } from './LayoutView';
 export { beginDragGuard } from './drag-guard.js';
 export type { LayoutViewProps } from './LayoutView';
 export { refreshTerminalThemes, getHost, ensureFontsRegistered, resetAllHosts, reactivateHosts } from './terminal-host.js';
+export { setSessionLinkHandler } from './session-links.js';
+export type { SessionLinkHandler } from './session-links.js';
 export type { LocalEchoSetting } from './terminal-host.js';
 export type { TerminalHost } from './terminal-host.js';

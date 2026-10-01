@@ -38,6 +38,24 @@ const PERSIST_IDLE_MS = 2000;   // flush after 2s idle
 const PERSIST_MAX_MS = 30000;   // force flush every 30s
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
+/** 세션 번호는 4자리를 넘지 않는다. 사람이 "%1297"처럼 부르고 적는 이름이라 짧아야 한다.
+ *  9999 다음은 1로 돌아가 빈 번호를 찾는다. 하루 수십 개를 만들어도 한 바퀴에 몇 년이
+ *  걸리므로, 돌아온 번호는 몇 년 전에 끝난 세션의 것이다. */
+export const MAX_SESSION_ID = 9999;
+
+/**
+ * start부터 위로 훑어 첫 빈 번호를 고른다. max를 넘으면 1로 돌아가고, 한 바퀴를 다 돌아도
+ * 없으면 null. 순수 함수 — 무엇이 "점유"인지는 taken이 정한다.
+ */
+export function pickSessionId(start: number, max: number, taken: (id: number) => boolean): number | null {
+  let id = start >= 1 && start <= max ? start : 1;
+  for (let i = 0; i < max; i++) {
+    if (!taken(id)) return id;
+    id = id >= max ? 1 : id + 1;
+  }
+  return null;
+}
+
 export class SessionManager {
   private sessions = new Map<number, Session>();
   private metas = new Map<number, SessionMeta>();
@@ -59,6 +77,11 @@ export class SessionManager {
 
   /** Set bus URL — injected by server after port is known */
   setBusUrl(url: string): void { this._busUrl = url; }
+
+  /** 이 서버 밖의 장부가 아직 붙들고 있는 번호 — workspace 멤버, 뷰어 탭. 서버가 주입한다.
+   *  번호가 돌아올 때 옛 세션을 가리키던 멤버·탭이 새 세션에 붙으면 안 된다. */
+  private idReferenced: (id: number) => boolean = () => false;
+  setIdReferenced(fn: (id: number) => boolean): void { this.idReferenced = fn; }
 
   /**
    * Boot: create runtime dir, recover existing holders, then mark ready.
@@ -384,8 +407,7 @@ export class SessionManager {
   }
 
   async create(cmd: string[], cols: number, rows: number, cwd?: string): Promise<Session> {
-    const id = this.nextId++;
-    await this.persistNextId();
+    const id = await this.allocateId();
 
     const extraEnv: Record<string, string> = { ...this.extraSessionEnv, TTYM_SESSION_ID: String(id) };
     if (this._busUrl) extraEnv.TTYM_BUS_URL = this._busUrl;
@@ -400,6 +422,28 @@ export class SessionManager {
     });
 
     return session;
+  }
+
+  /**
+   * 다음 번호를 고른다. 9999 안에서 돌고, 디스크에 흔적(holder manifest·meta·snapshot·
+   * 잠든 화면)이 남은 번호나 다른 장부가 참조하는 번호는 건너뛴다. 흔적이 남은 번호를
+   * 재사용하면 새 세션이 옛 세션의 meta(cwd·에이전트 상태)를 물려받는다.
+   */
+  private async allocateId(): Promise<number> {
+    let files: Set<string>;
+    try { files = new Set(await readdir(this.runtimeDir)); } catch { files = new Set(); }
+    const id = pickSessionId(this.nextId, MAX_SESSION_ID, (c) =>
+      this.sessions.has(c) ||
+      this.heldByOthers.has(c) ||
+      files.has(`session-${c}.json`) ||
+      files.has(`meta-${c}.json`) ||
+      files.has(`snapshot-${c}.json`) ||
+      files.has(`sleep-${c}.ansi`) ||
+      this.idReferenced(c));
+    if (id === null) throw new Error(`no free session id: all ${MAX_SESSION_ID} are in use`);
+    this.nextId = id + 1;
+    await this.persistNextId();
+    return id;
   }
 
   private async persistNextId(): Promise<void> {

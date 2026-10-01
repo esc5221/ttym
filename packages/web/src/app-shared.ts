@@ -426,7 +426,7 @@ export function workspaceDisplayLabel(workspace: Workspace): string {
 }
 
 export function memberLabel(name: string | undefined, sessionId: number): string {
-  return name ? `${name} · #${sessionId}` : `#${sessionId}`;
+  return name ? `${name} · %${sessionId}` : `%${sessionId}`;
 }
 
 export function sessionWorkspaceMembership(workspaces: Workspace[]): Map<number, { workspace: Workspace; memberName?: string }> {

@@ -167,7 +167,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
           style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
                    background: color ?? 'transparent', opacity: agent?.active ? 1 : 0.4 }}
         />
-        <span style={{ color: 'var(--text-dim)', fontSize: 11, minWidth: 24, flexShrink: 0 }}>#{sid}</span>
+        <span style={{ color: 'var(--text-dim)', fontSize: 11, minWidth: 24, flexShrink: 0 }}>%{sid}</span>
         <span style={{ color: color ?? 'var(--text)', fontWeight: 600, fontSize: 12, flexShrink: 0 }}>
           {name ?? '—'}
         </span>
@@ -205,9 +205,9 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
                 style={{ display: 'flex', alignItems: 'center', gap: 6, height: 22, padding: '0 8px', background: 'var(--bg2)', borderBottom: '1px solid var(--line)', fontSize: 10, cursor: 'pointer', flexShrink: 0 }}
               >
                 <span style={{ color: agentStates[sid]?.kind ? AGENT_COLORS[agentStates[sid]!.kind!] : 'var(--text-soft)', fontWeight: 700 }}>
-                  {names.get(sid) || `#${sid}`}
+                  {names.get(sid) || `%${sid}`}
                 </span>
-                <span style={{ color: 'var(--text-dim)' }}>#{sid}</span>
+                <span style={{ color: 'var(--text-dim)' }}>%{sid}</span>
               </div>
               <div style={{ flex: 1, minHeight: 0, pointerEvents: 'none' }}>
                 <Terminal mux={mux} attachId={sid} mode="readonly" fontSize={10} enableWebgl={false} />
@@ -307,7 +307,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
           {panel.kind === 'live' ? (
             <>
               <span style={{ color: 'var(--text-soft)', fontWeight: 700 }}>live</span>
-              <span>#{panel.sid}</span>
+              <span>%{panel.sid}</span>
               <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
                 <button onClick={() => navigate({ page: 'session', id: panel.sid })} style={miniLinkBtnStyle}>open</button>
                 <button onClick={() => void copySessionUrl(panel.sid)} style={miniLinkBtnStyle}>copy</button>
@@ -328,7 +328,7 @@ export function DashboardPage({ mux, agentStates, localEchoEnabled, actionsSlot 
               <span style={{ color: 'var(--text-soft)' }}>preview</span>
               <span>{hoveredWsId !== null
                 ? (() => { const w = workspaces.find((x) => x.id === hoveredWsId); return w ? workspaceDisplayLabel(w) : hoveredWsId; })()
-                : hoveredSessionId !== null ? `#${hoveredSessionId}` : 'no session'}</span>
+                : hoveredSessionId !== null ? `%${hoveredSessionId}` : 'no session'}</span>
               <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6 }}>
                 {hoveredSessionId !== null ? (
                   <>

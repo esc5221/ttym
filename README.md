@@ -229,14 +229,14 @@ C-]           alternate detach
 ```bash
 ttym new <name> [-- <cmd...>]              # default cmd: $SHELL
 ttym split <ws:name|:name> <new> [-- cmd]  # split next to the target
-ttym send <ws:name|:name|#id> -- "data"    # raw bytes to the PTY
-ttym screen <ws:name|:name|#id> [--json]   # read the current screen
-ttym await <ws:name|:name|#id> [--timeout ms] -- "prompt"
+ttym send <ws:name|:name|%id> -- "data"    # raw bytes to the PTY
+ttym screen <ws:name|:name|%id> [--json]   # read the current screen
+ttym await <ws:name|:name|%id> [--timeout ms] -- "prompt"
                                            # agent turn or shell command (shell integration)
 ttym commands <addr> [--limit N]           # command history (shell integration)
 ttym output <addr> [--cmd N|last] [--raw]  # one command's output, sliced from the ring
-ttym resize <ws:name|:name|#id> <cols> <rows>
-ttym kill <ws:name|:name|#id>              # end the session, holder included
+ttym resize <ws:name|:name|%id> <cols> <rows>
+ttym kill <ws:name|:name|%id>              # end the session, holder included
 ttym map refresh [--model M] [--base-url URL] [--note TEXT] [--force] [--dry-run]
 ```
 

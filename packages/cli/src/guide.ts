@@ -7,7 +7,7 @@
 const AGENTS = `# ttym: talking to other agents
 
 You are in a ttym pane if $TTYM_SESSION_ID is set. Other panes in your workspace
-are addressed as :name (same workspace), ws:name, or #id.
+are addressed as :name (same workspace), ws:name, or %id.
 
   ttym current --json                    who and where you are
   ttym workspace info --current --json   the members you can talk to, and their state

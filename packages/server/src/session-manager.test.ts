@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { SessionManager } from './session-manager.js';
+import { MAX_SESSION_ID, SessionManager, pickSessionId } from './session-manager.js';
 import { resolve } from 'node:path';
-import { rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 
 const TEST_RUNTIME_DIR = resolve('/tmp', `ttym-mgr-test-${process.pid}`);
 const managers: SessionManager[] = [];
@@ -53,5 +53,45 @@ describe('SessionManager', () => {
 
     expect(manager.has(s1.id)).toBe(false);
     expect(manager.has(s2.id)).toBe(false);
+  });
+
+  it('wraps after 9999 and skips a number whose meta is still on disk', async () => {
+    mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
+    writeFileSync(resolve(TEST_RUNTIME_DIR, 'next-id'), '9999');
+    writeFileSync(resolve(TEST_RUNTIME_DIR, 'meta-1.json'), '{"cwd":"/old"}');
+    const manager = createManager();
+    await manager.boot();
+
+    const a = await manager.create(['/bin/sh', '-lc', 'stty -echo; exec cat'], 80, 24);
+    const b = await manager.create(['/bin/sh', '-lc', 'stty -echo; exec cat'], 80, 24);
+
+    expect([a.id, b.id]).toEqual([9999, 2]);
+    expect((await manager.getMeta(2)).cwd).not.toBe('/old');
+  });
+});
+
+describe('pickSessionId', () => {
+  const none = () => false;
+
+  it('takes the next number while there is room', () => {
+    expect(pickSessionId(1317, MAX_SESSION_ID, none)).toBe(1317);
+  });
+
+  it('never goes past four digits: after 9999 it wraps to 1', () => {
+    expect(pickSessionId(9999, MAX_SESSION_ID, none)).toBe(9999);
+    expect(pickSessionId(10000, MAX_SESSION_ID, none)).toBe(1);
+  });
+
+  it('skips numbers that are still taken, across the wrap', () => {
+    const taken = new Set([9998, 9999, 1, 2]);
+    expect(pickSessionId(9998, MAX_SESSION_ID, (id) => taken.has(id))).toBe(3);
+  });
+
+  it('returns null when every number is taken', () => {
+    expect(pickSessionId(5, 10, () => true)).toBeNull();
+  });
+
+  it('treats a stray start (0, negative) as 1', () => {
+    expect(pickSessionId(0, MAX_SESSION_ID, none)).toBe(1);
   });
 });

@@ -221,14 +221,14 @@ C-]           대체 detach
 ```bash
 ttym new <name> [-- <cmd...>]              # 기본 cmd: $SHELL
 ttym split <ws:name|:name> <new> [-- cmd]  # 대상 옆에 분할
-ttym send <ws:name|:name|#id> -- "data"    # PTY 에 raw byte
-ttym screen <ws:name|:name|#id> [--json]   # 현재 화면 읽기
-ttym await <ws:name|:name|#id> [--timeout ms] -- "prompt"
+ttym send <ws:name|:name|%id> -- "data"    # PTY 에 raw byte
+ttym screen <ws:name|:name|%id> [--json]   # 현재 화면 읽기
+ttym await <ws:name|:name|%id> [--timeout ms] -- "prompt"
                                            # 에이전트 턴 또는 셸 명령 (셸 통합)
 ttym commands <addr> [--limit N]           # 명령 이력 (셸 통합)
 ttym output <addr> [--cmd N|last] [--raw]  # 그 명령의 출력만 ring 에서 슬라이스
-ttym resize <ws:name|:name|#id> <cols> <rows>
-ttym kill <ws:name|:name|#id>              # 세션 종료, holder 포함
+ttym resize <ws:name|:name|%id> <cols> <rows>
+ttym kill <ws:name|:name|%id>              # 세션 종료, holder 포함
 ttym map refresh [--model M] [--base-url URL] [--note TEXT] [--force] [--dry-run]
 ```
 

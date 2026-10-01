@@ -289,7 +289,7 @@ export async function cmdAttach() {
       const selected = i === picker.cursor;
       const marker = selected ? '▶' : ' ';
       const current = e.sessionId === currentTarget.sessionId ? ' *' : '  ';
-      let line = `${marker} ${e.label} #${e.sessionId}${current}`;
+      let line = `${marker} ${e.label} %${e.sessionId}${current}`;
       if (line.length > cols) line = line.slice(0, cols - 1) + '…';
       if (selected) writeStdout(`\x1b[7m${line.padEnd(cols)}\x1b[0m\r\n`);
       else writeStdout(`${line}\r\n`);

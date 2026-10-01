@@ -221,7 +221,7 @@ function buildPrompt(instructions: string, note: string, map: { workspaces: MapW
     lines.push('=== workspace 목록 ===');
     for (const w of map.workspaces) {
       const cur = w.map?.stream ? ` [기존 배치: stream="${w.map.stream}" column=${w.map.column} order=${w.map.order}]` : '';
-      const members = w.members.map((m) => `${m.name}(#${m.sessionId})`).join(', ');
+      const members = w.members.map((m) => `${m.name}(%${m.sessionId})`).join(', ');
       lines.push(`- ${w.id}: "${w.name}" 멤버: ${members}${cur}`);
     }
     lines.push('');
@@ -232,7 +232,7 @@ function buildPrompt(instructions: string, note: string, map: { workspaces: MapW
     const where = mem ? `workspace "${mem.ws.name}"의 멤버 "${mem.name}"` : 'workspace 미소속';
     const prev = s.summary && typeof s.summary.title === 'string' && s.summary.title ? ` 이전 title: "${s.summary.title}"` : '';
     lines.push('');
-    lines.push(`── 세션 #${s.id} · ${where} · 에이전트: ${s.agentKind ?? 'shell'} · cmd: ${s.cmd.slice(0, 3).join(' ')}${prev}`);
+    lines.push(`── 세션 %${s.id} · ${where} · 에이전트: ${s.agentKind ?? 'shell'} · cmd: ${s.cmd.slice(0, 3).join(' ')}${prev}`);
     lines.push(screens.get(s.id) || '(화면 비어 있음)');
   }
   if (organize) {
@@ -241,7 +241,7 @@ function buildPrompt(instructions: string, note: string, map: { workspaces: MapW
     for (const s of map.sessions) {
       if (stale.includes(s)) continue;
       const t = s.summary && typeof s.summary.title === 'string' ? s.summary.title : '';
-      if (t) lines.push(`- #${s.id}: ${t}`);
+      if (t) lines.push(`- %${s.id}: ${t}`);
     }
   }
   return lines.join('\n');

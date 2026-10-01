@@ -558,7 +558,7 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
         ) : (
           standaloneSessions.map((s) => (
             <button key={s.id} onClick={() => void attachSession(s.id)} style={attachDropdownItemStyle} title={s.cwd ?? ''}>
-              <span style={{ color: 'var(--text)' }}>#{s.id}</span>
+              <span style={{ color: 'var(--text)' }}>%{s.id}</span>
               {s.cwd ? <span style={{ color: 'var(--text-soft)', marginLeft: 8, fontSize: 10 }}>{s.cwd}</span> : null}
             </button>
           ))

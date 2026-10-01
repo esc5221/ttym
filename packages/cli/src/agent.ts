@@ -265,7 +265,7 @@ export async function cmdAgent() {
         console.log(`  sleep: ${st.afterMs > 0 ? `auto after ${Math.round(st.afterMs / 60000)}m` : 'auto off'}, ${st.sleeping.length} pane(s), ${mb(st.reclaimedBytes)} reclaimed`);
         for (const s of st.sleeping) {
           const age = Math.round((Date.now() - s.since) / 60000);
-          console.log(`    #${s.sessionId}  ${s.state.padEnd(8)}  ${mb(s.rssBefore)}  ${age}m  ${s.reason}${s.error ? `  ${s.error}` : ''}`);
+          console.log(`    %${s.sessionId}  ${s.state.padEnd(8)}  ${mb(s.rssBefore)}  ${age}m  ${s.reason}${s.error ? `  ${s.error}` : ''}`);
         }
       }
     } catch {}
@@ -283,8 +283,8 @@ export async function cmdAgent() {
       sessionId = target.sessionId; label = target.label;
     } else {
       const sid = process.env.TTYM_SESSION_ID;
-      if (!sid) { console.error(`usage: ttym agent ${action} <ws:name|:name|#id>  (or run inside a pane)`); process.exit(EXIT.USAGE); }
-      sessionId = parseInt(sid, 10); label = `#${sid}`;
+      if (!sid) { console.error(`usage: ttym agent ${action} <ws:name|:name|%id>  (or run inside a pane)`); process.exit(EXIT.USAGE); }
+      sessionId = parseInt(sid, 10); label = `%${sid}`;
     }
     const data = await fetchPost(port, `/api/sessions/${sessionId}/${action}`, {});
     if (hasFlag('--json')) return printOutput({ session: label, sessionId, ...data }, true);
@@ -460,7 +460,7 @@ export async function cmdAgent() {
     await fetchPost(port, `/api/sessions/${session.id}/send`, { data: `${line}\n` });
     const addr = `${workspace.name}:${member.name}`;
     if (hasFlag('--json')) return printOutput({ member: addr, sessionId: session.id, kind: conv.kind, conversation: conv.id, cwd: conv.cwd, command: line }, true);
-    console.log(`adopted ${conv.kind} ${conv.id} into ${addr} (#${session.id})`);
+    console.log(`adopted ${conv.kind} ${conv.id} into ${addr} (%${session.id})`);
     if (conv.cwd && !existsSync(conv.cwd)) console.log(`  its folder is gone (${conv.cwd}); started in the default folder`);
     console.log(`  ${line}`);
     if (!isHookInstalled(cfg)) for (const l of hookHint()) console.log(l);
@@ -486,7 +486,7 @@ export async function cmdAgent() {
   console.log('                        Bring a Claude Code or Codex conversation that ran elsewhere into a new');
   console.log('                        pane (its folder, resumed). Refuses while that conversation still runs.');
   console.log('  sleep|wake <addr>     Put a pane\'s agent to sleep (process gone, screen kept,');
-  console.log('                        any input resumes it) / wake it now. <addr> = ws:name|:name|#id');
+  console.log('                        any input resumes it) / wake it now. <addr> = ws:name|:name|%id');
   console.log('                        auto sleep is on (30m) unless config agent-sleep-after = off. never while the');
   console.log('                        agent reports a background task, a scheduled wakeup, or a prompt waiting');
   console.log('');

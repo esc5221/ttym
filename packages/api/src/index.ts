@@ -15,6 +15,7 @@ export * from './workspaces.js';
 export * from './interactions.js';
 export * from './config.js';
 export * from './views.js';
+export type { ScreenRun, ScreenTail } from '@ttym/protocol';
 export type { ViewItem, ViewerState, ViewRenderer, ViewPresentation, ViewChangeEvent, ViewOpenRequest } from '@ttym/protocol';
 
 import type { BaseUrl } from './transport.js';
@@ -30,6 +31,7 @@ export function createApi(base: BaseUrl) {
       create: (o?: Parameters<typeof sessions.createSession>[1]) => sessions.createSession(base, o),
       destroy: (id: number) => sessions.destroySession(base, id),
       screen: (id: number) => sessions.getSessionScreen(base, id),
+      screenTail: (id: number, rows?: number) => sessions.getSessionScreenTail(base, id, rows),
       meta: (id: number) => sessions.getSessionMeta(base, id),
       patchMeta: (id: number, patch: Parameters<typeof sessions.patchSessionMeta>[2]) =>
         sessions.patchSessionMeta(base, id, patch),
