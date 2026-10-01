@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build && vite build -c vite.embed.config.ts",
+    "build:embed": "vite build -c vite.embed.config.ts"
   },
   "dependencies": {
     "@ttym/api": "workspace:*",

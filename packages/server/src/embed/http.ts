@@ -1,7 +1,8 @@
 /**
- * The embed HTTP surface (ADR-0002):
+ * The embed HTTP surface (docs/embedding.md):
  *
  *   POST   /api/embed/v1/grants                 consumer key → a grant for one person
+ *   GET    /api/embed/v1/grant                  grant → what it reaches and until when
  *   DELETE /api/embed/v1/grants/:id             consumer key → end it, close its sockets
  *   GET    /api/embed/v1/workspaces/:ws/tabs            grant (terminal.read)
  *   POST   /api/embed/v1/workspaces/:ws/tabs            grant (tabs.write) — the registered profile's command
@@ -257,14 +258,20 @@ async function route(req: IncomingMessage, path: string, deps: EmbedDeps): Promi
     throw new HttpError(404, 'not found');
   }
 
-  // ── grant-authenticated: tabs ──
+  // ── grant-authenticated ──
   const tabs = rest.match(/^workspaces\/([^/]+)\/tabs(?:\/(\d+))?$/);
-  if (!tabs) throw new HttpError(404, 'not found');
+  if (!tabs && rest !== 'grant') throw new HttpError(404, 'not found');
   const grant = deps.grants.lookup(bearer(req));
   if (!grant) throw new HttpError(401, 'grant missing, expired or revoked', 'grant');
   const consumer = deps.consumers.get(grant.consumerId)!;
   const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
   if (!originOk(origin, req.method, consumer.origins)) throw new HttpError(403, 'origin not registered for this consumer', 'origin');
+  // What this grant reaches — the panel reads it when only a grant was handed to it.
+  if (rest === 'grant') {
+    if (req.method !== 'GET') throw new HttpError(405, 'method not allowed');
+    return [200, { id: grant.id, expiresAt: grant.expiresAt, access: grant.access }];
+  }
+  if (!tabs) throw new HttpError(404, 'not found');
   const wsId = decodeURIComponent(tabs[1]!);
   const sid = tabs[2] ? parseInt(tabs[2], 10) : undefined;
   const { caps, profile: profileName } = onWorkspace(grant.access, wsId);

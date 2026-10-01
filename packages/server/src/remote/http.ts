@@ -91,7 +91,7 @@ function gateInner(req: IncomingMessage, res: ServerResponse, ctx: RemoteContext
   const path = (req.url || '/').split('?')[0]!;
   const allow = ctx.store.allowHosts;
 
-  // Embedding (ADR-0002): a consumer's proxy forwards these with its own Host and
+  // Embedding (docs/embedding.md): a consumer's proxy forwards these with its own Host and
   // Origin. They carry a consumer key or a grant, and embed/http.ts checks that —
   // a login cookie or an allow-listed Host would not mean anything here.
   if (isEmbedPath(path)) return false;

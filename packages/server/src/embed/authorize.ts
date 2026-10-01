@@ -1,9 +1,9 @@
 /**
  * What a grant connection (/embed/v1/ws) may send and receive. One function
- * for each direction; anything not named here is refused (ADR-0002 D4).
+ * for each direction; anything not named here is refused.
  *
  * Adding a CMD means adding a row here, or grant connections never see it —
- * authorize.test.ts fails on a CMD with no row.
+ * embed.test.ts fails on a CMD with no row.
  */
 import { CMD, capsOn, grantWorkspaces, type EmbedAccess, type EmbedCap } from '@ttym/protocol';
 

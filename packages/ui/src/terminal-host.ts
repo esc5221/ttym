@@ -200,26 +200,36 @@ const BUNDLED_FONTS: Record<string, { faces: BundledFace[]; eager?: boolean }> =
   // 유니코드상 둘 다 Neutral(1셀)이라 xterm 계산은 맞고 폰트만 없던 것이라,
   // 0.5em advance로 직접 그려 스택 맨 앞에 세운다. scripts/build-glyph-font.mjs.
   'ttym glyphs': {
-    faces: [{ url: '/ttym-glyphs.woff2?v=1', unicodeRange: 'U+23FA, U+23F5' }],
+    faces: [{ url: 'ttym-glyphs.woff2?v=1', unicodeRange: 'U+23FA, U+23F5' }],
     // unicode-range는 해당 글자가 화면에 뜰 때만 받아온다. xterm은 캔버스로 재는
     // 경로가 있어 그 트리거를 놓치므로 직접 깨운다.
     eager: true,
   },
   'Monoplex KR Nerd': {
     faces: [
-      { weight: '400', url: '/fonts/MonoplexKRNerd-Regular.woff2' },
-      { weight: '700', url: '/fonts/MonoplexKRNerd-Bold.woff2' },
+      { weight: '400', url: 'fonts/MonoplexKRNerd-Regular.woff2' },
+      { weight: '700', url: 'fonts/MonoplexKRNerd-Bold.woff2' },
     ],
   },
   'D2Coding': {
     faces: [
-      { weight: '400', url: '/fonts/D2Coding.woff2' },
-      { weight: '700', url: '/fonts/D2Coding-Bold.woff2' },
+      { weight: '400', url: 'fonts/D2Coding.woff2' },
+      { weight: '700', url: 'fonts/D2Coding-Bold.woff2' },
     ],
   },
 };
 
 const registeredFonts = new Set<string>();
+
+/**
+ * Where the font files are, read when a font is first registered. The app serves
+ * them at the root ('/'); the embed panel sits behind a consumer's path prefix and
+ * sets './' (packages/web/embed/asset-base.ts) so they come relative to the page.
+ */
+function assetBase(): string {
+  const base = (globalThis as { __TTYM_ASSET_BASE__?: unknown }).__TTYM_ASSET_BASE__;
+  return typeof base === 'string' ? base : '/';
+}
 
 /**
  * 폰트 스택에 등장하는 번들 폰트를 document.fonts에 등록한다. 이름을 스택에서
@@ -236,7 +246,7 @@ export function ensureFontsRegistered(stack: string): void {
         const descriptors: FontFaceDescriptors = {};
         if (face.weight) descriptors.weight = face.weight;
         if (face.unicodeRange) descriptors.unicodeRange = face.unicodeRange;
-        const registered = new FontFace(family, `url(${face.url}) format('woff2')`, descriptors);
+        const registered = new FontFace(family, `url(${assetBase()}${face.url}) format('woff2')`, descriptors);
         document.fonts.add(registered);
         if (spec.eager) void registered.load().catch(() => {});
       } catch { /* 등록 실패는 폴백으로 흡수된다 — 폰트 때문에 터미널이 죽지는 않는다 */ }

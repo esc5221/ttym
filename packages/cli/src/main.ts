@@ -9,6 +9,7 @@ import { cmdAgent } from './agent.js';
 import { cmdMap } from './map.js';
 import { cmdService } from './service.js';
 import { cmdRemote } from './remote.js';
+import { cmdEmbed } from './embed.js';
 import { cmdUpgrade, cmdVersion } from './upgrade.js';
 import { cmdOpen, cmdView } from './viewer.js';
 import { cmdGuide } from './guide.js';
@@ -56,6 +57,7 @@ function printHelp() {
   console.log('  agent install <agent>        Install agent hook (claude, codex)');
   console.log('  service install|uninstall|status  Supervised residency: boot at login, restart on crash');
   console.log('  remote <command>             Reach ttym from another device (tailscale · cloudflare · link · doctor)');
+  console.log('  embed consumer <command>     Let another app show a ttym panel (add · list · rotate · remove)');
   console.log('  upgrade [--check|--rollback|--force]  Swap in the latest release (or a new build), sessions stay alive');
   console.log('  version [--json]             CLI + server versions');
   console.log('  start / stop / restart / log Server lifecycle (start is one-shot; entry verbs autostart)');
@@ -99,6 +101,7 @@ switch (cmd) {
   case 'map':     await cmdMap(); break;
   case 'service': await cmdService(); break;
   case 'remote':  await cmdRemote(); break;
+  case 'embed':   await cmdEmbed(); break;
   case 'upgrade': await cmdUpgrade(); break;
   case 'version': await cmdVersion(); break;
   case 'log':     cmdLog(); break;

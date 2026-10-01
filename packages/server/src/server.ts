@@ -1531,7 +1531,7 @@ export async function createServer(port: number): Promise<TtymServer> {
   // Idle agents sleep; the first key wakes them. See agent-sleep.ts.
   let sleeper: AgentSleeper | null = null;
 
-  // Embedding in other apps (docs/adr-0002-embed.md, embed/).
+  // Embedding in other apps (docs/embedding.md, embed/).
   const embedConsumers = new ConsumerStore(resolve(getHomeDir(), 'embed-consumers.json'), log);
   const grants = new GrantStore(embedConsumers);
   const workspaceOf = workspaceOfFn(workspaceStore);
@@ -2129,7 +2129,7 @@ export async function createServer(port: number): Promise<TtymServer> {
       if (!frame) return;
       const { sessionId, cmd, payload } = frame;
 
-      // Grant connections (ADR-0002 D3·D4): the first frame is HELLO with the grant;
+      // Grant connections (docs/embedding.md): the first frame is HELLO with the grant;
       // after that every frame is checked against it — expiry and revocation included.
       if (embed) {
         if (!embed.grant) {

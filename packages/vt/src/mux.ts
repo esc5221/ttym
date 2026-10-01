@@ -103,6 +103,9 @@ export class TerminalMux {
   private pendingAttaches = new Map<number, PendingAttach>();
   private pendingList: PendingList | null = null;
   private readonly url: string;
+  private readonly hello: (() => Record<string, unknown>) | undefined;
+  /** Close code of the last socket that opened and then closed (4401 = an embed grant was refused or ended). */
+  lastCloseCode: number | null = null;
   private readonly encoder = new TextEncoder();
   private readonly decoder = new TextDecoder();
   private _lastSeqs = new Map<number, number>(); // sessionId → 최신 수신 seq
@@ -112,8 +115,13 @@ export class TerminalMux {
   private configListeners = new Set<(event: ConfigChangeEvent) => void>();
   private viewListeners = new Set<(event: ViewChangeEvent) => void>();
 
-  constructor(url: string) {
+  /**
+   * `hello` adds fields to the first frame — an embed panel (/embed/v1/ws) puts
+   * its grant there; the server processes nothing before it.
+   */
+  constructor(url: string, opts: { hello?: () => Record<string, unknown> } = {}) {
     this.url = url;
+    this.hello = opts.hello;
     // Seq watermarks live and die with this page. Persisting them across a
     // reload (sessionStorage) shipped once and was a correctness bug: the
     // watermark says "parsed through N" but the reloaded xterm is blank, so
@@ -154,13 +162,15 @@ export class TerminalMux {
         // HELLO 전송
         this.sendRaw(encode(0, CMD.HELLO, this.encoder.encode(JSON.stringify({
           clientId: this.clientId(),
+          ...this.hello?.(),
         }))));
         resolve();
       };
       ws.onerror = () => { clearTimeout(dialTimer); reject(new Error('WebSocket connection failed')); };
       ws.onmessage = (e) => this.handleMessage(e);
-      ws.onclose = () => {
+      ws.onclose = (ev?: CloseEvent) => {
         clearTimeout(dialTimer);
+        if (opened) this.lastCloseCode = ev?.code ?? null;
         if (this.ws === ws) {
           this.cleanup(new Error('WebSocket closed'));
           // Only a connection that actually opened gets to announce a drop.

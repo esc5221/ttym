@@ -1,5 +1,5 @@
 /**
- * Embedding ttym in another app (docs/adr-0002-embed.md) — the shapes the
+ * Embedding ttym in another app (docs/embedding.md) — the shapes the
  * server, the CLI and the panel agree on.
  *
  *   consumer  an app registered on the ttym machine (~/.ttym/embed-consumers.json):
