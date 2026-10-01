@@ -94,6 +94,9 @@ const LIST_TIMEOUT_MS = 5_000;
 const MAX_DATA_CHUNK_BYTES = 16 * 1024;
 
 export class TerminalMux {
+  static DIAL_TIMEOUT_MS = 4000;
+  static DIAL_TIMEOUT_MAX_MS = 15000;
+  private dialTimeouts = 0;
   private ws: WebSocket | null = null;
   private sessions = new Map<number, SessionCallbacks>();
   private pendingCreates: PendingCreate[] = [];
@@ -129,7 +132,24 @@ export class TerminalMux {
       this.ws = ws;
       ws.binaryType = 'arraybuffer';
       let opened = false;
+      // A dial that never answers fires neither onopen nor onerror, so the
+      // caller waited on it for as long as the browser cared to (tunnel/edge
+      // stalls of 6–9s were seen — "connecting..." with nothing to retry).
+      // Cut it and let the caller's backoff dial again; each consecutive
+      // timeout widens the budget so a slow-but-alive link still connects.
+      const budgetMs = Math.min(
+        TerminalMux.DIAL_TIMEOUT_MS * (1 + this.dialTimeouts),
+        TerminalMux.DIAL_TIMEOUT_MAX_MS,
+      );
+      const dialTimer = setTimeout(() => {
+        if (opened || this.ws !== ws) return;
+        this.dialTimeouts++;
+        this.cleanup(new Error('WebSocket dial timed out'));
+        reject(new Error('WebSocket dial timed out'));
+      }, budgetMs);
       ws.onopen = () => {
+        clearTimeout(dialTimer);
+        this.dialTimeouts = 0;
         opened = true;
         // HELLO 전송
         this.sendRaw(encode(0, CMD.HELLO, this.encoder.encode(JSON.stringify({
@@ -137,9 +157,10 @@ export class TerminalMux {
         }))));
         resolve();
       };
-      ws.onerror = () => reject(new Error('WebSocket connection failed'));
+      ws.onerror = () => { clearTimeout(dialTimer); reject(new Error('WebSocket connection failed')); };
       ws.onmessage = (e) => this.handleMessage(e);
       ws.onclose = () => {
+        clearTimeout(dialTimer);
         if (this.ws === ws) {
           this.cleanup(new Error('WebSocket closed'));
           // Only a connection that actually opened gets to announce a drop.

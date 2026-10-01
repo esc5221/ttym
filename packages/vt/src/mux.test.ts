@@ -252,6 +252,63 @@ describe('TerminalMux', () => {
     expect(dropped).toHaveBeenCalledTimes(1);
   });
 
+  it('cuts a dial that never answers and widens the budget per consecutive timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const mux = new TerminalMux('ws://example.test');
+      const dropped = vi.fn();
+      mux.onDisconnect(dropped);
+
+      // 1st dial: silent for the base budget → rejected, orphan socket closed.
+      const first = mux.connect();
+      const socket1 = FakeWebSocket.latest();
+      const firstResult = expect(first).rejects.toThrow('dial timed out');
+      await vi.advanceTimersByTimeAsync(TerminalMux.DIAL_TIMEOUT_MS);
+      await firstResult;
+      expect(socket1.readyState).toBe(FakeWebSocket.CLOSED);
+      expect(dropped).not.toHaveBeenCalled();
+
+      // 2nd dial gets twice the budget: still pending after the base budget.
+      const second = mux.connect();
+      const socket2 = FakeWebSocket.latest();
+      let settled = false;
+      second.then(() => { settled = true; }, () => { settled = true; });
+      await vi.advanceTimersByTimeAsync(TerminalMux.DIAL_TIMEOUT_MS);
+      expect(settled).toBe(false);
+      expect(socket2.readyState).toBe(FakeWebSocket.CONNECTING);
+      // A slow-but-alive dial that opens inside the widened budget connects.
+      socket2.open();
+      await second;
+      expect(socket2.sent.length).toBe(1); // HELLO
+
+      // Success resets the budget: the next dial is back to the base.
+      socket2.close();
+      const third = mux.connect();
+      const socket3 = FakeWebSocket.latest();
+      const thirdResult = expect(third).rejects.toThrow('dial timed out');
+      await vi.advanceTimersByTimeAsync(TerminalMux.DIAL_TIMEOUT_MS);
+      await thirdResult;
+      expect(socket3.readyState).toBe(FakeWebSocket.CLOSED);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a dial that opens in time is not cut by its own timer', async () => {
+    vi.useFakeTimers();
+    try {
+      const mux = new TerminalMux('ws://example.test');
+      const connected = mux.connect();
+      const socket = FakeWebSocket.latest();
+      socket.open();
+      await connected;
+      await vi.advanceTimersByTimeAsync(TerminalMux.DIAL_TIMEOUT_MAX_MS * 2);
+      expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('detaches tracked sessions on disconnect without faking session exit', async () => {
     const mux = new TerminalMux('ws://example.test');
     const connected = mux.connect();
