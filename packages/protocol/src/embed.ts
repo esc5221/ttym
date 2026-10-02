@@ -15,7 +15,7 @@
 /** The public embed API major. Paths carry it (/api/embed/v1, /embed/v1/). */
 export const EMBED_API_VERSION = 1;
 /** The SDK (/embed/v1/sdk.js) major — methods, events, mount options. */
-export const EMBED_SDK_VERSION = 1;
+export const EMBED_SDK_VERSION = 2;
 
 export const EMBED_CAPS = ['terminal.read', 'terminal.write', 'tabs.write'] as const;
 export type EmbedCap = (typeof EMBED_CAPS)[number];

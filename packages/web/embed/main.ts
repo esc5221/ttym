@@ -14,6 +14,7 @@
 import './asset-base';
 import '@xterm/xterm/css/xterm.css';
 import './panel.css';
+import { checkPaste } from './paste';
 import { TerminalMux } from '@ttym/vt';
 import {
   acquireHost, destroyAllHosts, destroyHost, reactivateHosts, resetAllHosts, refreshTerminalThemes,
@@ -384,6 +385,23 @@ mux.onWorkspace((ev) => {
 
 document.addEventListener('visibilitychange', syncView);
 
+// ── paste (sdk handle.paste) ──
+
+/**
+ * Put text on the active tab's input line without submitting it. Goes through
+ * xterm's own paste, so it is bracketed when the program asked for bracketed
+ * paste (Claude Code, zsh, bash) and travels the normal input path — a
+ * read-only attach drops it server-side as it drops typing.
+ */
+function pasteText(raw: unknown): Promise<null> {
+  if (!canWrite) return Promise.reject(new Error('terminal.write required'));
+  if (!host) return Promise.reject(new Error('no active tab'));
+  const checked = checkPaste(raw, host.term.modes.bracketedPasteMode);
+  if ('error' in checked) return Promise.reject(new Error(checked.error));
+  host.term.paste(checked.text);
+  return Promise.resolve(null);
+}
+
 // ── messages from sdk.js ──
 
 window.addEventListener('message', (e) => {
@@ -411,6 +429,7 @@ window.addEventListener('message', (e) => {
     case 'create': reply(createTab(typeof msg.name === 'string' ? msg.name : undefined)); break;
     case 'rename': reply(renameTab(Number(msg.sid), String(msg.name ?? ''))); break;
     case 'close': reply(closeTab(Number(msg.sid))); break;
+    case 'paste': reply(pasteText(msg.text)); break;
   }
 });
 

@@ -195,7 +195,7 @@ describe('embed over the wire', () => {
     expect(ok.status).toBe(201);
     expect(ok.body.grant).toMatch(/^[A-Za-z0-9_-]{40,}$/);
     const version = await (await api('/api/version')).json();
-    expect(version.embed).toEqual({ api: 1, sdk: 1 });
+    expect(version.embed).toEqual({ api: 1, sdk: 2 });
   });
 
   it('a grant connection reaches its workspace and nothing else', async () => {

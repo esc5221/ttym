@@ -222,6 +222,7 @@ panel re-dials without a reload.
 | `setVisible(bool)` | Pause the stream while your panel is hidden. |
 | `setTheme(theme)` | |
 | `selectTab(sid)` · `createTab(name?)` · `renameTab(sid, name)` · `closeTab(sid)` | Promises; reject with the server's reason. |
+| `paste(text)` | Put `text` on the active tab's input line, without Enter. Promise. Needs `terminal.write`. Bracketed when the program asked for it (Claude Code, zsh, bash), so a newline does not submit; multi-line text is refused otherwise. Rejects text over 4 KB (UTF-8) and any control character but tab and newline — ESC included, so it cannot end the paste early or send keys. `TtymEmbed.version >= 2`. |
 | `destroy()` | Remove the iframe. |
 
 | Event | Detail |

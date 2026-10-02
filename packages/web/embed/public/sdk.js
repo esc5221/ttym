@@ -10,7 +10,7 @@
  */
 (function () {
   'use strict';
-  var SDK_VERSION = 1;
+  var SDK_VERSION = 2;
   var EVENTS = ['ready', 'tabs', 'active', 'exit', 'bell', 'auth', 'connected', 'disconnected'];
 
   /** grant option → Promise<{ grant, access? }> */
@@ -134,6 +134,8 @@
       createTab: function (name) { return call('create', { name: name }); },
       renameTab: function (sid, name) { return call('rename', { sid: sid, name: name }); },
       closeTab: function (sid) { return call('close', { sid: sid }); },
+      /** Put text on the active tab's input line; no Enter. Needs terminal.write. (sdk 2) */
+      paste: function (text) { return call('paste', { text: text }); },
       destroy: function () {
         destroyed = true;
         window.removeEventListener('message', onMessage);
