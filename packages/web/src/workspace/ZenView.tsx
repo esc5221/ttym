@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatCwd } from '@ttym/shared';
 import { beginDragGuard } from '@ttym/ui';
-import { readZenFontDelta, writeZenFontDelta, miniLinkBtnStyle } from '../app-shared.js';
+import { readZenFontDelta, writeZenFontDelta, readZenCols, writeZenCols, ZEN_DEFAULT_COLS, ZEN_COLS_MIN, ZEN_COLS_MAX, miniLinkBtnStyle } from '../app-shared.js';
 import { SessionBody } from './SessionBody.js';
 
 /** zen 읽기 모드 — 크롬을 전부 걷고 한 pane만 고정 폭으로 크게 읽는다.
@@ -17,11 +17,10 @@ import { SessionBody } from './SessionBody.js';
  *  바가 absolute인 것이 핵심이다. 흐름에 두면 마우스를 위로 올릴 때마다 컨테이너
  *  높이가 줄고 → rows가 바뀌고 → PTY가 리플로우된다. 읽는 중에 화면이 다시
  *  그려지는 최악의 경우다. */
-export function ZenView({ sid, name, cwd, cols, fontFamily, baseFontSize, onExit, side, sideOpen, onToggleSide }: {
+export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, onExit, side, sideOpen, onToggleSide }: {
   sid: number;
   name?: string;
   cwd?: string;
-  cols: number;
   fontFamily: string;
   /** pane의 글자 크기. zen은 여기에 기억된 차이만 더한다 — 기본은 같은 크기. */
   baseFontSize: number;
@@ -33,6 +32,9 @@ export function ZenView({ sid, name, cwd, cols, fontFamily, baseFontSize, onExit
   onToggleSide?: () => void;
 }) {
   const [delta, setDelta] = useState(() => readZenFontDelta());
+  // 폭은 이 기기의 것(localStorage). ◂ ▸ 한 번에 10칸, 숫자 클릭은 기본으로.
+  const [cols, setCols] = useState(() => readZenCols());
+  const widen = (by: number) => setCols((c) => Math.min(ZEN_COLS_MAX, Math.max(ZEN_COLS_MIN, c + by)));
   const fontSize = Math.min(32, Math.max(9, baseFontSize + delta));
   // 좌우 비율은 이 브라우저의 것. 터미널은 cols가 고정이라 왼쪽이 좁아지면 잘린다 —
   // 그래서 기본을 터미널 쪽에 넉넉히 준다.
@@ -66,6 +68,10 @@ export function ZenView({ sid, name, cwd, cols, fontFamily, baseFontSize, onExit
     const timer = setTimeout(() => writeZenFontDelta(delta), 300);
     return () => clearTimeout(timer);
   }, [delta]);
+  useEffect(() => {
+    const timer = setTimeout(() => writeZenCols(cols), 300);
+    return () => clearTimeout(timer);
+  }, [cols]);
 
   const bump = (by: number) => setDelta((d) => Math.min(20, Math.max(-20, d + by)));
 
@@ -78,7 +84,13 @@ export function ZenView({ sid, name, cwd, cols, fontFamily, baseFontSize, onExit
         <div className={`zen-bar${hintOpen || split ? ' zen-bar-show' : ''}`} style={zenBarStyle}>
           <span style={{ color: 'var(--text)', fontWeight: 700 }}>{name || `%${sid}`}</span>
           {cwd ? <span style={{ color: 'var(--cwd)', fontSize: 11 }}>{formatCwd(cwd)}</span> : null}
-          {split ? null : <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>{cols} cols</span>}
+          {split ? null : (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+              <button onClick={() => widen(-10)} style={miniLinkBtnStyle} title="narrower (10 cols)">◂</button>
+              <span onClick={() => setCols(ZEN_DEFAULT_COLS)} style={{ color: cols === ZEN_DEFAULT_COLS ? 'var(--text-dim)' : 'var(--warn)', fontSize: 11, cursor: cols === ZEN_DEFAULT_COLS ? 'default' : 'pointer' }} title={cols === ZEN_DEFAULT_COLS ? 'default width' : `click: back to ${ZEN_DEFAULT_COLS}`}>{cols} cols</span>
+              <button onClick={() => widen(10)} style={miniLinkBtnStyle} title="wider (10 cols)">▸</button>
+            </span>
+          )}
           <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <button onClick={() => bump(-1)} style={miniLinkBtnStyle} title="smaller">A−</button>
             <span onClick={() => setDelta(0)} style={{ color: delta === 0 ? 'var(--text-dim)' : 'var(--warn)', fontSize: 11, minWidth: 18, textAlign: 'center', cursor: delta === 0 ? 'default' : 'pointer' }} title={delta === 0 ? 'same as the pane' : 'click: back to the pane size'}>{fontSize}</span>

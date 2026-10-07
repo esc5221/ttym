@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import * as api from '@ttym/api';
 import { LayoutView, getHost, type LocalEchoSetting, type TerminalMux } from '@ttym/ui';
 import { MutationBarrier, layoutToSessionIds, memberNameBySession, removePane, resizeSplit, swapPanes } from '@ttym/shared';
-import { actionBtnStyle, ZEN_DEFAULT_COLS, API_BASE, useSurface, IS_NATIVE, UI_STYLES, apiAddMember, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, navigate, quotePathForShell, stripBtnStyle, type AgentState, type UiStyle, type Workspace } from '../app-shared.js';
+import { actionBtnStyle, API_BASE, useSurface, IS_NATIVE, UI_STYLES, apiAddMember, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, navigate, quotePathForShell, stripBtnStyle, type AgentState, type UiStyle, type Workspace } from '../app-shared.js';
 import { KeyBar } from '../KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
 import { useViewerState } from '../viewer/useViewerState.js';
@@ -623,7 +623,6 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
           sid={zenSid}
           name={memberNames[zenSid]}
           cwd={sessionCwds[zenSid]}
-          cols={ZEN_DEFAULT_COLS}
           fontFamily={fontFamily}
           baseFontSize={fontSize}
           onExit={() => openZen(null)}

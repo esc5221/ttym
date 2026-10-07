@@ -244,7 +244,25 @@ export type Surface = 'phone' | 'tablet' | 'desktop';
 /** zen 글자 크기는 절대값이 아니라 터미널 글자 크기에 대한 차이로 기억한다.
  *  절대값(기본 17)이던 시절에는 pane 글자를 바꿔도 zen만 따로 놀았다. 0이면 같다. */
 export const ZEN_FONT_DELTA_STORAGE_KEY = 'ttym-zen-font-delta';
-export const ZEN_DEFAULT_COLS = 120;
+/** zen 폭. 기본 140 — 120이면 Claude Code의 표·diff가 접혔다. 바의 ◂ ▸로 이 기기에서 바꾸고 기억한다. */
+export const ZEN_DEFAULT_COLS = 140;
+export const ZEN_COLS_STORAGE_KEY = 'ttym-zen-cols';
+export const ZEN_COLS_MIN = 60;
+export const ZEN_COLS_MAX = 400;
+
+export function readZenCols(): number {
+  try {
+    const value = Number(localStorage.getItem(ZEN_COLS_STORAGE_KEY));
+    return Number.isInteger(value) && value >= ZEN_COLS_MIN && value <= ZEN_COLS_MAX ? value : ZEN_DEFAULT_COLS;
+  } catch { return ZEN_DEFAULT_COLS; }
+}
+
+export function writeZenCols(value: number): void {
+  try {
+    if (value === ZEN_DEFAULT_COLS) localStorage.removeItem(ZEN_COLS_STORAGE_KEY);
+    else localStorage.setItem(ZEN_COLS_STORAGE_KEY, String(value));
+  } catch {}
+}
 
 export function readZenFontDelta(): number {
   try {
