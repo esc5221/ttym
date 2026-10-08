@@ -27,7 +27,7 @@
  */
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { dedupeFlags } from '@ttym/protocol';
+import { dedupeFlags, type ScreenRun } from '@ttym/protocol';
 import type { Session } from './session.js';
 
 export type SleepPhase = 'sleeping' | 'waking' | 'failed';
@@ -104,6 +104,56 @@ const QUEUE_MAX_BYTES = 64 * 1024;
  * 붙여넣기로 보고 CR을 줄바꿈으로 삼킨다. await(server.ts)와 wake 큐 재생이 같은 값을 쓴다.
  */
 export const SUBMIT_GAP_MS = 75;
+
+/** `restart` leaves a pane alone when someone typed into it this recently. */
+export const RESTART_QUIET_MS = 30_000;
+
+/**
+ * What sits in the agent's prompt line, unsent: '' when empty, null when no
+ * prompt line is on screen (a dialog, Claude's bash mode `!`, a menu) — then
+ * nobody can say, and restart refuses. The line is the last one starting with
+ * the agent's prompt mark (Claude ❯, Codex ›). Dim runs and runs in the mark's
+ * own grey are placeholders (Codex "Ask Codex to do anything", Claude's
+ * 'Try "…"' suggestions); everything else counts as typed.
+ */
+export function composerText(rows: ScreenRun[][], kind: AgentKind): string | null {
+  const text = (runs: ScreenRun[]) => runs.map((r) => r.t).join('');
+  // Claude draws its input box between two ──── rules; the first row inside starts with ❯,
+  // or with ! in bash mode. Read that box when it is there, so a ❯ in the scrollback is never it.
+  if (kind === 'claude') {
+    const rules = rows.map((r, i) => (/^─{8,}$/.test(text(r).trim()) ? i : -1)).filter((i) => i >= 0);
+    if (rules.length >= 2) {
+      const first = rows[rules[rules.length - 2]! + 1];
+      if (first && text(first).trimStart().startsWith('!')) return typedAfter(first, '!');
+      if (first && text(first).trimStart().startsWith('❯')) return typedAfter(first, '❯');
+    }
+  }
+  const mark = kind === 'claude' ? '❯' : '›';
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (text(rows[i]!).trimStart().startsWith(mark)) return typedAfter(rows[i]!, mark);
+  }
+  return null;
+}
+
+function typedAfter(runs: ScreenRun[], mark: string): string {
+  let markFg: string | undefined;
+  let seenMark = false;
+  let typed = '';
+  for (const r of runs) {
+    let t = r.t;
+    if (!seenMark) {
+      const at = t.indexOf(mark);
+      if (at < 0) continue;
+      seenMark = true;
+      markFg = r.fg;
+      t = t.slice(at + mark.length);
+      if (!t) continue;
+    }
+    if (r.d || (markFg !== undefined && r.fg === markFg)) continue;
+    typed += t;
+  }
+  return typed.replace(/\u00a0/g, ' ').trim();
+}
 
 /** Auto-sleep when the config key was never written. On, at half an hour. */
 export const SLEEP_AFTER_DEFAULT_MS = 30 * 60_000;
@@ -461,6 +511,53 @@ export class AgentSleeper {
     }
     this.deps.log(`WAKE session=${id} ready in ${Math.round((this.now() - cur.wakeStartedAt) / 100) / 10}s, wrote ${cur.queuedBytes}B`);
     return { ok: true };
+  }
+
+  /**
+   * Every pane with an agent: running (with its pid, for `ttym agent restart` to
+   * read the version from) or asleep. Sleeping panes need no restart — their next
+   * wake already runs whatever is installed then.
+   */
+  async agents(): Promise<Array<{ sessionId: number; kind: AgentKind; pid: number | null; sleeping: boolean }>> {
+    const procs = await this.deps.listProcesses();
+    const out: Array<{ sessionId: number; kind: AgentKind; pid: number | null; sleeping: boolean }> = [];
+    for (const id of this.deps.sessions.ids()) {
+      const l = this.live.get(id);
+      if (l && l.state.state !== 'failed') { out.push({ sessionId: id, kind: l.state.agent, pid: null, sleeping: true }); continue; }
+      const session = this.deps.sessions.get(id);
+      if (!session || session.isDead) continue;
+      const agent = findAgentProcess(procs, session.childPid);
+      if (agent) out.push({ sessionId: id, kind: agent.kind, pid: agent.pid, sleeping: false });
+    }
+    return out;
+  }
+
+  /**
+   * Bring a running agent down and back up on the same conversation, so it runs
+   * the binary installed now. sleep + wake, with two checks of its own first:
+   * sleep's Ctrl-C clears the composer, so a half-written prompt refuses; and so
+   * does a pane someone typed into within RESTART_QUIET_MS.
+   */
+  async restart(id: number): Promise<{ ok: true; before: number; after: number | null } | { ok: false; error: string }> {
+    const l = this.live.get(id);
+    if (l && l.state.state !== 'failed') return { ok: false, error: 'asleep — its next wake starts the installed version' };
+    const session = this.deps.sessions.get(id);
+    if (!session || session.isDead) return { ok: false, error: 'not found' };
+    const agent = findAgentProcess(await this.deps.listProcesses(), session.childPid);
+    if (!agent) return { ok: false, error: 'no agent process under this pane' };
+    const typed = composerText(session.screenTail(session.rows), agent.kind);
+    if (typed === null) return { ok: false, error: 'no prompt line on screen (a dialog, a menu, bash mode?)' };
+    if (typed) return { ok: false, error: `unsent text in the prompt (${typed.slice(0, 30)})` };
+    const sinceInput = this.now() - session.lastInputAt;
+    if (session.lastInputAt && sinceInput < RESTART_QUIET_MS) return { ok: false, error: `in use (typed ${Math.round(sinceInput / 1000)}s ago)` };
+
+    const slept = await this.sleep(id, 'manual');
+    if (!slept.ok) return slept;
+    const woke = await this.wake(id, 'manual');
+    if (!woke.ok) return { ok: false, error: `went down but did not come back: ${woke.error}` };
+    const now = findAgentProcess(await this.deps.listProcesses(), session.childPid);
+    this.deps.log(`RESTART session=${id} pid ${agent.pid} → ${now?.pid ?? '?'}`);
+    return { ok: true, before: agent.pid, after: now?.pid ?? null };
   }
 
   /** A session ended: forget it. */

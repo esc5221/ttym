@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildResumeArgs } from './agent.js';
+import { buildResumeArgs, isStale } from './agent.js';
 
 const base = ['claude', '--resume', 'abc123'];
 
@@ -66,5 +66,20 @@ describe('buildResumeArgs — 어디서 온 플래그가 어느 순서로 붙나
     const cfg = ['-c', 'check_for_update_on_startup=false'];
     expect(buildResumeArgs({ baseArgs: ['codex', 'resume', 'x'], extra: [...cfg, ...cfg] }))
       .toEqual(['codex', 'resume', 'x', ...cfg]);
+  });
+});
+
+describe('agent restart: which running agents are stale', () => {
+  const installed = { path: '/Users/x/.local/share/claude/versions/2.1.293', version: '2.1.293' };
+  it('versions decide when both are known', () => {
+    expect(isStale('claude', { exe: null, version: '2.1.288' }, installed)).toBe(true);
+    expect(isStale('claude', { exe: '/somewhere/else', version: '2.1.293' }, installed)).toBe(false);
+  });
+  it('otherwise the executable path, but only one that names the agent (not node)', () => {
+    const codex = { path: '/opt/homebrew/Caskroom/codex/0.160.0/bin/codex', version: null };
+    expect(isStale('codex', { exe: '/opt/homebrew/Caskroom/codex/0.159.0/bin/codex', version: null }, codex)).toBe(true);
+    expect(isStale('codex', { exe: codex.path, version: null }, codex)).toBe(false);
+    expect(isStale('claude', { exe: '/opt/homebrew/bin/node', version: null }, { path: '/x/cli.js', version: null })).toBeNull();
+    expect(isStale('claude', { exe: null, version: null }, installed)).toBeNull();
   });
 });

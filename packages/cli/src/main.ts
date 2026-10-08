@@ -55,6 +55,7 @@ function printHelp() {
   console.log('  workspace <command>          Workspace/member control plane');
   console.log('  meta <id> [--set k=v]        Session metadata (get/set)');
   console.log('  agent install <agent>        Install agent hook (claude, codex)');
+  console.log('  agent restart --stale         After updating claude/codex: restart running ones, same conversation');
   console.log('  service install|uninstall|status  Supervised residency: boot at login, restart on crash');
   console.log('  remote <command>             Reach ttym from another device (tailscale · cloudflare · link · doctor)');
   console.log('  embed consumer <command>     Let another app show a ttym panel (add · list · rotate · remove)');

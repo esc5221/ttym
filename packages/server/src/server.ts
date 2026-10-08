@@ -671,7 +671,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
-  // Agent sleep: POST /api/sessions/:id/sleep · /wake, GET /api/agent-sleep
+  // Agent sleep: POST /api/sessions/:id/sleep · /wake · /restart, GET /api/agent-sleep · /api/agent-processes
   const sleepMatch = path.match(/^\/api\/sessions\/(\d+)\/(sleep|wake)$/);
   if (sleepMatch && req.method === 'POST') {
     const id = parseInt(sleepMatch[1], 10);
@@ -682,6 +682,24 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       if (r.ok) json(200, { ok: true, sleep: sleeper.stateOf(id) });
       else json(409, { error: r.error, sleep: sleeper.stateOf(id) });
     });
+    return true;
+  }
+  // POST /api/sessions/:id/restart — down and back up on the same conversation (ttym agent restart).
+  const restartMatch = path.match(/^\/api\/sessions\/(\d+)\/restart$/);
+  if (restartMatch && req.method === 'POST') {
+    const id = parseInt(restartMatch[1], 10);
+    if (!sleeper) { json(503, { error: 'sleep not available' }); return true; }
+    readBody().then(async () => {
+      const r = await sleeper.restart(id);
+      if (r.ok) json(200, r);
+      else json(409, { error: r.error, sleep: sleeper.stateOf(id) });
+    });
+    return true;
+  }
+  // GET /api/agent-processes — every pane with an agent: pid when running, sleeping otherwise.
+  if (path === '/api/agent-processes' && req.method === 'GET') {
+    if (!sleeper) { json(200, { agents: [] }); return true; }
+    sleeper.agents().then((agents) => json(200, { agents }));
     return true;
   }
   if (path === '/api/agent-sleep' && req.method === 'GET') {

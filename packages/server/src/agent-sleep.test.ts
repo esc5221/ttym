@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentSleeper, busyChildOf, findAgentProcess, isInteractiveAgent, isPassiveInput, parseSleepAfter, resumeArgsFrom, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, busyChildOf, composerText, findAgentProcess, isInteractiveAgent, isPassiveInput, parseSleepAfter, resumeArgsFrom, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
 import type { Session } from './session.js';
+import type { ScreenRun } from '@ttym/protocol';
 
 /**
  * The sleeper against a stand-in session and a scripted process table.
@@ -32,6 +33,9 @@ class FakeSession {
   write(data: Buffer) { if (this.inputGate && this.inputGate(data)) return; this.lastInputAt = Date.now(); this.writes.push(data.toString('latin1')); }
   writeRaw(data: Buffer) { this.raw.push(data.toString('latin1')); }
   viewerSnapshot() { return this.screen; }
+  rows = 24;
+  tail: ScreenRun[][] = [[{ t: '❯\u00a0', fg: '#999999' }]];
+  screenTail() { return this.tail; }
   freeze(snapshot?: string) { this.frozen = { snapshot: snapshot ?? this.screen, seq: 7 }; }
   thaw() { this.frozen = null; }
   get isFrozen() { return this.frozen !== null; }
@@ -438,5 +442,77 @@ describe('which agent processes can sleep', () => {
   it('resume does not fork again on every wake (F-3)', () => {
     expect(resumeArgsFrom('claude --resume abc --fork-session --dangerously-skip-permissions')).toEqual(['--dangerously-skip-permissions']);
     expect(resumeArgsFrom('codex fork 01a0 --full-auto')).toEqual(['--full-auto']);
+  });
+});
+
+describe('agent restart (run the installed binary)', () => {
+  let h: ReturnType<typeof harness>;
+  afterEach(() => h?.cleanup());
+
+  it('reads the prompt line: typed text counts, placeholders and suggestions do not', () => {
+    const rule: ScreenRun[] = [{ t: '────────', fg: '#888888' }];
+    expect(composerText([rule, [{ t: '❯\u00a0', fg: '#999999' }], rule], 'claude')).toBe('');
+    expect(composerText([rule, [{ t: '❯\u00a0', fg: '#999999' }, { t: 'fix the tests' }], rule], 'claude')).toBe('fix the tests');
+    expect(composerText([[{ t: '❯\u00a0', fg: '#999999' }, { t: 'Try "refactor"', fg: '#999999' }]], 'claude')).toBe('');
+    // Codex: the placeholder is dim
+    expect(composerText([[{ t: '›', b: 1 }, { t: ' ' }, { t: 'Ask Codex to do anything', d: 1 }]], 'codex')).toBe('');
+    expect(composerText([[{ t: '›', b: 1 }, { t: ' ttym agent resume' }], [{ t: '  ttym agent resume' }]], 'codex')).toBe('ttym agent resume');
+    // An earlier ❯ in the scrollback is not the prompt; the last one is.
+    expect(composerText([[{ t: '❯ old prompt' }], [{ t: 'answer' }], [{ t: '❯\u00a0', fg: '#999999' }]], 'claude')).toBe('');
+    // Typed text Claude colours (a slash command) still counts; only the mark's grey and dim are placeholders.
+    expect(composerText([[{ t: '❯\u00a0', fg: '#999999' }, { t: '/model default', fg: '#b1b9f9' }]], 'claude')).toBe('/model default');
+    // No prompt line (a dialog, bash mode "!"): unknown, not empty.
+    expect(composerText([[{ t: 'no prompt here' }]], 'claude')).toBeNull();
+    expect(composerText([[{ t: '!', fg: '#fd5db1' }, { t: ' ls' }]], 'claude')).toBeNull();
+    // Inside Claude's box: bash mode counts, and an older ❯ above the box is not the prompt.
+    const asked: ScreenRun[] = [{ t: '❯ Reply with exactly: OK' }];
+    expect(composerText([asked, rule, [{ t: '!', fg: '#fd5db1' }, { t: ' ls' }], rule], 'claude')).toBe('ls');
+    expect(composerText([asked, rule, [{ t: '❯\u00a0', fg: '#999999' }], rule], 'claude')).toBe('');
+  });
+
+  it('goes down and comes back on the same conversation, reporting both pids', async () => {
+    let pid: number | null = AGENT;
+    h = harness({ procs: () => (pid ? [{ ...claudeProc(), pid }] : []) });
+    let presses = 0;
+    h.session.writeRaw = (d) => {
+      const text = d.toString('latin1');
+      h.session.raw.push(text);
+      if (text === '\x03' && ++presses === 2) pid = null;
+      if (text.includes('ttym agent resume')) setTimeout(() => { pid = 202; h.agentStarted(); }, 5);
+    };
+    const r = await h.sleeper.restart(1);
+    expect(r).toEqual({ ok: true, before: AGENT, after: 202 });
+    expect(h.session.raw).toEqual(['\x03', '\x03', '\x03', '\x15', 'PORT=7692 ttym agent resume claude --dangerously-skip-permissions\r']);
+    expect(h.meta().agentSleep).toBeNull();
+    expect(h.session.isFrozen).toBe(false);
+  });
+
+  it('refuses unsent text (Ctrl-C would clear it), recent typing, a sleeping pane, and whatever sleep refuses', async () => {
+    h = harness();
+    h.session.tail = [[{ t: '❯ ' }, { t: 'half a prompt' }]];
+    expect(await h.sleeper.restart(1)).toEqual({ ok: false, error: 'unsent text in the prompt (half a prompt)' });
+    expect(h.session.raw).toEqual([]);
+    h.session.tail = [[{ t: 'Do you want to proceed?' }]];
+    expect(await h.sleeper.restart(1)).toEqual({ ok: false, error: 'no prompt line on screen (a dialog, a menu, bash mode?)' });
+    h.session.tail = [[{ t: '❯\u00a0', fg: '#999999' }]];
+    h.session.lastInputAt = Date.now() - 2000;
+    expect(await h.sleeper.restart(1)).toMatchObject({ ok: false, error: expect.stringMatching(/^in use \(typed \ds ago\)$/) });
+    h.cleanup();
+    h = harness({ status: { status: 'busy' } });
+    expect(await h.sleeper.restart(1)).toEqual({ ok: false, error: 'agent is busy' });
+    h.cleanup();
+    h = harness({ procs: () => [] });
+    expect(await h.sleeper.restart(1)).toEqual({ ok: false, error: 'no agent process under this pane' });
+  });
+
+  it('lists running agents with their pid and sleeping ones without', async () => {
+    let alive = true;
+    h = harness({ procs: () => (alive ? [claudeProc()] : []) });
+    expect(await h.sleeper.agents()).toEqual([{ sessionId: 1, kind: 'claude', pid: AGENT, sleeping: false }]);
+    let presses = 0;
+    h.session.writeRaw = (d) => { h.session.raw.push(d.toString('latin1')); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
+    expect(await h.sleeper.agents()).toEqual([{ sessionId: 1, kind: 'claude', pid: null, sleeping: true }]);
+    expect(await h.sleeper.restart(1)).toEqual({ ok: false, error: 'asleep — its next wake starts the installed version' });
   });
 });

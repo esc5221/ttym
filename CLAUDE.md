@@ -157,8 +157,15 @@ ttym embed consumer list | rotate <id> | remove <id>
 ttym agent sleep <addr>        # 지금 재우기. Ctrl-C ×3 (transcript에 안 남음). 셸·PTY·세션은 그대로
 ttym agent wake <addr>         # 지금 깨우기 (입력·send·await가 오면 자동으로 깨어난다)
 ttym agent status              # 자는 pane 목록 + 돌려받은 RAM
+ttym agent restart --stale     # claude·codex 업데이트 후: 옛 버전으로 도는 것을 같은 대화로 다시 띄움
 ```
 
+- `agent restart`(<addr>... | --stale, --dry-run): sleep + wake를 한 pane씩. 깨어 있는 pane만 대상이고, 자는 pane은
+  다음 wake가 어차피 새 바이너리다. 옛 버전 판정은 CLI가 한다 — Claude는 `~/.claude/sessions/<pid>.json`의
+  `version`, 그 외는 실행 파일 경로(lsof)를 `which claude|codex`의 실제 경로·`--version`과 비교.
+  건너뛰는 것: sleep이 거절하는 것 전부, 입력창에 안 보낸 글자(Ctrl-C가 지운다. `composerText`), 30초 안의 입력,
+  transcript가 아직 없는 대화(메시지 0개 — 내리면 resume할 게 없다), 명령을 친 pane 자신.
+  내렸는데 못 올라오면 거기서 멈춘다. 모델은 안 바꾼다 — resume은 그 대화의 모델을 유지한다.
 - 자동: **기본 켜짐, 30분**. 설정(agents 탭)에서 on/off와 10m·30m·1h·2h. config 키 `agent-sleep-after` —
   키가 없으면 기본값(30m), `off`/`never`/`0`이면 끔. 입력·출력이 그 시간 동안 없고 아래 "바쁨" 신호가 없을 때만.
   한 번에 3개, 3초 간격. pin 같은 수동 예외는 없다 — 에이전트가 스스로 말하는 것으로 판단한다.

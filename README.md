@@ -101,6 +101,9 @@ More: [ttym.pages.dev/internals](https://ttym.pages.dev/internals)
 - **Idle agents sleep.** After 30 idle minutes the agent process is stopped and
   the screen stays; the next keystroke resumes the same conversation.
   `ttym agent sleep :limiter`
+- **Restart agents after an update.** After updating Claude Code or Codex,
+  the running ones come back on the new version in the same conversation.
+  `ttym agent restart --stale`
 - **Back after a reboot.** Every pane returns with its last screen, and the
   agent resumes in the same conversation. `ttym agent resume`
 

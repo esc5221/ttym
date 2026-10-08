@@ -1,5 +1,5 @@
-import { spawn, execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync } from 'node:fs';
+import { spawn, execSync, execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, statSync, realpathSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -294,6 +294,9 @@ export async function cmdAgent() {
     return;
   }
 
+  // ── restart <addr>... | --stale ──
+  if (action === 'restart') return agentRestart(process.argv.slice(4));
+
   // ── install / uninstall ──
   if (action === 'install' || action === 'uninstall') {
     if (!agentName) {
@@ -489,12 +492,181 @@ export async function cmdAgent() {
   console.log('                        any input resumes it) / wake it now. <addr> = ws:name|:name|%id');
   console.log('                        auto sleep is on (30m) unless config agent-sleep-after = off. never while the');
   console.log('                        agent reports a background task, a scheduled wakeup, or a prompt waiting');
+  console.log('  restart (<addr>... | --stale) [--dry-run] [--json]');
+  console.log('                        Restart running agents on the same conversation (sleep + wake), so they run');
+  console.log('                        the claude/codex installed now. --stale = every one older than the install.');
+  console.log('                        Skips busy panes and ones with unsent text; asleep ones need nothing');
   console.log('');
   console.log('agents:');
   for (const [key, cfg] of Object.entries(AGENTS)) {
     console.log(`  ${key}    ${cfg.name}`);
   }
   process.exit(EXIT.USAGE);
+}
+
+// ───── agent restart ─────
+// claude·codex를 업데이트해도 이미 떠 있는 프로세스는 옛 바이너리다. sleep + wake(같은 대화로
+// resume)를 한 pane씩 돌려 지금 설치된 것으로 다시 띄운다. 자는 pane은 다음 wake가 어차피
+// 새 바이너리라 할 일이 없다. 모델은 건드리지 않는다 — resume은 그 대화의 모델을 유지한다.
+
+const SEMVER = /\d+\.\d+\.\d+/;
+
+function whichSync(name) {
+  for (const dir of (process.env.PATH || '').split(':')) {
+    if (!dir) continue;
+    const p = resolve(dir, name);
+    try { if (statSync(p).isFile()) return p; } catch {}
+  }
+  return null;
+}
+
+/** The claude/codex a fresh shell would start now. */
+function installedAgent(kind) {
+  const bin = whichSync(kind);
+  if (!bin) return { path: null, version: null };
+  let version = null;
+  try {
+    const out = execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'ignore'] });
+    version = SEMVER.exec(out)?.[0] ?? null;
+  } catch {}
+  let path = bin;
+  try { path = realpathSync(bin); } catch {}
+  return { path, version };
+}
+
+/** The executable a process is running — lsof on macOS, /proc on Linux. */
+function processExe(pid) {
+  if (process.platform === 'linux') { try { return realpathSync(`/proc/${pid}/exe`); } catch { return null; } }
+  try {
+    const out = execFileSync('lsof', ['-a', '-p', String(pid), '-d', 'txt', '-Fn'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
+    const line = out.split('\n').find((l) => l.startsWith('n'));
+    return line ? line.slice(1) : null;
+  } catch { return null; }
+}
+
+/**
+ * What a running agent is. Claude writes its version into ~/.claude/sessions/<pid>.json;
+ * otherwise the version is read off the executable path (…/versions/2.1.293,
+ * …/Caskroom/codex/0.159.0/…) — only when the path names the agent, not node.
+ */
+function runningAgent(kind, pid) {
+  let version = null;
+  if (kind === 'claude') {
+    const home = process.env.CLAUDE_CONFIG_DIR || resolve(process.env.HOME || '/tmp', '.claude');
+    try { version = JSON.parse(readFileSync(resolve(home, 'sessions', `${pid}.json`), 'utf8')).version ?? null; } catch {}
+  }
+  const exe = processExe(pid);
+  if (!version && exe && exe.includes(kind)) version = SEMVER.exec(exe)?.[0] ?? null;
+  return { exe, version };
+}
+
+/** true / false, or null when neither the version nor the executable tells. */
+export function isStale(kind, running, installed) {
+  if (running.version && installed.version) return running.version !== installed.version;
+  if (running.exe && installed.path && running.exe.includes(kind)) return running.exe !== installed.path;
+  return null;
+}
+
+async function agentRestart(args) {
+  const port = getPort();
+  const stale = args.includes('--stale');
+  const dryRun = args.includes('--dry-run');
+  const json = hasFlag('--json');
+  const addrs = args.filter((a) => !a.startsWith('-'));
+  if (!stale && addrs.length === 0) {
+    console.error('usage: ttym agent restart (<addr>... | --stale) [--dry-run] [--json]');
+    console.error('  restarts running claude/codex panes on the same conversation so they run the installed version');
+    process.exit(EXIT.USAGE);
+  }
+  await ensureCompatibleServer(port);
+  const listed = await fetchJson(port, '/api/agent-processes');
+  if (!Array.isArray(listed?.agents)) {
+    // An older server answers 404 with a plain-text body, which reads as null here.
+    console.error(`agent restart: ${listed?.error ?? 'this server predates agent restart — restart it first (ttym restart)'}`);
+    process.exit(EXIT.FAIL);
+  }
+
+  const names = new Map();
+  for (const ws of (await listWorkspaces(port)) || []) for (const m of ws.members || []) names.set(m.sessionId, `${ws.name}:${m.name}`);
+  const label = (id) => names.get(id) ?? `%${id}`;
+  const installedBy = {};
+  const installed = (kind) => (installedBy[kind] ??= installedAgent(kind));
+  const rows = listed.agents.map((a) => {
+    if (a.sleeping) return { ...a, running: null, stale: null };
+    const running = runningAgent(a.kind, a.pid);
+    return { ...a, running, stale: isStale(a.kind, running, installed(a.kind)) };
+  });
+
+  const self = parseInt(process.env.TTYM_SESSION_ID || '', 10);
+  const plan = [];   // { row, skip? }
+  if (addrs.length > 0) {
+    for (const addr of addrs) {
+      const target = await resolveAddress(port, addr);
+      const row = rows.find((r) => r.sessionId === target.sessionId);
+      if (!row) plan.push({ row: { sessionId: target.sessionId, kind: '-', running: null }, skip: 'no agent in this pane' });
+      else plan.push({ row });
+    }
+  } else {
+    for (const row of rows) if (!row.sleeping && row.stale === true) plan.push({ row });
+  }
+  for (const p of plan) {
+    if (p.skip) continue;
+    if (p.row.sessionId === self) p.skip = 'this pane — run it from another one';
+    else if (p.row.sleeping) p.skip = 'asleep — its next wake starts the installed version';
+    else {
+      // A Claude that never got a message has no transcript yet: down, it could not come back.
+      const cfg = AGENTS[p.row.kind];
+      const meta = await fetchJson(port, `/api/sessions/${p.row.sessionId}/meta`);
+      const convId = meta?.[cfg.metaKey] || meta?.[cfg.lastMetaKey];
+      if (!convId || !findConversation(convId, p.row.kind)) p.skip = 'no conversation saved yet — nothing to resume';
+    }
+  }
+
+  const versionText = (row, after = null) => {
+    if (!row.running) return '-';
+    const from = row.running?.version ?? '?';
+    const to = after ?? installed(row.kind)?.version ?? '?';
+    return from === to ? from : `${from} → ${to}`;
+  };
+  const results = [];
+  const line = (r) => console.log(`  ${label(r.sessionId).padEnd(28)} ${String(r.kind).padEnd(6)} ${String(r.version).padEnd(18)} ${r.outcome}`);
+  let failed = false;
+  for (const p of plan) {
+    const row = p.row;
+    const base = { sessionId: row.sessionId, kind: row.kind, version: versionText(row) };
+    if (p.skip) { results.push({ ...base, outcome: `skipped: ${p.skip}`, ok: false }); if (!json) line(results.at(-1)); continue; }
+    if (dryRun) { results.push({ ...base, outcome: 'would restart', ok: true }); if (!json) line(results.at(-1)); continue; }
+    if (failed) { results.push({ ...base, outcome: 'not tried (stopped after a failure)', ok: false }); if (!json) line(results.at(-1)); continue; }
+    const started = Date.now();
+    const res = await fetchRequest(port, 'POST', `/api/sessions/${row.sessionId}/restart`, {}, 120_000);
+    if (res?.ok) {
+      // The new process's own version, not the installed one assumed: Claude writes its
+      // sessions file a moment after start, so give it two seconds.
+      let after = null;
+      for (let i = 0; res.after && i < 10 && !after; i++) {
+        after = runningAgent(row.kind, res.after).version;
+        if (!after) await new Promise((r) => setTimeout(r, 200));
+      }
+      const want = installed(row.kind).version;
+      const secs = ((Date.now() - started) / 1000).toFixed(1);
+      const outcome = after && want && after !== want ? `restarted, but still ${after} (installed ${want})` : `restarted (${secs}s)`;
+      results.push({ ...base, version: versionText(row, after ?? '?'), outcome, ok: true, pid: res.after, after });
+    } else {
+      const error = res?.error ?? 'no response';
+      // Down but not back up: stop here so one broken resume does not become ten.
+      if (/did not come back/.test(error)) failed = true;
+      results.push({ ...base, outcome: `${failed ? 'FAILED' : 'skipped'}: ${error}`, ok: false });
+    }
+    if (!json) line(results.at(-1));
+  }
+
+  const asleep = rows.filter((r) => r.sleeping).length;
+  const unknown = rows.filter((r) => !r.sleeping && r.stale === null);
+  if (json) return printOutput({ installed: installedBy, results, asleep, unknown: unknown.map((r) => r.sessionId) }, true);
+  if (plan.length === 0) console.log(stale ? '  every running agent is on the installed version' : '  nothing to restart');
+  if (stale && asleep > 0) console.log(`  ${asleep} asleep — they start the installed version on their next wake`);
+  if (unknown.length > 0) console.log(`  version unknown, left alone: ${unknown.map((r) => label(r.sessionId)).join(' ')}`);
+  if (failed) process.exit(EXIT.FAIL);
 }
 
 // ───── Agent hook entry point ─────
