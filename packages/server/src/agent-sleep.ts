@@ -514,6 +514,21 @@ export class AgentSleeper {
   }
 
   /**
+   * Drop a failed wake's mark. The shell is already live (a failure thaws the pane);
+   * only the record and the pill go. A pane still asleep or waking is not touched —
+   * its frozen screen and queue depend on the record.
+   */
+  async dismiss(id: number): Promise<{ ok: true } | { ok: false; error: string }> {
+    const l = this.live.get(id);
+    if (!l || l.state.state !== 'failed') return { ok: false, error: l ? `${l.state.state}, not failed` : 'no failed wake here' };
+    this.live.delete(id);
+    await this.deps.sessions.setMeta(id, { agentSleep: null });
+    this.deps.onState(id, null);
+    this.deps.log(`WAKE session=${id} failure dismissed`);
+    return { ok: true };
+  }
+
+  /**
    * Every pane with an agent: running (with its pid, for `ttym agent restart` to
    * read the version from) or asleep. Sleeping panes need no restart — their next
    * wake already runs whatever is installed then.

@@ -79,6 +79,9 @@ body {
 .agent-sleep-pill.sleeping { cursor: pointer; }
 .agent-sleep-pill.sleeping:hover { border-color: #8aa2ff; }
 .agent-sleep-pill .mark { font-size: 13px; line-height: 1; }
+/* 실패 사유는 셸 화면 꼬리까지 붙어 길다. 글자만 줄이고 restore·✕는 늘 보이게 — 버튼이 잘려 나가면 칩을 끌 수 없다. 전문은 title. */
+.agent-sleep-pill .text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.agent-sleep-pill > button, .agent-sleep-pill .mark { flex-shrink: 0; }
 .agent-sleep-pill.sleeping .mark { color: #8aa2ff; }
 .agent-sleep-pill.waking .mark { color: var(--warn); }
 .agent-sleep-pill.failed { border-color: var(--err); color: var(--err); }

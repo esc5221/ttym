@@ -90,6 +90,10 @@ export function sleepAgent(base: BaseUrl, id: number): Promise<{ ok?: true; erro
 export function wakeAgent(base: BaseUrl, id: number): Promise<{ ok?: true; error?: string; sleep: AgentSleepInfo | null }> {
   return request(base, `/api/sessions/${id}/wake`, { method: 'POST', body: {} });
 }
+/** Clear a failed wake's mark (the pill). The shell and the conversation are untouched. */
+export function dismissAgentSleep(base: BaseUrl, id: number): Promise<{ ok?: true; error?: string; sleep: AgentSleepInfo | null }> {
+  return request(base, `/api/sessions/${id}/dismiss`, { method: 'POST', body: {} });
+}
 export function getAgentSleepStatus(base: BaseUrl): Promise<{ sleeping: Array<{ sessionId: number } & AgentSleepInfo>; reclaimedBytes: number; afterMs: number }> {
   return request(base, '/api/agent-sleep');
 }

@@ -356,6 +356,21 @@ describe('wake', () => {
     // A failed pane refuses a second wake and points at restore.
     expect(await h.sleeper.wake(1)).toEqual({ ok: false, error: 'resume failed earlier; use restore' });
   });
+
+  it('dismiss clears a failed mark (record, push, gate state) and refuses anything else', async () => {
+    await asleep();
+    expect(await h.sleeper.dismiss(2)).toEqual({ ok: false, error: 'no failed wake here' });
+    expect(await h.sleeper.dismiss(1)).toEqual({ ok: false, error: 'sleeping, not failed' });
+    expect(h.session.isFrozen).toBe(true);
+    h.session.write(Buffer.from('x'));
+    await tick(200);
+    expect(h.meta().agentSleep).toMatchObject({ state: 'failed' });
+    expect(await h.sleeper.dismiss(1)).toEqual({ ok: true });
+    expect(h.meta().agentSleep).toBeNull();
+    expect(h.sleeper.stateOf(1)).toBeNull();
+    expect(h.events.at(-1)).toEqual({ id: 1, sleep: null });
+    expect(await h.sleeper.dismiss(1)).toEqual({ ok: false, error: 'no failed wake here' });
+  });
 });
 
 describe('auto sleep', () => {

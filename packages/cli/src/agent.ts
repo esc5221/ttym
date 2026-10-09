@@ -272,8 +272,8 @@ export async function cmdAgent() {
     return;
   }
 
-  // ── sleep / wake <addr> ──
-  if (action === 'sleep' || action === 'wake') {
+  // ── sleep / wake / dismiss <addr> ──
+  if (action === 'sleep' || action === 'wake' || action === 'dismiss') {
     const addr = process.argv[4];
     const port = getPort();
     let sessionId;
@@ -290,7 +290,8 @@ export async function cmdAgent() {
     if (hasFlag('--json')) return printOutput({ session: label, sessionId, ...data }, true);
     if (!data || data.error) { console.error(`${action} ${label}: ${data?.error ?? 'no response'}`); process.exit(EXIT.FAIL); }
     if (action === 'sleep') console.log(`${label} asleep — ${Math.round((data.sleep?.rssBefore ?? 0) / 1048576)}MB given back; any input wakes it`);
-    else console.log(`${label} awake`);
+    else if (action === 'wake') console.log(`${label} awake`);
+    else console.log(`${label} failed-wake notice cleared`);
     return;
   }
 
@@ -492,6 +493,7 @@ export async function cmdAgent() {
   console.log('                        any input resumes it) / wake it now. <addr> = ws:name|:name|%id');
   console.log('                        auto sleep is on (30m) unless config agent-sleep-after = off. never while the');
   console.log('                        agent reports a background task, a scheduled wakeup, or a prompt waiting');
+  console.log('  dismiss <addr>        Clear the "resume failed" notice on a pane (the shell is already live)');
   console.log('  restart (<addr>... | --stale) [--dry-run] [--json]');
   console.log('                        Restart running agents on the same conversation (sleep + wake), so they run');
   console.log('                        the claude/codex installed now. --stale = every one older than the install.');

@@ -50,6 +50,7 @@ export interface WorkspaceSessions {
 
   sleepAgent: (sid: number) => Promise<void>;
   wakeAgent: (sid: number) => Promise<void>;
+  dismissSleep: (sid: number) => Promise<void>;
   restoreAgent: (sid: number) => void;
   sleepNote: { sid: number; text: string } | null;
 

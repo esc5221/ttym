@@ -671,14 +671,14 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
-  // Agent sleep: POST /api/sessions/:id/sleep · /wake · /restart, GET /api/agent-sleep · /api/agent-processes
-  const sleepMatch = path.match(/^\/api\/sessions\/(\d+)\/(sleep|wake)$/);
+  // Agent sleep: POST /api/sessions/:id/sleep · /wake · /dismiss · /restart, GET /api/agent-sleep · /api/agent-processes
+  const sleepMatch = path.match(/^\/api\/sessions\/(\d+)\/(sleep|wake|dismiss)$/);
   if (sleepMatch && req.method === 'POST') {
     const id = parseInt(sleepMatch[1], 10);
     const verb = sleepMatch[2];
     if (!sleeper) { json(503, { error: 'sleep not available' }); return true; }
     readBody().then(async () => {
-      const r = verb === 'sleep' ? await sleeper.sleep(id, 'manual') : await sleeper.wake(id, 'manual');
+      const r = verb === 'sleep' ? await sleeper.sleep(id, 'manual') : verb === 'wake' ? await sleeper.wake(id, 'manual') : await sleeper.dismiss(id);
       if (r.ok) json(200, { ok: true, sleep: sleeper.stateOf(id) });
       else json(409, { error: r.error, sleep: sleeper.stateOf(id) });
     });

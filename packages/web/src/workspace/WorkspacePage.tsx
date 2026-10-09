@@ -217,6 +217,9 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
   const wakeAgent = useCallback(async (sid: number) => {
     try { await api.wakeAgent(API_BASE, sid); } catch {}
   }, []);
+  const dismissSleep = useCallback(async (sid: number) => {
+    try { await api.dismissAgentSleep(API_BASE, sid); } catch {}
+  }, []);
   const [sleepNote, setSleepNote] = useState<{ sid: number; text: string } | null>(null);
   useEffect(() => {
     if (!sleepNote) return;
@@ -249,6 +252,9 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
   }, [touch, focusedSid, zenSid, openZen, sessionIds.join(','), open, exitFull]);
 
   const restoreAgent = useCallback((sid: number) => {
+    // 실패 표시부터 지운다. 이번 resume도 실패하면 그 이유는 터미널에 찍힌다 —
+    // 칩이 남아 있으면 restore가 다시 실패한 경우 끌 방법이 없었다.
+    void dismissSleep(sid);
     if (!lastAgentIds[sid]) return;
     // 명령을 여기서 조립하지 않는다. `ttym agent resume`이 어느 에이전트인지
     // 찾고 설정·env·플래그를 붙이는 일을 이미 한다 — 베껴 두면 이렇게 어긋난다:
@@ -258,7 +264,7 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
     // pane의 셸 PATH에 ttym이 있어야 한다. 없으면 command not found가 터미널에
     // 그대로 찍힌다 — 조용히 아무 일도 안 일어나는 것보다 낫다.
     void api.sendToSession(API_BASE, sid, 'ttym agent resume\r');
-  }, [lastAgentIds]);
+  }, [lastAgentIds, dismissSleep]);
 
   useEffect(() => {
     if (sessionIds.length === 0) { setFocusedSid(null); return; }
@@ -465,10 +471,10 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
   const sessions = useMemo<WorkspaceSessions>(() => ({
     mux, localEchoEnabled, touch, agentStates, lastAgentIds, deadSessions, markDead, focusedSid, focusSid, bells, ringBell,
     viewer, open, openFull, viewerReload, reloadViewer, selOpen, setSelOpen, offerSelection, search, setSearch,
-    fileDropSid, setFileDropSid, insertPathsIntoPane, sleepAgent, wakeAgent, restoreAgent, sleepNote, restartAt, detachMember,
+    fileDropSid, setFileDropSid, insertPathsIntoPane, sleepAgent, wakeAgent, dismissSleep, restoreAgent, sleepNote, restartAt, detachMember,
   }), [mux, localEchoEnabled, touch, agentStates, lastAgentIds, deadSessions, markDead, focusedSid, focusSid, bells, ringBell,
     viewer, open, openFull, viewerReload, reloadViewer, selOpen, offerSelection, search,
-    fileDropSid, insertPathsIntoPane, sleepAgent, wakeAgent, restoreAgent, sleepNote, restartAt, detachMember]);
+    fileDropSid, insertPathsIntoPane, sleepAgent, wakeAgent, dismissSleep, restoreAgent, sleepNote, restartAt, detachMember]);
 
   const renderPane = useCallback((sid: number, _path: number[]) => {
     if (sid <= 0) {

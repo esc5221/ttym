@@ -169,7 +169,7 @@ export const SessionBody = forwardRef<HTMLDivElement, SessionBodyProps>(function
           {sleepNote?.sid === sid && !sleep ? <span>{sleepNote.text}</span>
             : sleep!.state === 'sleeping' ? <><span className="mark">☾</span><span>sleeping · {ageText(sleep!.since)} · type or click to wake{sleep!.dropped ? ` · ${sleep!.dropped} B dropped (queue full)` : ''}</span></>
             : sleep!.state === 'waking' ? <><span className="mark spin">◌</span><span>waking…{sleep!.queued ? ` ${sleep!.queued} B queued` : ''}{sleep!.dropped ? ` · ${sleep!.dropped} B dropped (queue full)` : ''}</span></>
-            : <><span className="mark">✕</span><span>resume failed: {sleep!.error ?? 'unknown'}</span><button onClick={(e) => { e.stopPropagation(); ctx.restoreAgent(sid); }} style={miniLinkBtnStyle}>restore</button></>}
+            : <><span className="mark">✕</span><span className="text">resume failed: {sleep!.error ?? 'unknown'}</span><button onClick={(e) => { e.stopPropagation(); ctx.restoreAgent(sid); }} style={miniLinkBtnStyle}>restore</button><button onClick={(e) => { e.stopPropagation(); void ctx.dismissSleep(sid); }} style={miniLinkBtnStyle} title="hide this notice">✕</button></>}
         </div>
       ) : null}
       {/* 뷰어 탭은 터미널 위에 덮는다. 터미널을 떼거나 숨기면 PTY 크기가 흔들리고 돌아올 때

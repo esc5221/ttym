@@ -157,6 +157,7 @@ ttym embed consumer list | rotate <id> | remove <id>
 ttym agent sleep <addr>        # 지금 재우기. Ctrl-C ×3 (transcript에 안 남음). 셸·PTY·세션은 그대로
 ttym agent wake <addr>         # 지금 깨우기 (입력·send·await가 오면 자동으로 깨어난다)
 ttym agent status              # 자는 pane 목록 + 돌려받은 RAM
+ttym agent dismiss <addr>      # resume 실패 표시(하단 알약)만 지우기. 웹 알약의 ✕ · restore도 같은 일
 ttym agent restart --stale     # claude·codex 업데이트 후: 옛 버전으로 도는 것을 같은 대화로 다시 띄움
 ```
 
