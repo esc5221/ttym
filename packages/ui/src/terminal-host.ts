@@ -547,7 +547,7 @@ export class TerminalHost {
     }
     if (prev.fixedCols !== opts.fixedCols) {
       this.syncWrapperSizing();
-      this.scheduleFit();
+      this.scheduleFit(opts.geometry === 'borrow');
     }
     if (prev.geometry !== opts.geometry) {
       this.syncWrapperSizing();
@@ -558,7 +558,7 @@ export class TerminalHost {
         // 옛 기하를 쥐고 있게 된다.
         this.mux.releaseGeometry(this.sessionId);
       }
-      if (opts.geometry !== 'follow') this.scheduleFit();
+      if (opts.geometry !== 'follow') this.scheduleFit(opts.geometry === 'borrow');
       // follow↔borrow 는 resize 구독 유무가 달라진다 — 입력 배선을 다시 짠다
       if (this.stream === 'attached' || this.stream === 'paused') {
         for (const d of this.inputDisposables) d.dispose();
@@ -850,15 +850,25 @@ export class TerminalHost {
     } catch {}
   }
 
-  private scheduleFit() {
+  /**
+   * `announce`: 빌려 쓰는 기하(zen)는 xterm 크기가 안 변해도 서버에 이 크기를 한 번 알린다.
+   * 크기가 이미 같으면 onResize가 안 울려서, 서버 PTY가 다른 크기로 남고 빌림 장부도
+   * 안 생긴다 — zen을 나갈 때 되돌릴 이전 기하가 없다.
+   */
+  private scheduleFit(announce = false) {
     if (this.opts.geometry === 'follow') return;
     requestAnimationFrame(() => {
       if (this.disposed) return;
       try {
+        const { cols, rows } = this.term;
         const fixed = this.opts.fixedCols;
         if (fixed && fixed > 0) this.resizeToFixedCols(fixed);
         else this.fit.fit();
         this.term.refresh(0, Math.max(0, this.term.rows - 1));
+        // 크기가 바뀌었으면 onResize가 이미 알렸다.
+        if (announce && this.term.cols === cols && this.term.rows === rows) {
+          this.mux.resize(this.sessionId, this.term.cols, this.term.rows, this.opts.geometry === 'borrow');
+        }
       } catch {}
     });
   }

@@ -142,3 +142,12 @@
 .rd-opt.sel { background: var(--accent-bg); color: var(--accent); }
 .rd-opt-n { flex-shrink: 0; }
 .rd-ap-hint { margin-top: 10px; font-size: 11px; color: var(--text-dim); }
+
+/* scrollbars: thin, and invisible until the pointer is over the thing that scrolls (the browser's own bars are heavy next to the text) */
+.rd-scroll, .rd-md pre, .rd-md table, .rd-pre, .rd-diff, .rd-approval {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.rd-scroll:hover, .rd-md pre:hover, .rd-md table:hover, .rd-pre:hover, .rd-diff:hover, .rd-approval:hover {
+  scrollbar-color: color-mix(in srgb, var(--text-dim) 55%, transparent) transparent;
+}
