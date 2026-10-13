@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { ReaderFeed, ReaderUpdate } from '@ttym/api';
-import { MAX_BLOCKS, applyFeed, emptyState, formatDuration, interrupted, pendingMessages, turnStartedAt } from './model.js';
+import { MAX_BLOCKS, applyEarlier, applyFeed, emptyState, formatDuration, interrupted, pendingMessages, turnStartedAt } from './model.js';
 
 const feed = (updates: ReaderUpdate[], over: Partial<ReaderFeed> = {}): ReaderFeed =>
-  ({ agent: 'claude-code', supported: true, key: 'k1', next: 100, reset: true, updates, ...over });
+  ({ agent: 'claude-code', supported: true, key: 'k1', next: 100, reset: true, from: 0, updates, ...over });
 const user = (id: string, at: number, text = id): ReaderUpdate => ({ op: 'user', id, at, text });
 const tool = (id: string, at: number, extra: Partial<Extract<ReaderUpdate, { op: 'tool' }>> = {}): ReaderUpdate =>
   ({ op: 'tool', id, at, name: 'Bash', target: 'ls', input: 'ls', ...extra });
@@ -142,5 +142,43 @@ describe('applyFeed', () => {
 describe('formatDuration', () => {
   it.each([[400, '<1s'], [42_000, '42s'], [221_000, '3m 41s'], [3_720_000, '1h 2m']])('%i ms → %s', (ms, text) => {
     expect(formatDuration(ms)).toBe(text);
+  });
+});
+
+describe('earlier history', () => {
+  const asked = (updates: ReaderUpdate[], from: number) => feed(updates, { reset: false, from, next: 50 });
+
+  it('remembers where the first load began, and how to ask for what is above it', () => {
+    expect(applyFeed(emptyState(), feed([user('u9', 9)], { from: 4000 })).earlier).toBe(4000);
+    expect(applyFeed(emptyState(), feed([user('u9', 9)], { from: 0 })).earlier).toBeNull();
+  });
+
+  it('puts the older page in front, and says when the start has been reached', () => {
+    const now = applyFeed(emptyState(), feed([user('u3', 3), user('u4', 4)], { from: 4000 }));
+    const older = applyEarlier(now, asked([user('u1', 1), { op: 'text', id: 'a1', at: 2, text: 'hi' }], 0));
+    expect(older.blocks.map((b) => b.id)).toEqual(['u1', 'a1', 'u3', 'u4']);
+    expect(older.earlier).toBeNull();
+    expect(older.next).toBe(now.next);
+  });
+
+  it('joins a result that arrived before its call was loaded', () => {
+    const now = applyFeed(emptyState(), feed([{ op: 'tool-result', id: 't1', at: 6, output: 'ok', isError: false }, user('u3', 3)], { from: 4000 }));
+    expect(now.blocks.map((b) => b.id)).toEqual(['u3']);
+    const older = applyEarlier(now, asked([tool('t1', 5)], 2000));
+    expect(older.blocks[0]).toMatchObject({ id: 't1', status: 'ok', output: 'ok' });
+    expect(older.earlier).toBe(2000);
+    expect(older.orphans).toEqual({});
+  });
+
+  it('ignores a page that belongs to a record we are no longer showing', () => {
+    const now = applyFeed(emptyState(), feed([user('u3', 3)], { from: 4000 }));
+    expect(applyEarlier(now, { ...asked([user('u1', 1)], 0), key: 'other' })).toBe(now);
+  });
+
+  it('does not take what was queued or titled back then as current', () => {
+    const now = applyFeed(emptyState(), feed([user('u3', 3)], { from: 4000, key: 'k1' }));
+    const older = applyEarlier(now, asked([{ op: 'queue', at: 1, action: 'enqueue', text: 'old' }, { op: 'title', text: 'Old' }, user('u1', 1)], 0));
+    expect(older.queue).toEqual([]);
+    expect(older.title).toBeNull();
   });
 });

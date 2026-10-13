@@ -13,3 +13,8 @@ export function getTranscript(base: BaseUrl, sessionId: number, since?: { after:
     query: since ? { after: since.after, key: since.key ?? undefined } : undefined,
   });
 }
+
+/** The page of history ahead of `before` (a previous answer's `from`) in the record `key` names. */
+export function getTranscriptBefore(base: BaseUrl, sessionId: number, before: number, key: string): Promise<ReaderFeed> {
+  return request(base, `/api/sessions/${sessionId}/transcript`, { query: { before, key } });
+}

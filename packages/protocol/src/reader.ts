@@ -85,5 +85,11 @@ export interface ReaderFeed {
   next: number;
   /** True when `updates` replace everything the client holds: first load, a new key, a rewound file. */
   reset: boolean;
+  /**
+   * Offset in the record of the first line `updates` were read from. 0 means they start at the
+   * record's beginning, so there is nothing earlier to load; otherwise pass it as `before` to get
+   * the lines ahead of it.
+   */
+  from: number;
   updates: ReaderUpdate[];
 }

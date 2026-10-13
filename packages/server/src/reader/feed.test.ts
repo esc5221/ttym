@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { readNewLines } from './feed.js';
+import { readLinesBefore, readNewLines } from './feed.js';
 
 let dir: string;
 let n = 0;
@@ -14,7 +14,7 @@ afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
 describe('readNewLines', () => {
   it('takes the whole of a small file on the first ask', async () => {
     const r = await readNewLines(fresh('a\nb\nc\n'), null);
-    expect(r).toEqual({ lines: ['a', 'b', 'c'], next: 6, reset: true });
+    expect(r).toEqual({ lines: ['a', 'b', 'c'], next: 6, start: 0, reset: true });
   });
 
   it('continues from where the last answer ended', async () => {
@@ -22,17 +22,17 @@ describe('readNewLines', () => {
     const first = await readNewLines(p, null);
     appendFileSync(p, 'c\nd\n');
     const second = await readNewLines(p, first.next);
-    expect(second).toEqual({ lines: ['c', 'd'], next: 8, reset: false });
-    expect(await readNewLines(p, second.next)).toEqual({ lines: [], next: 8, reset: false });
+    expect(second).toEqual({ lines: ['c', 'd'], next: 8, start: 4, reset: false });
+    expect(await readNewLines(p, second.next)).toEqual({ lines: [], next: 8, start: 8, reset: false });
   });
 
   it('holds back a line the writer has not finished', async () => {
     const p = fresh('a\nb');
     const first = await readNewLines(p, null);
-    expect(first).toEqual({ lines: ['a'], next: 2, reset: true });
+    expect(first).toEqual({ lines: ['a'], next: 2, start: 0, reset: true });
     appendFileSync(p, '\nc');
     const second = await readNewLines(p, first.next);
-    expect(second).toEqual({ lines: ['b'], next: 4, reset: false });
+    expect(second).toEqual({ lines: ['b'], next: 4, start: 2, reset: false });
     appendFileSync(p, '\n');
     expect((await readNewLines(p, second.next)).lines).toEqual(['c']);
   });
@@ -40,7 +40,7 @@ describe('readNewLines', () => {
   it('starts over when the file was rewritten shorter', async () => {
     const p = fresh('aaaa\nbbbb\n');
     writeFileSync(p, 'x\n');
-    expect(await readNewLines(p, 10)).toEqual({ lines: ['x'], next: 2, reset: true });
+    expect(await readNewLines(p, 10)).toEqual({ lines: ['x'], next: 2, start: 0, reset: true });
   });
 
   it('takes only the tail on the first ask and drops the fragment it lands in', async () => {
@@ -66,6 +66,27 @@ describe('readNewLines', () => {
   });
 
   it('is empty, not an error, for an empty file', async () => {
-    expect(await readNewLines(fresh(''), null)).toEqual({ lines: [], next: 0, reset: true });
+    expect(await readNewLines(fresh(''), null)).toEqual({ lines: [], next: 0, start: 0, reset: true });
+  });
+});
+
+describe('readLinesBefore', () => {
+  it('returns the lines ahead of an offset and says where they begin', async () => {
+    const p = fresh('aaaa\nbbbb\ncccc\ndddd\n');
+    // 'cccc' starts at byte 10; take two lines' worth ahead of it
+    expect(await readLinesBefore(p, 10, { initialBytes: 100, maxBytes: 100 })).toEqual({ lines: ['aaaa', 'bbbb'], start: 0 });
+    expect(await readLinesBefore(p, 10, { initialBytes: 6, maxBytes: 100 })).toEqual({ lines: ['bbbb'], start: 5 });
+  });
+
+  it('drops a line the window cuts in two, and walks back to the start page by page', async () => {
+    const p = fresh('aaaa\nbbbb\ncccc\ndddd\n');
+    const page1 = await readLinesBefore(p, 20, { initialBytes: 8, maxBytes: 100 });
+    expect(page1).toEqual({ lines: ['dddd'], start: 15 });
+    const page2 = await readLinesBefore(p, page1.start, { initialBytes: 8, maxBytes: 100 });
+    expect(page2).toEqual({ lines: ['cccc'], start: 10 });
+    const page3 = await readLinesBefore(p, page2.start, { initialBytes: 8, maxBytes: 100 });
+    expect(page3).toEqual({ lines: ['bbbb'], start: 5 });
+    expect(await readLinesBefore(p, page3.start, { initialBytes: 8, maxBytes: 100 })).toEqual({ lines: ['aaaa'], start: 0 });
+    expect(await readLinesBefore(p, 0)).toEqual({ lines: [], start: 0 });
   });
 });

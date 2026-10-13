@@ -56,7 +56,7 @@ describe('readerFeed', () => {
 
   it('answers an empty, supported feed when the record is not on disk yet', async () => {
     const feed = await readerFeed({ claudeSessionId: 'sid-missing', cwd: CWD }, { after: null, key: null });
-    expect(feed).toEqual({ agent: 'claude-code', supported: true, key: null, next: 0, reset: true, updates: [] });
+    expect(feed).toEqual({ agent: 'claude-code', supported: true, key: null, next: 0, reset: true, from: 0, updates: [] });
   });
 
   it('says so when the session has no agent, or an agent with no parser yet', async () => {

@@ -69,6 +69,7 @@ export function createApi(base: BaseUrl) {
     },
     reader: {
       transcript: (sessionId: number, since?: Parameters<typeof reader.getTranscript>[2]) => reader.getTranscript(base, sessionId, since),
+      transcriptBefore: (sessionId: number, before: number, key: string) => reader.getTranscriptBefore(base, sessionId, before, key),
     },
     interactions: {
       submit: (sessionId: number, o: Parameters<typeof interactions.submitInteraction>[2]) =>

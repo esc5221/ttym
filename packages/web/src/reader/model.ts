@@ -1,4 +1,4 @@
-import type { ReaderAgent, ReaderFeed, ReaderPatch } from '@ttym/api';
+import type { ReaderAgent, ReaderFeed, ReaderPatch, ReaderUpdate } from '@ttym/api';
 
 /**
  * The page's data: a conversation as an ordered list of blocks.
@@ -34,13 +34,19 @@ export interface ReaderState {
   blocks: Block[];
   title: string | null;
   queue: QueuedMessage[];
+  /** Offset to ask for the page of history above `blocks`; null when they begin at the start of the record. */
+  earlier: number | null;
+  /** Results whose call is in the page of history not loaded yet, waiting for it. */
+  orphans: Record<string, ToolResult>;
 }
+
+type ToolResult = Extract<ReaderUpdate, { op: 'tool-result' }>;
 
 /** A tab left open for days should not grow without bound. */
 export const MAX_BLOCKS = 2000;
 
 export function emptyState(): ReaderState {
-  return { key: null, next: 0, agent: null, supported: null, blocks: [], title: null, queue: [] };
+  return { key: null, next: 0, agent: null, supported: null, blocks: [], title: null, queue: [], earlier: null, orphans: {} };
 }
 
 export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
@@ -52,6 +58,7 @@ export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
   blocks.forEach((b, i) => index.set(b.id, i));
   let queue = feed.reset ? [] : state.queue.slice();
   let title = feed.reset ? null : state.title;
+  const orphans: Record<string, ToolResult> = feed.reset ? {} : { ...state.orphans };
 
   const add = (b: Block) => {
     if (index.has(b.id)) return; // the same update delivered twice changes nothing
@@ -70,11 +77,11 @@ export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
         add({ kind: 'tool', id: u.id, at: u.at, name: u.name, target: u.target, input: u.input, status: 'running', output: '', truncated: false, ...(u.patch ? { patch: u.patch } : {}) });
         break;
       case 'tool-result': {
-        // A result whose call is outside the window we hold has nothing to attach to.
+        // A result whose call is in history we haven't loaded waits for it.
         const i = index.get(u.id);
         const call = i === undefined ? undefined : blocks[i];
-        if (i === undefined || call?.kind !== 'tool') break;
-        blocks[i] = { ...call, status: u.isError ? 'error' : 'ok', output: u.output, truncated: u.truncated === true, endedAt: u.at, patch: u.patch ?? call.patch };
+        if (i === undefined || call?.kind !== 'tool') { orphans[u.id] = u; break; }
+        blocks[i] = withResult(call, u);
         break;
       }
       case 'turn-end': {
@@ -90,15 +97,49 @@ export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
     }
   }
 
+  const capped = blocks.length > MAX_BLOCKS ? blocks.slice(blocks.length - MAX_BLOCKS) : blocks;
   return {
     key: feed.key,
     next: feed.next,
     agent: feed.agent,
     supported: feed.supported,
-    blocks: blocks.length > MAX_BLOCKS ? blocks.slice(blocks.length - MAX_BLOCKS) : blocks,
+    blocks: capped,
     title,
     queue,
+    // Blocks trimmed off the front leave a gap nothing here can offset into, so there is no loading earlier history after that.
+    earlier: capped !== blocks ? null : feed.reset ? (feed.from > 0 ? feed.from : null) : state.earlier,
+    orphans,
   };
+}
+
+function withResult(call: Extract<Block, { kind: 'tool' }>, u: ToolResult): Block {
+  return { ...call, status: u.isError ? 'error' : 'ok', output: u.output, truncated: u.truncated === true, endedAt: u.at, patch: u.patch ?? call.patch };
+}
+
+/**
+ * The page of history ahead of the blocks we hold. Only the conversation itself is taken from it:
+ * what was queued or titled back then says nothing about now. Tool results that were waiting
+ * for their call are joined to it here.
+ */
+export function applyEarlier(state: ReaderState, feed: ReaderFeed): ReaderState {
+  if (feed.key !== state.key) return state; // the record changed while the page was on its way
+  const page = applyFeed(emptyState(), {
+    ...feed,
+    reset: true,
+    updates: feed.updates.filter((u) => u.op !== 'queue' && u.op !== 'title'),
+  });
+  const held = new Set(state.blocks.map((b) => b.id));
+  const orphans = { ...state.orphans };
+  const older = page.blocks
+    .filter((b) => !held.has(b.id))
+    .map((b) => {
+      if (b.kind !== 'tool') return b;
+      const result = orphans[b.id];
+      if (!result) return b;
+      delete orphans[b.id];
+      return withResult(b, result);
+    });
+  return { ...state, blocks: [...older, ...state.blocks], earlier: feed.from > 0 ? feed.from : null, orphans: { ...page.orphans, ...orphans } };
 }
 
 /** The tools and edited files of the turn that is ending: everything since the last prompt or turn end. */

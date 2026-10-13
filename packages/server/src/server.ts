@@ -829,7 +829,8 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
   }
 
   // GET /api/sessions/:id/transcript?after=N&key=K — the session's conversation, for reader mode.
-  // `after`/`key` are the previous answer's `next`/`key`; leave them out on the first ask. Reading
+  // `after`/`key` are the previous answer's `next`/`key`; leave them out on the first ask. `before` (with `key`)
+  // asks for the lines ahead of an offset instead, the page of history above what is shown. Reading
   // a transcript changes nothing, so like /screen it is safe to poll. Parsing lives in reader/.
   const transcriptMatch = path.match(/^\/api\/sessions\/(\d+)\/transcript$/);
   if (transcriptMatch && req.method === 'GET') {
@@ -838,8 +839,10 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     const afterRaw = url.searchParams.get('after');
     const after = afterRaw !== null && /^\d+$/.test(afterRaw) ? parseInt(afterRaw, 10) : null;
     const key = url.searchParams.get('key');
+    const beforeRaw = url.searchParams.get('before');
+    const before = beforeRaw !== null && /^\d+$/.test(beforeRaw) ? parseInt(beforeRaw, 10) : null;
     manager.getMeta(id)
-      .then((meta) => readerFeed(meta, { after, key }))
+      .then((meta) => readerFeed(meta, { after, key, before }))
       .then((feed) => json(200, feed))
       .catch((e) => { log(`HTTP TRANSCRIPT session=${id} failed: ${String((e as Error).message ?? e)}`); json(500, { error: 'transcript read failed' }); });
     return true;

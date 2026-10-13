@@ -1,7 +1,7 @@
 import type { ReaderFeed } from '@ttym/protocol';
 import { agentKindOf } from '../agent-providers.js';
 import { claudeSource } from './claude.js';
-import { readNewLines } from './feed.js';
+import { readLinesBefore, readNewLines } from './feed.js';
 import type { TranscriptSource } from './source.js';
 
 /**
@@ -17,11 +17,13 @@ export interface ReaderRequest {
   after: number | null;
   /** The previous answer's `key`; a mismatch means the record changed under the client. */
   key: string | null;
+  /** Instead of what is new: the lines ahead of this offset (an earlier answer's `from`). */
+  before?: number | null;
 }
 
 export async function readerFeed(meta: Record<string, unknown>, req: ReaderRequest): Promise<ReaderFeed> {
   const agent = agentKindOf(meta);
-  const none = (supported: boolean): ReaderFeed => ({ agent, supported, key: null, next: 0, reset: true, updates: [] });
+  const none = (supported: boolean): ReaderFeed => ({ agent, supported, key: null, next: 0, reset: true, from: 0, updates: [] });
 
   if (!agent) return none(false);
   const source = SOURCES.find((s) => s.agent === agent);
@@ -33,8 +35,12 @@ export async function readerFeed(meta: Record<string, unknown>, req: ReaderReque
   // A different key is a different file: whatever offset the client holds is meaningless there.
   const after = req.key === found.key ? req.after : null;
   try {
+    if (req.before != null && req.key === found.key) {
+      const earlier = await readLinesBefore(found.path, req.before);
+      return { agent, supported: true, key: found.key, next: req.before, reset: false, from: earlier.start, updates: source.parse(earlier.lines) };
+    }
     const read = await readNewLines(found.path, after);
-    return { agent, supported: true, key: found.key, next: read.next, reset: read.reset, updates: source.parse(read.lines) };
+    return { agent, supported: true, key: found.key, next: read.next, reset: read.reset, from: read.start, updates: source.parse(read.lines) };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return none(true);
     throw e;

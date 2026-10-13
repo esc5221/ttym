@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '@ttym/api';
 import { API_BASE } from '../app-shared.js';
-import { applyFeed, emptyState, type ReaderState } from './model.js';
+import { applyEarlier, applyFeed, emptyState, type ReaderState } from './model.js';
 
 /**
  * Keeps a session's conversation current while reader mode is on.
@@ -11,6 +11,9 @@ import { applyFeed, emptyState, type ReaderState } from './model.js';
  * answer is only the new bytes, so a one-second poll is cheap; push can replace
  * it later without the page noticing. Polling pauses while the tab is hidden
  * and resumes the moment it is visible.
+ *
+ * The first answer holds only the end of the conversation; `loadEarlier` fetches
+ * the page of history above what is held, one page per call.
  */
 
 const DEFAULT_POLL_MS = 1000;
@@ -20,20 +23,31 @@ export interface TranscriptHook {
   state: ReaderState;
   /** The last request's failure, or null once one succeeds. */
   error: string | null;
+  /** Fetch the page of history above `state.blocks`; does nothing when there is none or one is already on its way. */
+  loadEarlier: () => void;
+  loadingEarlier: boolean;
 }
 
 export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFAULT_POLL_MS): TranscriptHook {
   const [state, setState] = useState<ReaderState>(emptyState);
   const [error, setError] = useState<string | null>(null);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  // The mirror lives in a ref so a slow answer is always applied on top of the newest state, never an older one.
+  const latest = useRef<ReaderState>(state);
+  const paging = useRef(false);
+
+  const commit = useCallback((next: ReaderState) => {
+    if (next === latest.current) return;
+    latest.current = next;
+    setState(next);
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    // The mirror lives here, not in a ref to React state, so a slow answer
-    // can never be applied on top of a newer one.
-    let current = emptyState();
-    setState(current);
+    latest.current = emptyState();
+    setState(latest.current);
 
     const schedule = (ms: number) => {
       if (!cancelled) timer = setTimeout(tick, ms);
@@ -42,10 +56,10 @@ export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFA
       if (document.hidden) { schedule(pollMs); return; }
       let wait = pollMs;
       try {
-        const feed = await api.getTranscript(API_BASE, sessionId, current.key !== null ? { after: current.next, key: current.key } : undefined);
+        const have = latest.current;
+        const feed = await api.getTranscript(API_BASE, sessionId, have.key !== null ? { after: have.next, key: have.key } : undefined);
         if (cancelled) return;
-        const next = applyFeed(current, feed);
-        if (next !== current) { current = next; setState(next); }
+        commit(applyFeed(latest.current, feed));
         setError(null);
       } catch (e) {
         if (cancelled) return;
@@ -65,7 +79,18 @@ export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFA
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [sessionId, enabled, pollMs]);
+  }, [sessionId, enabled, pollMs, commit]);
 
-  return { state, error };
+  const loadEarlier = useCallback(() => {
+    const have = latest.current;
+    if (paging.current || have.earlier === null || have.key === null) return;
+    paging.current = true;
+    setLoadingEarlier(true);
+    api.getTranscriptBefore(API_BASE, sessionId, have.earlier, have.key)
+      .then((feed) => { commit(applyEarlier(latest.current, feed)); setError(null); })
+      .catch((e) => setError(String((e as Error).message ?? e)))
+      .finally(() => { paging.current = false; setLoadingEarlier(false); });
+  }, [sessionId, commit]);
+
+  return { state, error, loadEarlier, loadingEarlier };
 }
