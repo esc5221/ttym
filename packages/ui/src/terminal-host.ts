@@ -337,6 +337,9 @@ export class TerminalHost {
       fontFamily: fontStack,
       theme: terminalTheme(),
       disableStdin: opts.mode === 'readonly',
+      // 터치 기기: xterm이 오른쪽에 두는 세로 스크롤바 14px은 안 보여도 폭을 차지하고(FitAddon이 그만큼 뺀다),
+      // 거기서 시작한 손가락은 본문 스크롤 대신 스크롤바 드래그가 된다. 0은 `||14`에 걸려 14로 돌아가므로 1.
+      ...(typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? { overviewRuler: { width: 1 } } : null),
     });
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
