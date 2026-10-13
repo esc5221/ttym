@@ -54,7 +54,7 @@ export function PaneBody(props: SessionBodyProps) {
   return (
     <div ref={stageRef} style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <SessionBody {...bodyProps} />
-      {on ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} columnMax={READER_COLUMN_PX} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+      {on ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} columnMax={READER_COLUMN_PX} fontSize={props.terminal.fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
     </div>
   );
 }

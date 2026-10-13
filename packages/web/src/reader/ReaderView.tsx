@@ -18,7 +18,7 @@ export type DockMode = 'native' | 'styled';
  * and the permission dialog) is the terminal itself showing through, so typing
  * and answering a prompt need nothing from this file.
  */
-export function ReaderView({ sid, state, error, working, layout, dockMode, columnMax, flow = false, onLoadEarlier, loadingEarlier = false }: {
+export function ReaderView({ sid, state, error, working, layout, dockMode, columnMax, flow = false, onLoadEarlier, loadingEarlier = false, fontSize, topInset }: {
   sid: number;
   state: ReaderState;
   error: string | null;
@@ -33,6 +33,10 @@ export function ReaderView({ sid, state, error, working, layout, dockMode, colum
   /** Fetch the page of history above what is shown (see `state.earlier`). */
   onLoadEarlier?: () => void;
   loadingEarlier?: boolean;
+  /** The terminal's font size in px; the page's text scales with it. */
+  fontSize?: number;
+  /** Space to keep clear above the first line (px), for something floating over the top of the page. */
+  topInset?: number;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
@@ -132,7 +136,15 @@ export function ReaderView({ sid, state, error, working, layout, dockMode, colum
 
   const queued = pendingMessages(state);
   const colW = layout ? Math.min(layout.widthPx, columnMax ?? Infinity) : 0;
-  const cssVars = layout ? ({ ['--rd-w' as string]: `${colW}px` } as React.CSSProperties) : null;
+  const cssVars = layout
+    ? ({
+        ['--rd-w' as string]: `${colW}px`,
+        // Measured from the terminal's own left edge, so text, tool rows and the input rows start at the same x.
+        ['--rd-left' as string]: `${layout.leftPx}px`,
+        ...(fontSize ? { ['--rd-fs' as string]: `${fontSize + 1}px`, ['--rd-term-fs' as string]: `${fontSize}px` } : null),
+        ...(topInset ? { ['--rd-top' as string]: `${topInset}px` } : null),
+      } as React.CSSProperties)
+    : null;
   const style = layout ? { bottom, ...cssVars } : ({ visibility: 'hidden' } as React.CSSProperties);
 
   return (

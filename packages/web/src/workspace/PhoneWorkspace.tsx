@@ -9,6 +9,8 @@ import { PaneTabs } from '../viewer/PaneTabs.js';
 import { SessionBody } from './SessionBody.js';
 import { ReaderView, type DockMode } from '../reader/ReaderView.js';
 import { useReader } from '../reader/useReader.js';
+import { ImmersiveChip } from './ImmersiveChip.js';
+import { setPhoneImmersive, usePhoneImmersive } from '../phone-immersive.js';
 import { paneView, useWorkspaceSessions } from './session-context.js';
 
 /**
@@ -199,6 +201,7 @@ function FocusView({
   const [readerPref, setReaderPref] = useState(() => readPhoneReader());
   const [dockMode, setDockMode] = useState<DockMode>(() => readPhoneReaderDock());
   const stageRef = useRef<HTMLDivElement>(null);
+  const immersive = usePhoneImmersive();
   const dead = deadSessions.has(sid);
   const agent = agentStates[sid];
   const readerOn = readerPref && onTerminal && !dead;
@@ -234,14 +237,14 @@ function FocusView({
   // 핀치로 폰트. 8~28로 물리고, 키울 때는 최소 행수도 지킨다 — borrow는 폰트가
   // 커진 만큼 행을 줄이므로 그냥 두면 터미널이 두세 줄만 남는다. 행높이는 폰트의
   // 1.08배로 잡았다(폰트 14에서 15.1px 실측).
-  usePinchZoom(bodyRef, (delta) => {
+  usePinchZoom(stageRef, (delta) => {
     const stepped = Math.min(28, Math.max(8, fontSize + delta));
     if (delta > 0) {
       const h = bodyRef.current?.clientHeight ?? 0;
       if (h > 0 && h / (stepped * 1.08) < MIN_ROWS) return;
     }
     onFontSize(stepped);
-  }, onTerminal && !readerOn);
+  }, onTerminal);
 
   const { transcript, dock, working } = useReader(sid, agent, stageRef, readerOn, 2000);
   const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
@@ -249,6 +252,7 @@ function FocusView({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      {immersive ? null : (
       <div style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', height: 30,
         flexShrink: 0, borderBottom: '1px solid var(--line)', background: 'var(--bg1)',
@@ -270,6 +274,7 @@ function FocusView({
           }}>{formatCwd(cwd)}</span>
         ) : null}
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <button onClick={() => setPhoneImmersive(true)} style={{ ...miniLinkBtnStyle, fontSize: 12 }} title="immersive: hide the bars">⤢</button>
           {readerOn ? (
             <button onClick={() => pickDock(dockMode === 'native' ? 'styled' : 'native')} style={{ ...miniLinkBtnStyle, fontSize: 10 }} title="bottom input area: the terminal’s own rows, or redrawn in the page’s style">{dockMode}</button>
           ) : null}
@@ -281,6 +286,7 @@ function FocusView({
           <button onClick={() => next !== undefined && onMove(next)} disabled={next === undefined} style={{ ...miniLinkBtnStyle, fontSize: 11, opacity: next === undefined ? 0.3 : 1 }}>›</button>
         </span>
       </div>
+      )}
 
       {view.state ? (
         // 파일 탭이 있을 때만 선다 — 데스크톱 pane 헤더의 탭 줄과 같은 물건이다.
@@ -311,7 +317,12 @@ function FocusView({
           브라우저가 "세로 팬은 내 몫"이라 여겨 xterm의 scrollback 스크롤이 죽는다
           (실측: viewportY가 baseY에서 한 칸도 안 움직였다). 뷰어가 덮일 때는 그 층이
           touchAction을 되돌린다(SessionBody). */}
-      <div ref={stageRef} style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative', paddingBottom: dead ? 0 : 'calc(38px + env(safe-area-inset-bottom))' }}>
+      <div ref={stageRef} style={{
+        flex: 1, minHeight: 0, display: 'flex', position: 'relative',
+        paddingBottom: dead ? 0 : 'calc(38px + env(safe-area-inset-bottom))',
+        // reader: the same gutter on both sides of the terminal and of the page, which are exactly as wide as each other
+        ...(readerOn ? { paddingLeft: 10, paddingRight: 10 } : null),
+      }}>
         <SessionBody
           ref={bodyRef}
           sid={sid}
@@ -324,8 +335,23 @@ function FocusView({
           // 손가락 하나에 스크롤이 두 번 걸린다. 빌려 쓰면 넘칠 것이 없다.
           terminal={{ fontSize, geometry: 'borrow', enableWebgl: false }}
         />
-        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} fontSize={fontSize} topInset={immersive ? 44 : undefined} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
       </div>
+
+      {immersive ? (
+        <ImmersiveChip
+          label={`${memberNames[sid] || `%${sid}`}${cwd ? ` · ${formatCwd(cwd)}` : ''}`}
+          position={`${at + 1}/${sessionIds.length}`}
+          onBack={onBack}
+          onPrev={prev !== undefined ? () => onMove(prev) : undefined}
+          onNext={next !== undefined ? () => onMove(next) : undefined}
+          reader={!dead && onTerminal ? readerOn : null}
+          onToggleReader={() => setReader(!readerPref)}
+          dock={readerOn ? dockMode : null}
+          onToggleDock={() => pickDock(dockMode === 'native' ? 'styled' : 'native')}
+          onExit={() => setPhoneImmersive(false)}
+        />
+      ) : null}
 
       {!dead ? <KeyBar sid={sid} onSearch={() => ctx.setSearch({ sid, query: '', index: -1, count: 0 })} /> : null}
     </div>

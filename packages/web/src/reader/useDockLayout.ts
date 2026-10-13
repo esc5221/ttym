@@ -18,6 +18,8 @@ import { contentRows, dockBusy, dockRowCount, dockView, type DockView } from './
  */
 export interface DockLayout {
   bottomPx: number;
+  /** Where the terminal's rows begin, from the stage's left edge: the page's column starts there so the two line up whatever sits around them. */
+  leftPx: number;
   /** Room between the terminal's last row and the stage's bottom edge (padding, a key bar); a styled dock stands above it. */
   insetPx: number;
   widthPx: number;
@@ -96,12 +98,13 @@ export function useDockLayout(
         bottomPx: Math.max(0, Math.round(box.bottom - bottomUnshifted + n * cellH)),
         insetPx: Math.max(0, Math.round(box.bottom - bottomUnshifted)),
         widthPx: Math.round(r.width),
+        leftPx: Math.max(0, Math.round(r.left - box.left)),
         cellW: r.width / term.cols,
         rows: n,
         view,
         busy: waiting ? null : dockBusy(agent, drawn, term.cols),
       };
-      setLayout((prev) => prev && prev.bottomPx === next.bottomPx && prev.insetPx === next.insetPx && prev.widthPx === next.widthPx && prev.rows === next.rows && prev.busy === next.busy && JSON.stringify(prev.view) === JSON.stringify(next.view) ? prev : next);
+      setLayout((prev) => prev && prev.bottomPx === next.bottomPx && prev.insetPx === next.insetPx && prev.leftPx === next.leftPx && prev.widthPx === next.widthPx && prev.rows === next.rows && prev.busy === next.busy && JSON.stringify(prev.view) === JSON.stringify(next.view) ? prev : next);
     };
     // Agents draw text and then move the cursor in separate writes; one more look once the output pauses catches the final caret.
     let settle: ReturnType<typeof setTimeout> | undefined;

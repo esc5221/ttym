@@ -12,6 +12,7 @@ import { MapPage } from './MapPage.js';
 import { SessionPeek } from './SessionPeek.js';
 import { SettingsModal } from './SettingsModal.js';
 import { WorkspacePage } from './workspace/WorkspacePage.js';
+import { usePhoneImmersive } from './phone-immersive.js';
 
 /** crypto.randomUUID fallback for non-secure contexts (HTTP over LAN) */
 function uuid(): string {
@@ -918,6 +919,9 @@ function App() {
   const [stripSlot, setStripSlot] = useState<HTMLSpanElement | null>(null);
   const appSurface = useSurface();
   const phone = appSurface === 'phone';
+  // 폰에서 한 pane이 화면 전체를 쓰는 모드: 탭 줄을 접는다. 숨기기만 한다 — 안의 slot에 포털로 붙는 것들이 남아 있어야 한다.
+  const immersivePref = usePhoneImmersive();
+  const immersive = phone && immersivePref && route.page === 'workspace' && route.pane != null;
   const visualH = useViewportHeight();
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
@@ -1482,7 +1486,7 @@ function App() {
       )}
       <div
         {...(IS_NATIVE ? { 'data-tauri-drag-region': true } : {})}
-        style={{ ...tabStripStyle, background: UI_STYLES[uiStyle].stripBg, borderBottom: UI_STYLES[uiStyle].stripLine, paddingLeft: IS_NATIVE ? 84 : 10 }}
+        style={{ ...tabStripStyle, background: UI_STYLES[uiStyle].stripBg, borderBottom: UI_STYLES[uiStyle].stripLine, paddingLeft: IS_NATIVE ? 84 : 10, ...(immersive ? { display: 'none' } : null) }}
       >
         <button
           onClick={() => navigate({ page: 'dashboard' })}
