@@ -666,10 +666,7 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
         )}
       </div>
       {touch && focusedSid !== null ? (
-        <KeyBar
-          sid={focusedSid}
-          onSearch={() => setSearch({ sid: focusedSid, query: '', index: -1, count: 0 })}
-        />
+        <KeyBar sid={focusedSid} />
       ) : null}
 
     </div>

@@ -4,7 +4,7 @@ import type { ReaderPatch } from '@ttym/api';
 import '../viewer/viewer.css';
 import './reader.css';
 import { cachedMarkdown, renderMarkdown } from './markdown.js';
-import { formatDuration, pendingMessages, turnStartedAt, type Block, type ReaderState } from './model.js';
+import { formatDuration, groupRuns, pendingMessages, turnStartedAt, type Block, type ReaderState } from './model.js';
 import { StyledDock } from './StyledDock.js';
 import type { DockLayout } from './useDockLayout.js';
 
@@ -176,6 +176,7 @@ export function ReaderView({ sid, state, error, working, layout, dockMode, colum
 }
 
 function Body({ state, error }: { state: ReaderState; error: string | null }) {
+  const narrow = useNarrow();
   if (state.supported === false) {
     return <div className="rd-empty">Reader mode isn’t available for this pane’s program yet. Switch back to the terminal.</div>;
   }
@@ -184,7 +185,9 @@ function Body({ state, error }: { state: ReaderState; error: string | null }) {
   return (
     <>
       {error ? <div className="rd-notice">Can’t refresh: {error}</div> : null}
-      {state.blocks.map((b) => <BlockView key={b.id} block={b} />)}
+      {groupRuns(state.blocks, narrow).map((g) => Array.isArray(g)
+        ? <ToolGroup key={g[0].id} tools={g} />
+        : <BlockView key={g.id} block={g} />)}
     </>
   );
 }
@@ -226,6 +229,41 @@ function Markdown({ text }: { text: string }) {
 }
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;
+
+const NARROW_QUERY = '(max-width: 640px)';
+
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW_QUERY);
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return narrow;
+}
+
+function ToolGroup({ tools }: { tools: ToolBlock[] }) {
+  const [pick, setPick] = useState<boolean | null>(null);
+  const live = tools.some((t) => t.status === 'running' || t.status === 'error');
+  const counts = new Map<string, number>();
+  for (const t of tools) counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
+  const summary = [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n)).join(', ');
+  const status = tools.some((t) => t.status === 'error') ? 'error' : tools.some((t) => t.status === 'running') ? 'running' : 'ok';
+  return (
+    <details className={`rd-tool rd-group rd-${status}`} open={pick ?? live} onToggle={(e) => {
+      const o = (e.currentTarget as HTMLDetailsElement).open;
+      if (o !== (pick ?? live)) setPick(o);
+    }}>
+      <summary>
+        <span className="rd-dot" aria-label={status} />
+        <span className="rd-tool-name">{tools.length} tool calls</span>
+        <span className="rd-tool-target">{summary}</span>
+      </summary>
+      <div className="rd-group-body">{tools.map((t) => <ToolRow key={t.id} tool={t} />)}</div>
+    </details>
+  );
+}
 
 function ToolRow({ tool: t }: { tool: ToolBlock }) {
   const hasBody = !!t.patch || !!t.output || !!t.input;

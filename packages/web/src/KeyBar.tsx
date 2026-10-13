@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getHost } from '@ttym/ui';
+import { setKeyBarHidden, useKeyBarHidden } from './phone-keybar.js';
 
 /**
  * 모바일 키바 — 소프트키보드가 낼 수 없는 키(Esc·Ctrl·Tab·화살표)를 주는
@@ -11,7 +12,8 @@ import { getHost } from '@ttym/ui';
  * 2. iOS에서 position:fixed; bottom:0은 키보드 위가 아니라 뒤에 깔린다 —
  *    visualViewport의 (offsetTop + height)를 top으로 잡고 -100% translate.
  */
-export function KeyBar({ sid, onSearch }: { sid: number; onSearch: () => void }) {
+export function KeyBar({ sid }: { sid: number }) {
+  const hidden = useKeyBarHidden();
   const ref = useRef<HTMLDivElement>(null);
   const [ctrl, setCtrl] = useState(false);
 
@@ -64,15 +66,35 @@ export function KeyBar({ sid, onSearch }: { sid: number; onSearch: () => void })
     try { host()?.sendText(await navigator.clipboard.readText()); } catch {}
   };
 
+  // The fold button sits where `find` used to; a little see-through so it does not read as one more key.
+  // Folded, the bar is gone and only that button stays, in the corner, to bring it back.
+  const fold = (
+    <button
+      key="fold"
+      onPointerDown={(e) => { e.preventDefault(); setKeyBarHidden(!hidden); }}
+      title={hidden ? 'show the keys' : 'hide the keys'}
+      aria-label={hidden ? 'show the keys' : 'hide the keys'}
+      style={{
+        ...(hidden
+          ? { width: 34, height: 34, borderRadius: 17, flex: '0 0 auto', marginRight: 4, border: '1px solid var(--line-strong)', background: 'color-mix(in srgb, var(--bg1) 70%, transparent)', backdropFilter: 'blur(6px)', pointerEvents: 'auto' as const }
+          : { flex: '1 1 0', minWidth: 0, height: 30, border: 'none', borderRadius: 5, background: 'var(--bg0)' }),
+        padding: 0, color: 'var(--text-soft)', opacity: 0.6, fontSize: 14, touchAction: 'manipulation',
+      }}
+    >⌨</button>
+  );
+
   return (
     <div
       ref={ref}
       style={{
         position: 'fixed', left: 0, right: 0, top: '100dvh', transform: 'translateY(-100%)',
-        zIndex: 40, display: 'flex', gap: 4, padding: '4px 6px calc(4px + env(safe-area-inset-bottom))',
-        background: 'var(--bg1)', borderTop: '1px solid var(--line)',
+        zIndex: 40, display: 'flex', gap: 4,
+        ...(hidden
+          ? { justifyContent: 'flex-end', padding: '0 6px calc(6px + env(safe-area-inset-bottom))', pointerEvents: 'none' as const }
+          : { padding: '4px 6px calc(4px + env(safe-area-inset-bottom))', background: 'var(--bg1)', borderTop: '1px solid var(--line)' }),
       }}
     >
+      {hidden ? fold : <>
       {key('esc', () => host()?.sendKey('esc'))}
       {key('tab', () => host()?.sendKey('tab'))}
       {key('ctrl', toggleCtrl, ctrl)}
@@ -82,7 +104,8 @@ export function KeyBar({ sid, onSearch }: { sid: number; onSearch: () => void })
       {key('→', () => host()?.sendKey('right'))}
       {key('⏎', () => host()?.sendKey('enter'))}
       {key('paste', () => void paste())}
-      {key('find', onSearch)}
+      {fold}
+      </>}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Terminal, getHost } from '@ttym/ui';
 import { formatCwd } from '@ttym/shared';
-import { AGENT_COLORS, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, readPhoneFontSize, stripBtnStyle, writePhoneFontSize, readPhoneReader, writePhoneReader, readPhoneReaderDock, writePhoneReaderDock } from '../app-shared.js';
+import { AGENT_COLORS, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, readPhoneFontSize, stripBtnStyle, writePhoneFontSize, readPhoneReaderDock, writePhoneReaderDock } from '../app-shared.js';
 import { KeyBar } from '../KeyBar.js';
 import { useSwipe } from '../useSwipe.js';
 import { usePinchZoom } from '../usePinchZoom.js';
@@ -10,6 +10,10 @@ import { SessionBody } from './SessionBody.js';
 import { ReaderView, type DockMode } from '../reader/ReaderView.js';
 import { useReader } from '../reader/useReader.js';
 import { ImmersiveChip } from './ImmersiveChip.js';
+import { PaneMenu } from './PaneMenu.js';
+import { paneReaderAvailable } from './PaneBody.js';
+import { setPaneReader, usePaneReader } from '../reader/paneReader.js';
+import { useKeyBarHidden } from '../phone-keybar.js';
 import { setPhoneImmersive, usePhoneImmersive } from '../phone-immersive.js';
 import { paneView, useWorkspaceSessions } from './session-context.js';
 
@@ -198,14 +202,25 @@ function FocusView({
   const view = paneView(ctx, sid, true);
   const onTerminal = view.item === null;
   // reader: 대화를 읽기 좋게 터미널 위에 덮는다. 폰은 이미 PTY를 폰 크기로 빌려 쓰므로 폭 맞춤은 필요 없다.
-  const [readerPref, setReaderPref] = useState(() => readPhoneReader());
   const [dockMode, setDockMode] = useState<DockMode>(() => readPhoneReaderDock());
   const stageRef = useRef<HTMLDivElement>(null);
   const immersive = usePhoneImmersive();
   const dead = deadSessions.has(sid);
   const agent = agentStates[sid];
-  const readerOn = readerPref && onTerminal && !dead;
-  const setReader = (on: boolean) => { setReaderPref(on); writePhoneReader(on); };
+  // reader is a choice per pane (the same one the grid uses), and only exists for panes whose program has a reader:
+  // a shell gets no switch and no "not available" screen, just its terminal.
+  const readerAvailable = paneReaderAvailable(agent?.kind, dead, false);
+  const readerPref = usePaneReader(sid);
+  const readerOn = readerPref && readerAvailable && onTerminal;
+  const setReader = (on: boolean) => setPaneReader(sid, on);
+  const keysHidden = useKeyBarHidden();
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: PointerEvent) => { if (!(e.target as HTMLElement | null)?.closest('[data-pane-menu]')) setMenuOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [menuOpen]);
   const pickDock = (m: DockMode) => { setDockMode(m); writePhoneReaderDock(m); };
   const at = sessionIds.indexOf(sid);
   const prev = at > 0 ? sessionIds[at - 1] : undefined;
@@ -249,13 +264,25 @@ function FocusView({
   const { transcript, dock, working } = useReader(sid, agent, stageRef, readerOn, 2000);
   const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
   const cwd = sessionCwds[sid];
+  const menuProps = {
+    label: `${memberNames[sid] || `%${sid}`}${cwd ? ` · ${formatCwd(cwd)}` : ''}`,
+    position: `${at + 1}/${sessionIds.length}`,
+    onBack,
+    onPrev: prev !== undefined ? () => onMove(prev) : undefined,
+    onNext: next !== undefined ? () => onMove(next) : undefined,
+    reader: readerAvailable && onTerminal ? readerOn : null,
+    onToggleReader: () => setReader(!readerPref),
+    dock: readerOn ? dockMode : null,
+    onToggleDock: () => pickDock(dockMode === 'native' ? 'styled' : 'native'),
+    onFind: () => ctx.setSearch({ sid, query: '', index: -1, count: 0 }),
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       {immersive ? null : (
       <div style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', height: 30,
-        flexShrink: 0, borderBottom: '1px solid var(--line)', background: 'var(--bg1)',
+        flexShrink: 0, borderBottom: '1px solid var(--line)', background: 'var(--bg1)', position: 'relative',
       }}>
         <button onClick={onBack} style={{ ...miniLinkBtnStyle, padding: '1px 5px 1px 0' }}>‹ list</button>
         {color ? (
@@ -273,18 +300,14 @@ function FocusView({
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{formatCwd(cwd)}</span>
         ) : null}
-        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          <button onClick={() => setPhoneImmersive(true)} style={{ ...miniLinkBtnStyle, fontSize: 12 }} title="immersive: hide the bars">⤢</button>
-          {readerOn ? (
-            <button onClick={() => pickDock(dockMode === 'native' ? 'styled' : 'native')} style={{ ...miniLinkBtnStyle, fontSize: 10 }} title="bottom input area: the terminal’s own rows, or redrawn in the page’s style">{dockMode}</button>
-          ) : null}
-          {!dead && onTerminal ? (
-            <button onClick={() => setReader(!readerPref)} style={{ ...miniLinkBtnStyle, fontSize: 11, ...(readerOn ? { color: 'var(--accent)' } : null) }} title="conversation, laid out to read">reader</button>
-          ) : null}
-          <button onClick={() => prev !== undefined && onMove(prev)} disabled={prev === undefined} style={{ ...miniLinkBtnStyle, fontSize: 11, opacity: prev === undefined ? 0.3 : 1 }}>‹</button>
-          <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)' }}>{at + 1}/{sessionIds.length}</span>
-          <button onClick={() => next !== undefined && onMove(next)} disabled={next === undefined} style={{ ...miniLinkBtnStyle, fontSize: 11, opacity: next === undefined ? 0.3 : 1 }}>›</button>
+        <span data-pane-menu style={{ marginLeft: 'auto', flexShrink: 0 }}>
+          <button onClick={() => setMenuOpen((v) => !v)} style={{ ...miniLinkBtnStyle, fontSize: 16, padding: '0 6px' }} aria-label="pane menu">⋯</button>
         </span>
+        {menuOpen ? (
+          <div data-pane-menu style={{ position: 'absolute', right: 6, top: 32, zIndex: 40 }}>
+            <PaneMenu {...menuProps} immersive={false} onToggleImmersive={() => setPhoneImmersive(true)} onClose={() => setMenuOpen(false)} />
+          </div>
+        ) : null}
       </div>
       )}
 
@@ -319,7 +342,7 @@ function FocusView({
           touchAction을 되돌린다(SessionBody). */}
       <div ref={stageRef} style={{
         flex: 1, minHeight: 0, display: 'flex', position: 'relative',
-        paddingBottom: dead ? 0 : 'calc(38px + env(safe-area-inset-bottom))',
+        paddingBottom: dead ? 0 : keysHidden ? 'env(safe-area-inset-bottom)' : 'calc(38px + env(safe-area-inset-bottom))',
         // reader: the same gutter on both sides of the terminal and of the page, which are exactly as wide as each other
         ...(readerOn ? { paddingLeft: 10, paddingRight: 10 } : null),
       }}>
@@ -339,21 +362,10 @@ function FocusView({
       </div>
 
       {immersive ? (
-        <ImmersiveChip
-          label={`${memberNames[sid] || `%${sid}`}${cwd ? ` · ${formatCwd(cwd)}` : ''}`}
-          position={`${at + 1}/${sessionIds.length}`}
-          onBack={onBack}
-          onPrev={prev !== undefined ? () => onMove(prev) : undefined}
-          onNext={next !== undefined ? () => onMove(next) : undefined}
-          reader={!dead && onTerminal ? readerOn : null}
-          onToggleReader={() => setReader(!readerPref)}
-          dock={readerOn ? dockMode : null}
-          onToggleDock={() => pickDock(dockMode === 'native' ? 'styled' : 'native')}
-          onExit={() => setPhoneImmersive(false)}
-        />
+        <ImmersiveChip {...menuProps} onExit={() => setPhoneImmersive(false)} />
       ) : null}
 
-      {!dead ? <KeyBar sid={sid} onSearch={() => ctx.setSearch({ sid, query: '', index: -1, count: 0 })} /> : null}
+      {!dead ? <KeyBar sid={sid} /> : null}
     </div>
   );
 }

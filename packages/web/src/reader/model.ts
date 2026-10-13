@@ -254,3 +254,22 @@ export function formatDuration(ms: number): string {
   if (m < 60) return `${m}m ${s % 60}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+
+/** On a phone a run of this many tool calls or more folds into one line. */
+const GROUP_MIN = 3;
+/** Consecutive tool calls become one array entry when `fold` is on and the run is long enough to be worth a line. */
+export function groupRuns(blocks: Block[], fold: boolean): (Block | Extract<Block, { kind: 'tool' }>[])[] {
+  if (!fold) return blocks;
+  const out: (Block | Extract<Block, { kind: 'tool' }>[])[] = [];
+  let run: Extract<Block, { kind: 'tool' }>[] = [];
+  const flush = () => {
+    if (run.length >= GROUP_MIN) out.push(run); else out.push(...run);
+    run = [];
+  };
+  for (const b of blocks) {
+    if (b.kind === 'tool') run.push(b); else { flush(); out.push(b); }
+  }
+  flush();
+  return out;
+}
+

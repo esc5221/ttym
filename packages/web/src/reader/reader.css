@@ -178,3 +178,9 @@
   color: var(--text-dim); font: 12px var(--mono, monospace);
 }
 .rd-earlier:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); }
+
+.rd-group-body { margin: 2px 0 4px 10px; }
+@media (max-width: 640px) {
+  .rd-turn-end { font-size: var(--rd-s12); opacity: .7; }
+  .rd-tool-body { margin-left: 8px; }
+}
