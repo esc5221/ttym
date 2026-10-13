@@ -1,7 +1,7 @@
 import { useEffect, useState, type RefObject } from 'react';
 import { getHost } from '@ttym/ui';
 import type { ReaderAgent } from '@ttym/api';
-import { contentRows, dockRowCount, dockView, type DockView } from './dock.js';
+import { contentRows, dockBusy, dockRowCount, dockView, type DockView } from './dock.js';
 
 /**
  * Where the page ends and the real terminal shows through.
@@ -18,12 +18,16 @@ import { contentRows, dockRowCount, dockView, type DockView } from './dock.js';
  */
 export interface DockLayout {
   bottomPx: number;
+  /** Room between the terminal's last row and the stage's bottom edge (padding, a key bar); a styled dock stands above it. */
+  insetPx: number;
   widthPx: number;
   /** One terminal cell, for choosing a column count that gives a wanted pixel width. */
   cellW: number;
   rows: number;
   /** The input area read as data, for drawing it in the page's style; null if the agent's layout isn't recognised. */
   view: DockView | null;
+  /** Whether the screen says a turn is running; null when it can't tell (or while the agent is waiting on a dialog). */
+  busy: boolean | null;
 }
 
 const HOST_RETRY_MS = 250;
@@ -69,12 +73,14 @@ export function useDockLayout(
       if (nextShift !== shift) { shift = nextShift; host.wrapper.style.transform = shift ? `translateY(${shift}px)` : ''; }
       const next: DockLayout = {
         bottomPx: Math.max(0, Math.round(box.bottom - bottomUnshifted + n * cellH)),
+        insetPx: Math.max(0, Math.round(box.bottom - bottomUnshifted)),
         widthPx: Math.round(r.width),
         cellW: r.width / term.cols,
         rows: n,
         view,
+        busy: waiting ? null : dockBusy(agent, drawn, term.cols),
       };
-      setLayout((prev) => prev && prev.bottomPx === next.bottomPx && prev.widthPx === next.widthPx && prev.rows === next.rows && JSON.stringify(prev.view) === JSON.stringify(next.view) ? prev : next);
+      setLayout((prev) => prev && prev.bottomPx === next.bottomPx && prev.insetPx === next.insetPx && prev.widthPx === next.widthPx && prev.rows === next.rows && prev.busy === next.busy && JSON.stringify(prev.view) === JSON.stringify(next.view) ? prev : next);
     };
     // Agents draw text and then move the cursor in separate writes; one more look once the output pauses catches the final caret.
     let settle: ReturnType<typeof setTimeout> | undefined;

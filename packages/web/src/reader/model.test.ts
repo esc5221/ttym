@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ReaderFeed, ReaderUpdate } from '@ttym/api';
-import { MAX_BLOCKS, applyFeed, emptyState, formatDuration, pendingMessages, turnStartedAt } from './model.js';
+import { MAX_BLOCKS, applyFeed, emptyState, formatDuration, interrupted, pendingMessages, turnStartedAt } from './model.js';
 
 const feed = (updates: ReaderUpdate[], over: Partial<ReaderFeed> = {}): ReaderFeed =>
   ({ agent: 'claude-code', supported: true, key: 'k1', next: 100, reset: true, updates, ...over });
@@ -85,6 +85,24 @@ describe('applyFeed', () => {
       expect(turnStartedAt(done)).toBeNull();
       const running = applyFeed(done, feed([user('u2', 9), tool('t', 10)], { reset: false }));
       expect(turnStartedAt(running)).toBe(9);
+    });
+  });
+
+  describe('interruption', () => {
+    const stop: ReaderUpdate = { op: 'notice', id: 'n1', at: 20, text: 'Request interrupted by user', endsTurn: true };
+
+    it('says the turn is over until something new is sent', () => {
+      const cut = applyFeed(emptyState(), feed([user('u1', 10), tool('t1', 11), stop]));
+      expect(interrupted(cut)).toBe(true);
+      expect(turnStartedAt(cut)).toBeNull();
+      const again = applyFeed(cut, feed([user('u2', 30)], { reset: false }));
+      expect(interrupted(again)).toBe(false);
+      expect(turnStartedAt(again)).toBe(30);
+    });
+
+    it('does not count an ordinary notice as an interruption', () => {
+      const s = applyFeed(emptyState(), feed([user('u1', 10), { op: 'notice', id: 'n2', at: 12, text: 'Task finished' }]));
+      expect(interrupted(s)).toBe(false);
     });
   });
 

@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Terminal, getHost } from '@ttym/ui';
 import { formatCwd } from '@ttym/shared';
-import { AGENT_COLORS, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, readPhoneFontSize, stripBtnStyle, writePhoneFontSize } from '../app-shared.js';
+import { AGENT_COLORS, actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, readPhoneFontSize, stripBtnStyle, writePhoneFontSize, readPhoneReader, writePhoneReader, readPhoneReaderDock, writePhoneReaderDock } from '../app-shared.js';
 import { KeyBar } from '../KeyBar.js';
 import { useSwipe } from '../useSwipe.js';
 import { usePinchZoom } from '../usePinchZoom.js';
 import { PaneTabs } from '../viewer/PaneTabs.js';
 import { SessionBody } from './SessionBody.js';
+import { ReaderView, type DockMode } from '../reader/ReaderView.js';
+import { useReader } from '../reader/useReader.js';
 import { paneView, useWorkspaceSessions } from './session-context.js';
 
 /**
@@ -193,6 +195,15 @@ function FocusView({
   // 켜 두면 문서를 스크롤하는 손가락이 뒤의 터미널 scrollback을 같이 굴린다.
   const view = paneView(ctx, sid, true);
   const onTerminal = view.item === null;
+  // reader: 대화를 읽기 좋게 터미널 위에 덮는다. 폰은 이미 PTY를 폰 크기로 빌려 쓰므로 폭 맞춤은 필요 없다.
+  const [readerPref, setReaderPref] = useState(() => readPhoneReader());
+  const [dockMode, setDockMode] = useState<DockMode>(() => readPhoneReaderDock());
+  const stageRef = useRef<HTMLDivElement>(null);
+  const dead = deadSessions.has(sid);
+  const agent = agentStates[sid];
+  const readerOn = readerPref && onTerminal && !dead;
+  const setReader = (on: boolean) => { setReaderPref(on); writePhoneReader(on); };
+  const pickDock = (m: DockMode) => { setDockMode(m); writePhoneReaderDock(m); };
   const at = sessionIds.indexOf(sid);
   const prev = at > 0 ? sessionIds[at - 1] : undefined;
   const next = at < sessionIds.length - 1 ? sessionIds[at + 1] : undefined;
@@ -209,7 +220,7 @@ function FocusView({
     onScrollStart: () => { scrollAnchor.current = getHost(sid)?.term.buffer.active.viewportY ?? 0; },
     // 실제로 움직였는지 돌려준다. 맨 위·맨 아래에 닿으면 false가 되고,
     // 그때 관성이 선다 — 안 그러면 경계에서 rAF가 계속 헛돈다.
-    onScrollTo: (delta) => {
+    onScrollTo: readerOn ? undefined : (delta) => {
       const h = getHost(sid);
       if (!h) return false;
       const before = h.term.buffer.active.viewportY;
@@ -230,10 +241,9 @@ function FocusView({
       if (h > 0 && h / (stepped * 1.08) < MIN_ROWS) return;
     }
     onFontSize(stepped);
-  }, onTerminal);
+  }, onTerminal && !readerOn);
 
-  const dead = deadSessions.has(sid);
-  const agent = agentStates[sid];
+  const { transcript, dock, working } = useReader(sid, agent, stageRef, readerOn, 2000);
   const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
   const cwd = sessionCwds[sid];
 
@@ -260,6 +270,12 @@ function FocusView({
           }}>{formatCwd(cwd)}</span>
         ) : null}
         <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {readerOn ? (
+            <button onClick={() => pickDock(dockMode === 'native' ? 'styled' : 'native')} style={{ ...miniLinkBtnStyle, fontSize: 10 }} title="bottom input area: the terminal’s own rows, or redrawn in the page’s style">{dockMode}</button>
+          ) : null}
+          {!dead && onTerminal ? (
+            <button onClick={() => setReader(!readerPref)} style={{ ...miniLinkBtnStyle, fontSize: 11, ...(readerOn ? { color: 'var(--accent)' } : null) }} title="conversation, laid out to read">reader</button>
+          ) : null}
           <button onClick={() => prev !== undefined && onMove(prev)} disabled={prev === undefined} style={{ ...miniLinkBtnStyle, fontSize: 11, opacity: prev === undefined ? 0.3 : 1 }}>‹</button>
           <span style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)' }}>{at + 1}/{sessionIds.length}</span>
           <button onClick={() => next !== undefined && onMove(next)} disabled={next === undefined} style={{ ...miniLinkBtnStyle, fontSize: 11, opacity: next === undefined ? 0.3 : 1 }}>›</button>
@@ -295,7 +311,7 @@ function FocusView({
           브라우저가 "세로 팬은 내 몫"이라 여겨 xterm의 scrollback 스크롤이 죽는다
           (실측: viewportY가 baseY에서 한 칸도 안 움직였다). 뷰어가 덮일 때는 그 층이
           touchAction을 되돌린다(SessionBody). */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', paddingBottom: dead ? 0 : 'calc(38px + env(safe-area-inset-bottom))' }}>
+      <div ref={stageRef} style={{ flex: 1, minHeight: 0, display: 'flex', position: 'relative', paddingBottom: dead ? 0 : 'calc(38px + env(safe-area-inset-bottom))' }}>
         <SessionBody
           ref={bodyRef}
           sid={sid}
@@ -308,6 +324,7 @@ function FocusView({
           // 손가락 하나에 스크롤이 두 번 걸린다. 빌려 쓰면 넘칠 것이 없다.
           terminal={{ fontSize, geometry: 'borrow', enableWebgl: false }}
         />
+        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} /> : null}
       </div>
 
       {!dead ? <KeyBar sid={sid} onSearch={() => ctx.setSearch({ sid, query: '', index: -1, count: 0 })} /> : null}

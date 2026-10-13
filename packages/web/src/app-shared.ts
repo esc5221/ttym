@@ -296,6 +296,26 @@ export function writeZenReaderDock(mode: 'native' | 'styled'): void {
   } catch {}
 }
 
+/** 폰의 reader 모드와 아래 입력 영역 방식. zen과 따로 기억한다. */
+export const PHONE_READER_STORAGE_KEY = 'ttym-phone-reader';
+export const PHONE_READER_DOCK_STORAGE_KEY = 'ttym-phone-reader-dock';
+
+export function readPhoneReader(): boolean {
+  try { return localStorage.getItem(PHONE_READER_STORAGE_KEY) === '1'; } catch { return false; }
+}
+
+export function writePhoneReader(on: boolean): void {
+  try { if (on) localStorage.setItem(PHONE_READER_STORAGE_KEY, '1'); else localStorage.removeItem(PHONE_READER_STORAGE_KEY); } catch {}
+}
+
+export function readPhoneReaderDock(): 'native' | 'styled' {
+  try { return localStorage.getItem(PHONE_READER_DOCK_STORAGE_KEY) === 'styled' ? 'styled' : 'native'; } catch { return 'native'; }
+}
+
+export function writePhoneReaderDock(mode: 'native' | 'styled'): void {
+  try { if (mode === 'styled') localStorage.setItem(PHONE_READER_DOCK_STORAGE_KEY, mode); else localStorage.removeItem(PHONE_READER_DOCK_STORAGE_KEY); } catch {}
+}
+
 export function readZenReader(): boolean {
   try { return localStorage.getItem(ZEN_READER_STORAGE_KEY) === '1'; } catch { return false; }
 }

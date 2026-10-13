@@ -1,7 +1,7 @@
 /* Reader mode: the conversation drawn like Claude's web apps (layout and rhythm only; colours come from the app's tokens). */
 
 .rd-root { position: absolute; top: 0; left: 0; right: 0; background: var(--bg0); z-index: 2; min-height: 0; }
-.rd-scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; }
+.rd-scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
 .rd-col {
   width: var(--rd-w, 768px); max-width: 100%; margin: 0 auto; box-sizing: border-box;
   padding: 32px 0 20px; color: var(--text); font: 15px/24px var(--sans, system-ui, -apple-system, 'Segoe UI', sans-serif);
@@ -27,9 +27,10 @@
 .rd-md ul, .rd-md ol { padding-left: 24px; }
 .rd-md li { margin: 4px 0; }
 .rd-md li > p { margin: 4px 0; }
-.rd-md h1, .rd-md h2 { font-size: 22px; line-height: 30px; font-weight: 600; margin: 30px 0 8px; }
-.rd-md h3 { font-size: 18px; line-height: 26px; font-weight: 600; margin: 24px 0 8px; }
-.rd-md h4, .rd-md h5, .rd-md h6 { font-size: 15px; font-weight: 600; margin: 20px 0 6px; }
+/* headings stay close to the 15px body: a reply is a chat message, not a document */
+.rd-md h1, .rd-md h2 { font-size: 18px; line-height: 26px; font-weight: 600; margin: 24px 0 6px; }
+.rd-md h3 { font-size: 16px; line-height: 24px; font-weight: 600; margin: 20px 0 4px; }
+.rd-md h4, .rd-md h5, .rd-md h6 { font-size: 15px; line-height: 24px; font-weight: 600; margin: 16px 0 4px; }
 .rd-md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .rd-md hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 .rd-md blockquote { padding-left: 14px; border-left: 2px solid var(--line-strong); color: var(--text-soft); }
@@ -100,7 +101,7 @@
   opacity: 0; transition: opacity .15s ease; pointer-events: none;
 }
 .rd-hint.near { opacity: 1; }
-@media (hover: none) { .rd-hint { opacity: 1; } }
+@media (hover: none) { .rd-hint { display: none; } }
 
 /* styled copy of the input area: stands on the terminal rows it copies, same column as the page */
 .rd-dock {
@@ -151,3 +152,12 @@
 .rd-scroll:hover, .rd-md pre:hover, .rd-md table:hover, .rd-pre:hover, .rd-diff:hover, .rd-approval:hover {
   scrollbar-color: color-mix(in srgb, var(--text-dim) 55%, transparent) transparent;
 }
+
+/* touch screens: option buttons big enough for a finger */
+@media (pointer: coarse) {
+  .rd-opt { min-height: 40px; align-items: center; }
+  .rd-approval { padding: 12px; }
+}
+
+/* text an input method is still composing, drawn at the caret */
+.rd-ime { text-decoration: underline; text-underline-offset: 3px; }

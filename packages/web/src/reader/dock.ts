@@ -42,6 +42,12 @@ export interface DockProfile {
    * in which case the page shows the real rows instead. `caret` is relative to `rows`.
    */
   view?(rows: ScreenRows, caret: { x: number; y: number } | null, waiting: boolean): DockView | null;
+  /**
+   * Whether the screen says the agent is mid-turn, or null when it can't tell.
+   * The agent's own "active" flag is set by a hook and cleared by another; a turn that ends
+   * some other way (the person pressed Esc before the first token) never clears it.
+   */
+  busy?(rows: ScreenRows, cols: number): boolean | null;
 }
 
 /** Rows to leave uncovered when the screen can't be read. */
@@ -71,6 +77,12 @@ const isBoxTop = (row: string): boolean => /^\s*[╭┌]/.test(row);
  * from the bottom is the top.
  */
 const claude: DockProfile = {
+  // Claude Code prints "esc to interrupt" in its spinner and status rows for exactly as long as a turn runs.
+  // On a narrow screen those rows are cut short and the phrase may be gone, so it proves nothing there.
+  busy(rows, cols) {
+    if (cols < 70) return null;
+    return rows.slice(-8).some((r) => /esc to interr/i.test(r));
+  },
   view: (rows, caret, waiting) => claudeView(rows, caret, waiting), // defined below
   top(rows, waiting) {
     const rules: number[] = [];
@@ -159,4 +171,10 @@ export function dockRowCount(agent: ReaderAgent | null, rows: ScreenRows, waitin
 export function dockView(agent: ReaderAgent | null, rows: ScreenRows, caret: { x: number; y: number } | null, waiting: boolean): DockView | null {
   const profile = agent ? PROFILES[agent] : undefined;
   return profile?.view?.(rows, caret, waiting) ?? null;
+}
+
+/** Whether the agent is mid-turn according to what is on screen; null when this agent's screen can't say. Pass `contentRows(...)`. */
+export function dockBusy(agent: ReaderAgent | null, rows: ScreenRows, cols: number): boolean | null {
+  const profile = agent ? PROFILES[agent] : undefined;
+  return profile?.busy?.(rows, cols) ?? null;
 }

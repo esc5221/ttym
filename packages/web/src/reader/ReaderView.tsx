@@ -48,6 +48,8 @@ export function ReaderView({ sid, state, error, working, layout, dockMode }: {
 
   // A click that selects nothing hands the keyboard back to the terminal, so typing never needs a click on the dock.
   const refocus = () => {
+    // On a touch screen a tap would raise the keyboard every time someone touches the text to scroll.
+    if (window.matchMedia('(pointer: coarse)').matches) return;
     if (window.getSelection()?.isCollapsed !== false) getHost(sid)?.focusTerminal();
   };
 
@@ -63,7 +65,7 @@ export function ReaderView({ sid, state, error, working, layout, dockMode }: {
     setDockH(el.offsetHeight);
     return () => ro.disconnect();
   }, [view !== null]);
-  const bottom = layout ? (view ? Math.max(dockH, layout.bottomPx) : layout.bottomPx) : 0;
+  const bottom = layout ? (view ? Math.max(layout.insetPx + dockH, layout.bottomPx) : layout.bottomPx) : 0;
 
   // The caption names what the bottom rows are; it shows while the pointer is near them.
   const root = useRef<HTMLDivElement>(null);
@@ -101,7 +103,7 @@ export function ReaderView({ sid, state, error, working, layout, dockMode }: {
       </div>
     </div>
     {view && layout ? (
-      <div className="rd-dock" ref={dockEl} style={{ minHeight: layout.bottomPx, ...cssVars }}>
+      <div className="rd-dock" ref={dockEl} style={{ bottom: layout.insetPx, minHeight: layout.bottomPx - layout.insetPx, ...cssVars }}>
         <StyledDock sid={sid} view={view} />
       </div>
     ) : null}

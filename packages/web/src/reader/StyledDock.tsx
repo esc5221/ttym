@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { getHost } from '@ttym/ui';
 import type { DockView } from './dock.js';
 
@@ -9,8 +10,28 @@ import type { DockView } from './dock.js';
  * a dialog option sends that option's number to it, the same key the agent
  * itself accepts.
  */
+/**
+ * The text an input method is still composing (a Hangul syllable not yet
+ * committed). It lives in the terminal's hidden textarea, which this dock covers,
+ * so the dock draws it itself at the caret.
+ */
+function useComposition(sid: number): string {
+  const [text, setText] = useState('');
+  useEffect(() => {
+    const area = getHost(sid)?.term.textarea;
+    if (!area) return;
+    const update = (e: CompositionEvent) => setText(e.data ?? '');
+    const end = () => setText('');
+    area.addEventListener('compositionupdate', update);
+    area.addEventListener('compositionend', end);
+    return () => { area.removeEventListener('compositionupdate', update); area.removeEventListener('compositionend', end); };
+  }, [sid]);
+  return text;
+}
+
 export function StyledDock({ sid, view }: { sid: number; view: DockView }) {
   const focusTerminal = () => getHost(sid)?.focusTerminal();
+  const composing = useComposition(sid);
   if (view.kind === 'dialog') {
     const choose = (n: number) => { getHost(sid)?.term.input(String(n)); focusTerminal(); };
     return (
@@ -33,7 +54,7 @@ export function StyledDock({ sid, view }: { sid: number; view: DockView }) {
         {view.lines.map((line, i) => (
           <div key={i} className="rd-crow">
             <span className="rd-pm">{i === 0 ? '❯' : ' '}</span>
-            <span className="rd-ctext">{view.caret?.line === i ? <WithCaret text={line} col={view.caret.col} /> : line || ' '}</span>
+            <span className="rd-ctext">{view.caret?.line === i ? <WithCaret text={line} col={view.caret.col} composing={composing} /> : line || ' '}</span>
           </div>
         ))}
       </div>
@@ -52,7 +73,7 @@ const cellWidth = (ch: string): number => {
     || (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x1f300 && c <= 0x1faff) ? 2 : 1;
 };
 
-function WithCaret({ text, col }: { text: string; col: number }) {
+function WithCaret({ text, col, composing }: { text: string; col: number; composing: string }) {
   let used = 0;
   let at = 0;
   const chars = Array.from(text);
@@ -61,6 +82,9 @@ function WithCaret({ text, col }: { text: string; col: number }) {
   return (
     <>
       {chars.slice(0, at).join('')}
+      {/* the terminal row ends where the text does, so spaces typed at the end only show in the caret's column */}
+      {at >= chars.length && used < col ? ' '.repeat(col - used) : null}
+      {composing ? <span className="rd-ime">{composing}</span> : null}
       <span className="rd-caret">{under ?? ' '}</span>
       {chars.slice(at + 1).join('')}
     </>

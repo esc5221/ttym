@@ -14,7 +14,7 @@ export type Block =
   | { kind: 'user'; id: string; at: number; text: string; images: number }
   | { kind: 'text'; id: string; at: number; text: string }
   | { kind: 'thinking'; id: string; at: number; text: string }
-  | { kind: 'notice'; id: string; at: number; text: string }
+  | { kind: 'notice'; id: string; at: number; text: string; endsTurn: boolean }
   | { kind: 'boundary'; id: string; at: number; label: string }
   | {
       kind: 'tool'; id: string; at: number; name: string; target: string; input: string;
@@ -64,7 +64,7 @@ export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
       case 'user': add({ kind: 'user', id: u.id, at: u.at, text: u.text, images: u.images ?? 0 }); break;
       case 'text': add({ kind: 'text', id: u.id, at: u.at, text: u.text }); break;
       case 'thinking': add({ kind: 'thinking', id: u.id, at: u.at, text: u.text }); break;
-      case 'notice': add({ kind: 'notice', id: u.id, at: u.at, text: u.text }); break;
+      case 'notice': add({ kind: 'notice', id: u.id, at: u.at, text: u.text, endsTurn: u.endsTurn === true }); break;
       case 'boundary': add({ kind: 'boundary', id: u.id, at: u.at, label: u.label }); break;
       case 'tool':
         add({ kind: 'tool', id: u.id, at: u.at, name: u.name, target: u.target, input: u.input, status: 'running', output: '', truncated: false, ...(u.patch ? { patch: u.patch } : {}) });
@@ -124,10 +124,20 @@ export function pendingMessages(state: ReaderState): string[] {
 export function turnStartedAt(state: ReaderState): number | null {
   for (let i = state.blocks.length - 1; i >= 0; i--) {
     const b = state.blocks[i];
-    if (b.kind === 'turn-end') return null;
+    if (b.kind === 'turn-end' || (b.kind === 'notice' && b.endsTurn)) return null;
     if (b.kind === 'user' || b.kind === 'notice') return b.at || null;
   }
   return null;
+}
+
+/**
+ * The turn was cut short and nothing has been sent since. An interrupted turn
+ * gets no normal end signal, so an agent's "active" flag can stay on for a long
+ * time after it; the transcript is what says it is over.
+ */
+export function interrupted(state: ReaderState): boolean {
+  const last = state.blocks[state.blocks.length - 1];
+  return last?.kind === 'notice' && last.endsTurn;
 }
 
 export function formatDuration(ms: number): string {

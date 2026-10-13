@@ -5,8 +5,7 @@ import { beginDragGuard, getHost } from '@ttym/ui';
 import { readZenFontDelta, writeZenFontDelta, readZenCols, writeZenCols, readZenReader, writeZenReader, readZenReaderDock, writeZenReaderDock, READER_COLUMN_PX, ZEN_DEFAULT_COLS, ZEN_COLS_MIN, ZEN_COLS_MAX, miniLinkBtnStyle, type AgentState } from '../app-shared.js';
 import { SessionBody } from './SessionBody.js';
 import { ReaderView, type DockMode } from '../reader/ReaderView.js';
-import { useTranscript } from '../reader/useTranscript.js';
-import { useDockLayout } from '../reader/useDockLayout.js';
+import { useReader } from '../reader/useReader.js';
 
 /** zen 읽기 모드 — 크롬을 전부 걷고 한 pane만 고정 폭으로 크게 읽는다.
  *
@@ -70,9 +69,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
   const [dockMode, setDockMode] = useState<DockMode>(() => readZenReaderDock());
   const pickDock = (m: DockMode) => { setDockMode(m); writeZenReaderDock(m); };
   const stageRef = useRef<HTMLDivElement>(null);
-  const transcript = useTranscript(sid, readerOn);
-  const readerAgent = transcript.state.agent ?? agent?.kind ?? null;
-  const dock = useDockLayout(stageRef, sid, readerAgent, !!agent?.waiting, readerOn);
+  const { transcript, dock, working } = useReader(sid, agent, stageRef, readerOn);
   // 본문 폭을 px로 맞춘다 — 글자 폭을 알아야 cols가 나와서, 첫 측정 전에는 기존 cols를 쓴다.
   const fixedCols = split ? undefined : readerOn && dock ? Math.max(ZEN_COLS_MIN, Math.floor(READER_COLUMN_PX / dock.cellW)) : cols;
   const setReader = (on: boolean) => { setReaderPref(on); writeZenReader(on); };
@@ -164,7 +161,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
             wrapStyle={split ? { display: 'flex' } : { display: 'flex', justifyContent: 'center' }}
           />
         </div>
-        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={!!agent?.active} layout={dock} dockMode={dockMode} /> : null}
+        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} /> : null}
         {split ? (
           <>
             <div className="viewer-splitter col" onPointerDown={startSideDrag} title="drag to resize" />

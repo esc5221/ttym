@@ -13,7 +13,7 @@ import { applyFeed, emptyState, type ReaderState } from './model.js';
  * and resumes the moment it is visible.
  */
 
-const POLL_MS = 1000;
+const DEFAULT_POLL_MS = 1000;
 const RETRY_MS = 3000;
 
 export interface TranscriptHook {
@@ -22,7 +22,7 @@ export interface TranscriptHook {
   error: string | null;
 }
 
-export function useTranscript(sessionId: number, enabled: boolean): TranscriptHook {
+export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFAULT_POLL_MS): TranscriptHook {
   const [state, setState] = useState<ReaderState>(emptyState);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,8 +39,8 @@ export function useTranscript(sessionId: number, enabled: boolean): TranscriptHo
       if (!cancelled) timer = setTimeout(tick, ms);
     };
     const tick = async () => {
-      if (document.hidden) { schedule(POLL_MS); return; }
-      let wait = POLL_MS;
+      if (document.hidden) { schedule(pollMs); return; }
+      let wait = pollMs;
       try {
         const feed = await api.getTranscript(API_BASE, sessionId, current.key !== null ? { after: current.next, key: current.key } : undefined);
         if (cancelled) return;
@@ -65,7 +65,7 @@ export function useTranscript(sessionId: number, enabled: boolean): TranscriptHo
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [sessionId, enabled]);
+  }, [sessionId, enabled, pollMs]);
 
   return { state, error };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FALLBACK_DOCK_ROWS, contentRows, dockRowCount, dockView } from './dock.js';
+import { FALLBACK_DOCK_ROWS, contentRows, dockBusy, dockRowCount, dockView } from './dock.js';
 
 const RULE = '─'.repeat(100);
 /** A 20-row screen: some output, then the given bottom rows. */
@@ -92,5 +92,20 @@ describe('dockView · claude-code', () => {
   it('gives up on a dialog with no numbered options, and on agents without a reader', () => {
     expect(dockView('claude-code', [RULE, ' something else', ' entirely'], null, true)).toBeNull();
     expect(dockView('codex', [RULE, '❯ ', RULE], null, false)).toBeNull();
+  });
+});
+
+describe('dockBusy · claude-code', () => {
+  const idle = [...Array(10).fill('output'), '✻ Cooked for 4s · done', RULE, '❯ ', RULE, '  ⏵⏵ bypass permissions on · 1 shell'];
+  const running = [...Array(10).fill('output'), '✻ Brewing… (4s · esc to interrupt)', RULE, '❯ ', RULE, '  ⏵⏵ bypass permissions on · esc to interrupt'];
+
+  it('reads "esc to interrupt" as a running turn and its absence as an idle one', () => {
+    expect(dockBusy('claude-code', running, 100)).toBe(true);
+    expect(dockBusy('claude-code', idle, 100)).toBe(false);
+  });
+
+  it('does not guess on a narrow screen, or for an agent it has no profile for', () => {
+    expect(dockBusy('claude-code', idle, 44)).toBeNull();
+    expect(dockBusy('codex', running, 100)).toBeNull();
   });
 });
