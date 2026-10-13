@@ -173,6 +173,7 @@ export function payloadText(payload: Uint8Array): string {
 export { isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch } from './meta.js';
 export type { ViewKind, ViewRenderer, ViewPresentation, ViewItem, ViewOpenRequest, ViewerState, ViewChangeEvent } from './viewer.js';
 export { VIEW_MAX_TABS } from './viewer.js';
+export type { ReaderAgent, ReaderPatch, ReaderHunk, ReaderPatchLine, ReaderUpdate, ReaderFeed } from './reader.js';
 export { dedupeFlags } from './resume-args.js';
 
 /** 화면 아래쪽 몇 줄을 색과 함께 — 호버 미리보기용 (`GET /api/sessions/:id/screen?format=tail`).

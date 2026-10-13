@@ -9,6 +9,7 @@ import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import headless from '@xterm/headless';
 import { screenTail } from './screen-tail.js';
+import { readerFeed } from './reader/index.js';
 import { readTurn, renderFull, renderOutline } from './agent-turn.js';
 import { InteractionStore, turnRange, type StopReport } from './interaction.js';
 import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
@@ -824,6 +825,23 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       return true;
     }
     json(200, { screen: frozen ? frozen.snapshot : session.snapshot(), ...sleepInfo });
+    return true;
+  }
+
+  // GET /api/sessions/:id/transcript?after=N&key=K — the session's conversation, for reader mode.
+  // `after`/`key` are the previous answer's `next`/`key`; leave them out on the first ask. Reading
+  // a transcript changes nothing, so like /screen it is safe to poll. Parsing lives in reader/.
+  const transcriptMatch = path.match(/^\/api\/sessions\/(\d+)\/transcript$/);
+  if (transcriptMatch && req.method === 'GET') {
+    const id = parseInt(transcriptMatch[1], 10);
+    if (!manager.get(id)) { json(404, { error: 'not found' }); return true; }
+    const afterRaw = url.searchParams.get('after');
+    const after = afterRaw !== null && /^\d+$/.test(afterRaw) ? parseInt(afterRaw, 10) : null;
+    const key = url.searchParams.get('key');
+    manager.getMeta(id)
+      .then((meta) => readerFeed(meta, { after, key }))
+      .then((feed) => json(200, feed))
+      .catch((e) => { log(`HTTP TRANSCRIPT session=${id} failed: ${String((e as Error).message ?? e)}`); json(500, { error: 'transcript read failed' }); });
     return true;
   }
 

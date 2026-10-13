@@ -631,6 +631,7 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
           cwd={sessionCwds[zenSid]}
           fontFamily={fontFamily}
           baseFontSize={fontSize}
+          agent={agentStates[zenSid]}
           onExit={() => openZen(null)}
           sideOpen={zenSideOpen}
           onToggleSide={toggleZenSide}

@@ -15,13 +15,16 @@ export * from './workspaces.js';
 export * from './interactions.js';
 export * from './config.js';
 export * from './views.js';
+export * from './reader.js';
 export type { ScreenRun, ScreenTail } from '@ttym/protocol';
 export type { ViewItem, ViewerState, ViewRenderer, ViewPresentation, ViewChangeEvent, ViewOpenRequest } from '@ttym/protocol';
+export type { ReaderAgent, ReaderFeed, ReaderUpdate, ReaderPatch, ReaderHunk, ReaderPatchLine } from '@ttym/protocol';
 
 import type { BaseUrl } from './transport.js';
 import * as sessions from './sessions.js';
 import * as workspaces from './workspaces.js';
 import * as interactions from './interactions.js';
+import * as reader from './reader.js';
 
 /** Bind a base URL once and call without repeating it. */
 export function createApi(base: BaseUrl) {
@@ -63,6 +66,9 @@ export function createApi(base: BaseUrl) {
       reorder: (names: string[]) => workspaces.reorderStreams(base, names),
       rename: (from: string, to: string) => workspaces.renameStream(base, from, to),
       remove: (name: string) => workspaces.removeStream(base, name),
+    },
+    reader: {
+      transcript: (sessionId: number, since?: Parameters<typeof reader.getTranscript>[2]) => reader.getTranscript(base, sessionId, since),
     },
     interactions: {
       submit: (sessionId: number, o: Parameters<typeof interactions.submitInteraction>[2]) =>

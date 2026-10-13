@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatCwd } from '@ttym/shared';
-import { beginDragGuard } from '@ttym/ui';
-import { readZenFontDelta, writeZenFontDelta, readZenCols, writeZenCols, ZEN_DEFAULT_COLS, ZEN_COLS_MIN, ZEN_COLS_MAX, miniLinkBtnStyle } from '../app-shared.js';
+import { beginDragGuard, getHost } from '@ttym/ui';
+import { readZenFontDelta, writeZenFontDelta, readZenCols, writeZenCols, readZenReader, writeZenReader, readZenReaderDock, writeZenReaderDock, READER_COLUMN_PX, ZEN_DEFAULT_COLS, ZEN_COLS_MIN, ZEN_COLS_MAX, miniLinkBtnStyle, type AgentState } from '../app-shared.js';
 import { SessionBody } from './SessionBody.js';
+import { ReaderView, type DockMode } from '../reader/ReaderView.js';
+import { useTranscript } from '../reader/useTranscript.js';
+import { useDockLayout } from '../reader/useDockLayout.js';
 
 /** zen 읽기 모드 — 크롬을 전부 걷고 한 pane만 고정 폭으로 크게 읽는다.
  *
@@ -17,13 +20,15 @@ import { SessionBody } from './SessionBody.js';
  *  바가 absolute인 것이 핵심이다. 흐름에 두면 마우스를 위로 올릴 때마다 컨테이너
  *  높이가 줄고 → rows가 바뀌고 → PTY가 리플로우된다. 읽는 중에 화면이 다시
  *  그려지는 최악의 경우다. */
-export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, onExit, side, sideOpen, onToggleSide }: {
+export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExit, side, sideOpen, onToggleSide }: {
   sid: number;
   name?: string;
   cwd?: string;
   fontFamily: string;
   /** pane의 글자 크기. zen은 여기에 기억된 차이만 더한다 — 기본은 같은 크기. */
   baseFontSize: number;
+  /** 이 세션의 에이전트 상태. reader 모드가 "작업 중"·"권한 대기"를 여기서 읽는다. */
+  agent?: AgentState;
   /** ⌘. · exit 버튼 · 세션이 끝났을 때. */
   onExit: () => void;
   /** 이 세션의 뷰어. 있으면 바에 토글이 생기고, 열면 터미널 오른쪽에 나란히 선다. */
@@ -58,6 +63,25 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, onExit, side
     window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
   };
   const split = !!side && !!sideOpen;
+  // reader: 같은 세션의 대화를 읽기 좋게 터미널 위에 덮는다. 터미널은 그대로 떠 있고 아래 몇 줄(입력창·권한 창)만 비친다.
+  // 옆 뷰어와 나란히 설 때는 폭이 모자라 끈다.
+  const [readerPref, setReaderPref] = useState(() => readZenReader());
+  const readerOn = readerPref && !split;
+  const [dockMode, setDockMode] = useState<DockMode>(() => readZenReaderDock());
+  const pickDock = (m: DockMode) => { setDockMode(m); writeZenReaderDock(m); };
+  const stageRef = useRef<HTMLDivElement>(null);
+  const transcript = useTranscript(sid, readerOn);
+  const readerAgent = transcript.state.agent ?? agent?.kind ?? null;
+  const dock = useDockLayout(stageRef, sid, readerAgent, !!agent?.waiting, readerOn);
+  // 본문 폭을 px로 맞춘다 — 글자 폭을 알아야 cols가 나와서, 첫 측정 전에는 기존 cols를 쓴다.
+  const fixedCols = split ? undefined : readerOn && dock ? Math.max(ZEN_COLS_MIN, Math.floor(READER_COLUMN_PX / dock.cellW)) : cols;
+  const setReader = (on: boolean) => { setReaderPref(on); writeZenReader(on); };
+  useEffect(() => {
+    if (!readerOn) return;
+    const host = getHost(sid);
+    host?.term.scrollToBottom();
+    host?.focusTerminal();
+  }, [readerOn, sid]);
   // 들어올 때 한 번은 보여준다 — 안 보여주면 나가는 법을 알 도리가 없다.
   const [hintOpen, setHintOpen] = useState(true);
   useEffect(() => {
@@ -86,6 +110,21 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, onExit, side
           {cwd ? <span style={{ color: 'var(--cwd)', fontSize: 11 }}>{formatCwd(cwd)}</span> : null}
           {split ? null : (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+              {(['terminal', 'reader'] as const).map((m) => {
+                const on = (m === 'reader') === readerOn;
+                return <button key={m} onClick={() => setReader(m === 'reader')} style={{ ...miniLinkBtnStyle, ...(on ? { color: 'var(--accent)' } : null) }} title={m === 'reader' ? 'conversation, laid out to read' : 'the raw terminal'}>{m}</button>;
+              })}
+            </span>
+          )}
+          {readerOn ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+              {(['native', 'styled'] as const).map((m) => (
+                <button key={m} onClick={() => pickDock(m)} style={{ ...miniLinkBtnStyle, ...(dockMode === m ? { color: 'var(--accent)' } : null) }} title={m === 'native' ? 'bottom input area: the terminal’s own rows' : 'bottom input area: redrawn in the page’s style'}>{m}</button>
+              ))}
+            </span>
+          ) : null}
+          {split || readerOn ? null : (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
               <button onClick={() => widen(-10)} style={miniLinkBtnStyle} title="narrower (10 cols)">◂</button>
               <span onClick={() => setCols(ZEN_DEFAULT_COLS)} style={{ color: cols === ZEN_DEFAULT_COLS ? 'var(--text-dim)' : 'var(--warn)', fontSize: 11, cursor: cols === ZEN_DEFAULT_COLS ? 'default' : 'pointer' }} title={cols === ZEN_DEFAULT_COLS ? 'default width' : `click: back to ${ZEN_DEFAULT_COLS}`}>{cols} cols</span>
               <button onClick={() => widen(10)} style={miniLinkBtnStyle} title="wider (10 cols)">▸</button>
@@ -104,7 +143,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, onExit, side
           </span>
         </div>
       </div>
-      <div style={split ? { ...zenStageStyle, justifyContent: 'stretch', padding: '6px 0 0' } : zenStageStyle}>
+      <div ref={stageRef} style={split ? { ...zenStageStyle, justifyContent: 'stretch', padding: '6px 0 0' } : zenStageStyle}>
         <div style={split ? { flex: `0 0 ${sideRatio * 100}%`, minWidth: 0, display: 'flex', overflow: 'hidden', padding: '0 6px' } : { display: 'contents' }}>
           {/* 뷰어는 옆에 따로 선다(side) — 본문에 덮지 않는다. 알약·검색·경로 open은 grid와 같다. */}
           <SessionBody
@@ -117,7 +156,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, onExit, side
               geometry: 'borrow',
               // 나란히 볼 때는 고정 cols 대신 왼쪽 영역에 맞춘다 — splitter를 끌면 PTY도 따라온다.
               // borrow는 그대로라 zen을 나가면 서버가 이전 기하를 되돌린다.
-              fixedCols: split ? undefined : cols,
+              fixedCols,
               enableWebgl: true,
               // 100% 폭이면 wrapper(max-content)가 그 안 왼쪽에 붙어 가운데 정렬이 안 먹는다.
               style: split ? { width: '100%', height: '100%' } : { width: 'max-content', height: '100%' },
@@ -125,6 +164,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, onExit, side
             wrapStyle={split ? { display: 'flex' } : { display: 'flex', justifyContent: 'center' }}
           />
         </div>
+        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={!!agent?.active} layout={dock} dockMode={dockMode} /> : null}
         {split ? (
           <>
             <div className="viewer-splitter col" onPointerDown={startSideDrag} title="drag to resize" />
@@ -182,4 +222,7 @@ const zenStageStyle: React.CSSProperties = {
   justifyContent: 'center',
   padding: '6px 0',
   overflow: 'hidden',
+  // reader 덮개의 기준이자, 바(zIndex 1)보다 아래로 가두는 쌓임 맥락.
+  position: 'relative',
+  zIndex: 0,
 };
