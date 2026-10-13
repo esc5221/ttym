@@ -20,7 +20,7 @@ import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { ViewerStore } from './viewer/store.js';
 import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
-import { AgentSleeper, SUBMIT_GAP_MS, findAgentProcess, psProcesses, readAgentStatus, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, SUBMIT_GAP_MS, findAgentProcess, psProcesses, readAgentStatus, turnIsStale, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { RemoteStore } from './remote/store.js';
@@ -1740,13 +1740,13 @@ export async function createServer(port: number): Promise<TtymServer> {
   const WAITING_SWEEP_MS = 3_000;
   const waitingSweep = setInterval(() => {
     void (async () => {
-      const claudePanes: Array<{ id: number; shellPid: number }> = [];
+      const claudePanes: Array<{ id: number; shellPid: number; meta: Record<string, unknown> }> = [];
       for (const info of manager.list()) {
         const session = manager.get(info.id);
         if (!session || session.isDead || !session.childPid) continue;
         if (sleeper?.stateOf(info.id)) continue; // a sleeping pane has no agent to ask
         const meta = await manager.getMeta(info.id).catch(() => null);
-        if (meta && agentKindOf(meta) === 'claude-code') claudePanes.push({ id: info.id, shellPid: session.childPid });
+        if (meta && agentKindOf(meta) === 'claude-code') claudePanes.push({ id: info.id, shellPid: session.childPid, meta });
       }
       const seen = new Set<number>();
       if (claudePanes.length > 0) {
@@ -1755,6 +1755,12 @@ export async function createServer(port: number): Promise<TtymServer> {
         for (const pane of claudePanes) {
           const agent = findAgentProcess(procs, pane.shellPid);
           const status = agent?.kind === 'claude' ? await readAgentStatus(agent.pid) : null;
+          // A turn the person cut short never gets its Stop; Claude's own idle, stamped after the last activity, says it is over.
+          if (turnIsStale(pane.meta, status)) {
+            manager.setMeta(pane.id, { claudeActive: false, claudeTurnOpen: false })
+              .then((merged) => { log(`AGENT STALE-TURN cleared session=${pane.id}`); broadcastAgentState(pane.id, merged as Record<string, unknown>); })
+              .catch(() => {});
+          }
           if (status?.status !== 'waiting') continue;
           seen.add(pane.id);
           const what = status.waitingFor ?? 'input';

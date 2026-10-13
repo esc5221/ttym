@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentSleeper, busyChildOf, composerText, findAgentProcess, isInteractiveAgent, isPassiveInput, parseSleepAfter, resumeArgsFrom, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, busyChildOf, composerText, findAgentProcess, isInteractiveAgent, isPassiveInput, parseSleepAfter, resumeArgsFrom, turnIsStale, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
 import type { Session } from './session.js';
 import type { ScreenRun } from '@ttym/protocol';
 
@@ -188,6 +188,25 @@ describe('sleep', () => {
     h = harness({ meta: { claudeLastSessionId: null } });
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'no claude session id to resume from' });
     expect(h.session.isFrozen).toBe(false);
+  });
+
+  it('a turn the person cut short (Esc) does not keep the agent from sleeping once Claude says it is idle', async () => {
+    let alive = true;
+    // the hooks last reported activity at 1000; Claude's own idle came at 4000
+    h = harness({
+      meta: { claudeActive: true, claudeTurnOpen: true, agentActiveAt: 1000 },
+      status: { status: 'idle', updatedAt: 4000 },
+      procs: () => (alive ? [claudeProc()] : []),
+    });
+    const origRaw = h.session.writeRaw.bind(h.session);
+    let presses = 0;
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
+  });
+
+  it('a turn that began after Claude last said idle is still a turn', async () => {
+    h = harness({ meta: { claudeActive: true, claudeTurnOpen: true, agentActiveAt: 5000 }, status: { status: 'idle', updatedAt: 4000 } });
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'agent is mid-turn' });
   });
 
   it('a freshly started agent (SessionStart says active, no turn yet) may sleep', async () => {
@@ -529,5 +548,33 @@ describe('agent restart (run the installed binary)', () => {
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
     expect(await h.sleeper.agents()).toEqual([{ sessionId: 1, kind: 'claude', pid: null, sleeping: true }]);
     expect(await h.sleeper.restart(1)).toEqual({ ok: false, error: 'asleep — its next wake starts the installed version' });
+  });
+});
+
+describe('turnIsStale', () => {
+  const open = { claudeActive: true, claudeTurnOpen: true, agentActiveAt: 10_000 };
+
+  it('is true when Claude went idle after the last activity the hooks reported', () => {
+    expect(turnIsStale(open, { status: 'idle', updatedAt: 12_000 })).toBe(true);
+  });
+
+  it('is false while the idle is not later than the activity, or only barely', () => {
+    expect(turnIsStale(open, { status: 'idle', updatedAt: 9_000 })).toBe(false);
+    expect(turnIsStale(open, { status: 'idle', updatedAt: 10_500 })).toBe(false);
+  });
+
+  it('is false while Claude says busy or waiting, or says nothing', () => {
+    expect(turnIsStale(open, { status: 'busy', updatedAt: 99_000 })).toBe(false);
+    expect(turnIsStale(open, { status: 'waiting', updatedAt: 99_000 })).toBe(false);
+    expect(turnIsStale(open, null)).toBe(false);
+    expect(turnIsStale(open, { status: 'idle' })).toBe(false);
+  });
+
+  it('has nothing to clear when no turn is open', () => {
+    expect(turnIsStale({ claudeActive: false, claudeTurnOpen: false, agentActiveAt: 1 }, { status: 'idle', updatedAt: 99_000 })).toBe(false);
+  });
+
+  it('treats a flag with no stamp at all (a fossil) as stale once Claude is idle', () => {
+    expect(turnIsStale({ claudeActive: true }, { status: 'idle', updatedAt: 5 })).toBe(true);
   });
 });

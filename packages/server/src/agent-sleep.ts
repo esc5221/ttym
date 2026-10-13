@@ -54,6 +54,25 @@ export interface ProcInfo { pid: number; ppid: number; rss: number; command: str
 /** ~/.claude/sessions/<pid>.json — written by Claude Code for `claude ps`. `waiting` names a permission prompt or dialog. */
 export interface AgentStatusFile { status: 'busy' | 'idle' | 'waiting'; waitingFor?: string; updatedAt?: number }
 
+/**
+ * A turn the hooks say is running while Claude Code says it is idle.
+ *
+ * UserPromptSubmit opens a turn (claudeActive + claudeTurnOpen) and Stop closes it, but a turn
+ * the person cuts short (Esc, which also takes the prompt back out of the conversation) never
+ * fires Stop, and the flags stayed on for up to 15 minutes: the tab dot kept pulsing and a
+ * sleep was refused as "mid-turn". The status file is written by Claude Code itself, and an
+ * `idle` stamped after the last activity the hooks reported means nothing has run since.
+ * A prompt submitted after that idle re-stamps agentActiveAt later than it, so a turn that
+ * has only just begun never reads as stale.
+ */
+export const STALE_TURN_MARGIN_MS = 1000;
+export function turnIsStale(meta: Record<string, unknown>, status: AgentStatusFile | null): boolean {
+  if (meta.claudeActive !== true && meta.claudeTurnOpen !== true) return false;
+  if (status?.status !== 'idle' || typeof status.updatedAt !== 'number') return false;
+  const stamp = meta.agentActiveAt;
+  return typeof stamp !== 'number' || status.updatedAt > stamp + STALE_TURN_MARGIN_MS;
+}
+
 /** What the Stop hook forwarded from Claude Code's payload; null on versions that do not send it. */
 export interface InFlight {
   tasks: Array<{ type: string; status?: string; description?: string }>;
@@ -629,7 +648,7 @@ export class AgentSleeper {
     const status = await this.deps.agentStatus(agent.pid);
     if (status?.status === 'waiting') return `agent is waiting for you (${status.waitingFor ?? 'input needed'})`;
     if (status?.status === 'busy') return 'agent is busy';
-    if (meta.claudeTurnOpen === true) return 'agent is mid-turn';
+    if (meta.claudeTurnOpen === true && !turnIsStale(meta, status)) return 'agent is mid-turn';
     const inFlight = meta.claudeInFlight as InFlight | null | undefined;
     if (inFlight && typeof inFlight === 'object') {
       if (inFlight.tasks.length > 0) {
