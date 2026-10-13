@@ -49,7 +49,9 @@
 
 /* tool rows: flat, one line collapsed */
 .rd-tool { font: 13px/20px var(--mono, ui-monospace, Menlo, monospace); color: var(--text-soft); }
-.rd-tool > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; padding: 2px 0; }
+.rd-tool > summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; padding: 1px 0; }
+/* a run of collapsed tool calls reads as a list: the column's 10px gap between blocks is for paragraphs, not for one-line status rows */
+.rd-tool:not([open]) + .rd-tool { margin-top: -8px; }
 .rd-tool > summary::-webkit-details-marker { display: none; }
 .rd-tool-name { color: var(--text); font-weight: 600; flex-shrink: 0; }
 .rd-tool-target { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
