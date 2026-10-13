@@ -101,7 +101,7 @@ function pushUserText(out: ReaderUpdate[], e: Json, at: number, raw: string, ima
     return;
   }
   if (text.startsWith('[Request interrupted')) {
-    out.push({ op: 'notice', id, at, text: text.replace(/^\[|\]$/g, '') });
+    out.push({ op: 'notice', id, at, text: text.replace(/^\[|\]$/g, ''), endsTurn: true });
     return;
   }
   if (text.startsWith('<task-notification>')) {

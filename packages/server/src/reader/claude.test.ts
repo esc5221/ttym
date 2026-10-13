@@ -37,6 +37,7 @@ describe('claude transcript → reader updates', () => {
         { type: 'user', timestamp: T(2), message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
       );
       expect(only(u, 'notice').map((n) => n.text)).toEqual(['Monitor event: "page done"', 'Request interrupted by user']);
+      expect(only(u, 'notice').map((n) => n.endsTurn)).toEqual([undefined, true]);
     });
 
     it('drops harness-injected text (isMeta) and subagent records', () => {

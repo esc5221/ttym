@@ -56,7 +56,8 @@ export type ReaderUpdate =
   /** A tool call has finished. `patch`, when present, replaces the one on the call. */
   | { op: 'tool-result'; id: string; at: number; output: string; isError: boolean; truncated?: boolean; patch?: ReaderPatch }
   /** An event that is neither a person nor the agent: a finished background task, an interruption. */
-  | { op: 'notice'; id: string; at: number; text: string }
+  /** `endsTurn`: the agent stopped what it was doing without a normal end of turn (the person interrupted it). */
+  | { op: 'notice'; id: string; at: number; text: string; endsTurn?: true }
   /** The conversation was compacted here. */
   | { op: 'boundary'; id: string; at: number; label: string }
   /** The agent finished a turn. */
