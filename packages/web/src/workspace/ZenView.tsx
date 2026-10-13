@@ -70,8 +70,9 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
   const pickDock = (m: DockMode) => { setDockMode(m); writeZenReaderDock(m); };
   const stageRef = useRef<HTMLDivElement>(null);
   const { transcript, dock, working } = useReader(sid, agent, stageRef, readerOn);
-  // 본문 폭을 px로 맞춘다 — 글자 폭을 알아야 cols가 나와서, 첫 측정 전에는 기존 cols를 쓴다.
-  const fixedCols = split ? undefined : readerOn && dock ? Math.max(ZEN_COLS_MIN, Math.floor(READER_COLUMN_PX / dock.cellW)) : cols;
+  // 본문 폭을 px로 맞춘다. 첫 측정 전에는 글자 폭을 글자 크기의 0.6배로 어림한다 — 기존 cols(140)로 먼저 붙었다가 줄이면
+  // 140칸으로 그려진 화면이 접혀서(reflow) 에이전트가 다시 그릴 때까지 입력창 줄이 깨진다.
+  const fixedCols = split ? undefined : readerOn ? Math.max(ZEN_COLS_MIN, Math.floor(READER_COLUMN_PX / (dock?.cellW ?? fontSize * 0.6))) : cols;
   const setReader = (on: boolean) => { setReaderPref(on); writeZenReader(on); };
   useEffect(() => {
     if (!readerOn) return;

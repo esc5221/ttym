@@ -61,14 +61,35 @@ export function useDockLayout(
       if (!term.rows || !term.cols || !r.height) return;
       const cellH = r.height / term.rows;
       const buf = term.buffer.active;
+      // A line the terminal had to wrap (or re-wrapped when it got narrower) fills several rows; its continuation
+      // rows are folded into the row that starts it, so a rule drawn wider than the screen is still one rule.
       const all: string[] = [];
-      for (let i = 0; i < term.rows; i++) all.push(buf.getLine(buf.viewportY + i)?.translateToString(true) ?? '');
+      const continued: boolean[] = [];
+      for (let i = 0; i < term.rows; i++) {
+        const line = buf.getLine(buf.viewportY + i);
+        const text = line?.translateToString(true) ?? '';
+        const isContinuation = !!line?.isWrapped && all.length > 0;
+        continued.push(isContinuation);
+        if (isContinuation) {
+          let head = all.length - 1;
+          while (head > 0 && continued[head]) head--;
+          all[head] += text;
+          all.push('');
+        } else all.push(text);
+      }
       const drawn = contentRows(all);
       const n = dockRowCount(agent, drawn, waiting);
       // `r` was read under the transform applied last time; with it removed, the screen's bottom edge is here.
       const bottomUnshifted = r.bottom - shift;
       const dockTop = drawn.length - n;
-      const view = dockView(agent, drawn.slice(dockTop), { x: buf.cursorX, y: buf.cursorY - dockTop }, waiting);
+      // The styled copy reads the rows without the continuation ones, which hold only the rest of a wrapped line.
+      const dockRows: string[] = [];
+      let caretY = buf.cursorY - dockTop;
+      for (let i = dockTop; i < drawn.length; i++) {
+        if (continued[i]) { if (i < buf.cursorY) caretY--; continue; }
+        dockRows.push(drawn[i]);
+      }
+      const view = dockView(agent, dockRows, { x: buf.cursorX, y: caretY }, waiting);
       const nextShift = Math.round((term.rows - drawn.length) * cellH);
       if (nextShift !== shift) { shift = nextShift; host.wrapper.style.transform = shift ? `translateY(${shift}px)` : ''; }
       const next: DockLayout = {

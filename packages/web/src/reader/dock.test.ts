@@ -48,6 +48,22 @@ describe('dockRowCount · agents without a profile', () => {
   });
 });
 
+describe('a prompt whose top rule carries the session name', () => {
+  const TITLED = '─'.repeat(66) + ' claude-cli-browser-agent-plan ─';
+
+  it('still finds the top rule, so the prompt is inside the uncovered rows', () => {
+    const rows = screen([TITLED, '❯ ', RULE, '  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 7 agents']);
+    expect(dockRowCount('claude-code', rows, false)).toBe(4);
+    expect(dockView('claude-code', rows.slice(-4), { x: 2, y: 1 }, false)).toMatchObject({ kind: 'prompt', lines: [''] });
+  });
+
+  it('does not take a line of prose that happens to start with dashes for a rule', () => {
+    const rows = screen(['──────── is how it starts, then words, and no closing rule', '❯ ', RULE, 'status']);
+    // only the real bottom rule counts, so the uncovered rows start there
+    expect(dockRowCount('claude-code', rows, false)).toBe(2);
+  });
+});
+
 describe('contentRows', () => {
   it('drops the empty rows under the last thing drawn', () => {
     expect(contentRows(['a', 'b', '', '  ', ''])).toEqual(['a', 'b']);

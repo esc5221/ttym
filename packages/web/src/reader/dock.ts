@@ -53,12 +53,24 @@ export interface DockProfile {
 /** Rows to leave uncovered when the screen can't be read. */
 export const FALLBACK_DOCK_ROWS = 6;
 
+const RULE_CHARS = /[─━═]/;
+
+/**
+ * A horizontal rule: a long run of line-drawing characters. Claude Code puts the
+ * session's name into the prompt's top rule ("──────── my-session ─"), so the
+ * run may be followed by a short title and one more dash.
+ */
 const isRule = (row: string): boolean => {
   const t = row.trim();
   if (t.length < 8 || /[╭╮╰╯┌┐└┘│]/.test(t)) return false; // a box edge is not a rule
+  let lead = 0;
+  while (lead < t.length && RULE_CHARS.test(t[lead])) lead++;
+  if (lead < 8) return false;
+  if (lead === t.length) return true;
+  if (!RULE_CHARS.test(t[t.length - 1])) return false;
   let heavy = 0;
-  for (const c of t) if (c === '─' || c === '━' || c === '═') heavy++;
-  return heavy / t.length >= 0.9;
+  for (const c of t) if (RULE_CHARS.test(c)) heavy++;
+  return heavy / t.length >= 0.4;
 };
 
 const isBoxTop = (row: string): boolean => /^\s*[╭┌]/.test(row);
