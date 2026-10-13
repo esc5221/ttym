@@ -3,6 +3,51 @@ import { getHost } from '@ttym/ui';
 import type { DockView } from './dock.js';
 
 /**
+ * The text an input method is still composing (a Hangul syllable not yet
+ * committed). It lives in the terminal's hidden textarea, which this dock covers,
+ * so the dock draws it itself at the caret.
+ *
+ * A syllable that was just committed has gone to the terminal but not come back
+ * in the rows yet; it is kept on screen until the rows change (or briefly), so
+ * the text doesn't blink out between the two.
+ *
+ * `rowsSignature` changes whenever the typed text on screen does.
+ */
+function useComposition(sid: number, rowsSignature: string): string {
+  const [live, setLive] = useState('');
+  const [held, setHeld] = useState('');
+
+  useEffect(() => {
+    let area: HTMLTextAreaElement | undefined;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const update = (e: CompositionEvent) => setLive(e.data ?? '');
+    const end = (e: CompositionEvent) => { setHeld((h) => h + (e.data ?? '')); setLive(''); };
+    // The terminal's textarea exists only once it is opened; look again until it does.
+    const attach = () => {
+      area = getHost(sid)?.term.textarea;
+      if (!area) { retry = setTimeout(attach, 200); return; }
+      area.addEventListener('compositionupdate', update);
+      area.addEventListener('compositionend', end);
+    };
+    attach();
+    return () => {
+      clearTimeout(retry);
+      area?.removeEventListener('compositionupdate', update);
+      area?.removeEventListener('compositionend', end);
+    };
+  }, [sid]);
+
+  useEffect(() => { setHeld(''); }, [rowsSignature]);
+  useEffect(() => {
+    if (!held) return;
+    const t = setTimeout(() => setHeld(''), 600);
+    return () => clearTimeout(t);
+  }, [held]);
+
+  return held + live;
+}
+
+/**
  * The input area drawn in the page's own style instead of as terminal rows.
  *
  * It is a picture of the real terminal rows beneath it: nothing here takes
@@ -10,28 +55,9 @@ import type { DockView } from './dock.js';
  * a dialog option sends that option's number to it, the same key the agent
  * itself accepts.
  */
-/**
- * The text an input method is still composing (a Hangul syllable not yet
- * committed). It lives in the terminal's hidden textarea, which this dock covers,
- * so the dock draws it itself at the caret.
- */
-function useComposition(sid: number): string {
-  const [text, setText] = useState('');
-  useEffect(() => {
-    const area = getHost(sid)?.term.textarea;
-    if (!area) return;
-    const update = (e: CompositionEvent) => setText(e.data ?? '');
-    const end = () => setText('');
-    area.addEventListener('compositionupdate', update);
-    area.addEventListener('compositionend', end);
-    return () => { area.removeEventListener('compositionupdate', update); area.removeEventListener('compositionend', end); };
-  }, [sid]);
-  return text;
-}
-
 export function StyledDock({ sid, view }: { sid: number; view: DockView }) {
   const focusTerminal = () => getHost(sid)?.focusTerminal();
-  const composing = useComposition(sid);
+  const composing = useComposition(sid, view.kind === 'prompt' ? view.lines.join('\n') : '');
   if (view.kind === 'dialog') {
     const choose = (n: number) => { getHost(sid)?.term.input(String(n)); focusTerminal(); };
     return (
@@ -51,12 +77,16 @@ export function StyledDock({ sid, view }: { sid: number; view: DockView }) {
   return (
     <div className="rd-composer-wrap">
       <div className="rd-composer" onMouseUp={focusTerminal}>
-        {view.lines.map((line, i) => (
-          <div key={i} className="rd-crow">
-            <span className="rd-pm">{i === 0 ? '❯' : ' '}</span>
-            <span className="rd-ctext">{view.caret?.line === i ? <WithCaret text={line} col={view.caret.col} composing={composing} /> : line || ' '}</span>
-          </div>
-        ))}
+        {view.lines.map((line, i) => {
+          // The agent sometimes parks the terminal cursor outside the prompt; text being composed still has to be seen, so it goes at the end.
+          const caret = view.caret ?? (composing && i === view.lines.length - 1 ? { line: i, col: Infinity } : null);
+          return (
+            <div key={i} className="rd-crow">
+              <span className="rd-pm">{i === 0 ? '❯' : ' '}</span>
+              <span className="rd-ctext">{caret?.line === i ? <WithCaret text={line} col={caret.col} composing={composing} /> : line || ' '}</span>
+            </div>
+          );
+        })}
       </div>
       <div className="rd-meta">
         {view.status.map((parts, i) => <div key={i} className="rd-meta-row">{parts.map((p, j) => <span key={j}>{p}</span>)}</div>)}
@@ -83,7 +113,7 @@ function WithCaret({ text, col, composing }: { text: string; col: number; compos
     <>
       {chars.slice(0, at).join('')}
       {/* the terminal row ends where the text does, so spaces typed at the end only show in the caret's column */}
-      {at >= chars.length && used < col ? ' '.repeat(col - used) : null}
+      {at >= chars.length && Number.isFinite(col) && used < col ? ' '.repeat(col - used) : null}
       {composing ? <span className="rd-ime">{composing}</span> : null}
       <span className="rd-caret">{under ?? ' '}</span>
       {chars.slice(at + 1).join('')}

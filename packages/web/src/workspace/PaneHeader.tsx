@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatCwd } from '@ttym/shared';
 import { AGENT_COLORS, closeBtnStyle, copySessionUrl, miniLinkBtnStyle, type UI_STYLES } from '../app-shared.js';
 import { viewSrc } from '../viewer/content.js';
 import { PaneTabs } from '../viewer/PaneTabs.js';
+import { StripMenu, attachDropdownItemStyle } from '../StripMenu.js';
+import { setPaneDock, setPaneReader, usePaneDock, usePaneReader } from '../reader/paneReader.js';
+import { paneReaderAvailable } from './PaneBody.js';
 import { sleepTitle } from './sleep-text.js';
 import { paneView, useWorkspaceSessions } from './session-context.js';
 
@@ -40,6 +43,18 @@ export function PaneHeader({ sid, name, cwd, isFocused, dead, zoomed, fit, U, dr
   const asleep = sleep?.state === 'sleeping' || sleep?.state === 'waking';
   const canRestore = !agent?.active && !asleep && (ctx.lastAgentIds[sid]?.claude || ctx.lastAgentIds[sid]?.codex);
   const { state: viewerState, tab: paneTab, item: paneItem } = paneView(ctx, sid);
+  const readerAvail = paneReaderAvailable(agent?.kind, dead, touch);
+  const readerOn = usePaneReader(sid) && readerAvail;
+  const dockChoice = usePaneDock();
+  // 가끔 쓰는 액션은 ⋯ 메뉴 하나에 모은다. 패널은 body 포털이라 헤더 밖에서 열려서, 바깥 클릭은 문서 전체에서 듣는다.
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e: MouseEvent) => { if (!(e.target as HTMLElement | null)?.closest('[data-pane-menu]')) setMenuOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuOpen]);
+  const act = (fn: () => void) => () => { setMenuOpen(false); fn(); };
 
   // viewer 탭 스트립이 우측 absolute 액션 클러스터(☾ sleep · zen · split · detach · × …) 밑으로
   // 깔려서, 마지막 탭의 ×를 누르려 하면 hover로 살아난 그 버튼들이 클릭을 가로채던 문제.
@@ -110,6 +125,22 @@ export function PaneHeader({ sid, name, cwd, isFocused, dead, zoomed, fit, U, dr
           <span className="agent-waiting-mark" title={`waiting for you: ${agent.waiting}`}>needs you</span>
         ) : null}
       </span>
+      {readerAvail ? (
+        // 같은 세션을 보는 두 가지 방식. 터미널 탭 바로 옆에 항상 보여서, 지금 어느 쪽인지 호버 없이 안다.
+        <span style={{ display: 'inline-flex', flexShrink: 0, margin: '0 0 0 6px', border: '1px solid var(--line-strong)', borderRadius: 4, overflow: 'hidden', fontFamily: 'var(--mono)', fontSize: 10 }}>
+          {(['term', 'reader'] as const).map((m) => {
+            const on = paneTab === 'term' && (m === 'reader') === readerOn;
+            return (
+              <button
+                key={m}
+                onClick={(e) => { e.stopPropagation(); if (paneTab !== 'term') viewer.setActive(sid, 'term'); setPaneReader(sid, m === 'reader'); }}
+                title={m === 'reader' ? 'the conversation, laid out to read' : 'the raw terminal'}
+                style={{ padding: '1px 7px', border: 'none', cursor: 'pointer', font: 'inherit', background: on ? 'var(--bg1)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-dim)' }}
+              >{m}</button>
+            );
+          })}
+        </span>
+      ) : null}
       <span
         onClick={() => { if (paneTab !== 'term') viewer.setActive(sid, 'term'); }}
         onDoubleClick={onToggleZoom}
@@ -151,27 +182,33 @@ export function PaneHeader({ sid, name, cwd, isFocused, dead, zoomed, fit, U, dr
         {agent?.kind && !asleep && !dead ? (
           <button className="reveal" onClick={(e) => { e.stopPropagation(); void ctx.sleepAgent(sid); }} style={miniLinkBtnStyle} title="sleep now: the process exits, the screen stays, any input resumes it">☾</button>
         ) : null}
-        {canRestore ? (
-          <button className="reveal" onClick={(e) => { e.stopPropagation(); ctx.restoreAgent(sid); }} style={miniLinkBtnStyle} title="resume last agent session">restore</button>
-        ) : null}
         {touch ? null : (
           <button className="reveal" onClick={(e) => { e.stopPropagation(); onZen(); }} style={miniLinkBtnStyle} title="zen · ⌘.">zen</button>
         )}
-        <button className="reveal" onClick={(e) => { e.stopPropagation(); onSplit('right'); }} style={miniLinkBtnStyle} title="split right">│</button>
-        <button className="reveal" onClick={(e) => { e.stopPropagation(); onSplit('down'); }} style={miniLinkBtnStyle} title="split down">─</button>
-        {touch ? (
-          <button
-            className="reveal"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFit();
-            }}
-            style={{ ...miniLinkBtnStyle, ...(fit ? { color: 'var(--accent)' } : null) }}
-            title="borrow this viewport size · restored on leave"
-          >{fit ? 'reset' : 'fit'}</button>
-        ) : null}
-        <button className="reveal" onClick={(e) => { e.stopPropagation(); void ctx.detachMember(sid); }} style={miniLinkBtnStyle} title="detach · session keeps running">detach</button>
-        <button className="reveal" onClick={(e) => { e.stopPropagation(); void copySessionUrl(sid); }} style={miniLinkBtnStyle}>copy</button>
+        <span data-pane-menu style={{ display: 'inline-flex' }}>
+          <StripMenu
+            label="⋯"
+            open={menuOpen}
+            onToggle={() => setMenuOpen((v) => !v)}
+            anchorStyle={{ ...miniLinkBtnStyle, ...(menuOpen ? { opacity: 1 } : null) }}
+            anchorProps={{ className: 'reveal', title: 'more' }}
+            panelStyle={{ minWidth: 200 }}
+          >
+            <div data-pane-menu>
+              <button onClick={act(() => onSplit('right'))} style={attachDropdownItemStyle}>split right</button>
+              <button onClick={act(() => onSplit('down'))} style={attachDropdownItemStyle}>split down</button>
+              {touch ? <button onClick={act(onToggleFit)} style={attachDropdownItemStyle} title="borrow this viewport size · restored on leave">{fit ? 'reset size' : 'fit to screen'}</button> : null}
+              {canRestore ? <button onClick={act(() => ctx.restoreAgent(sid))} style={attachDropdownItemStyle}>restore last agent session</button> : null}
+              {readerOn ? (
+                <button onClick={act(() => setPaneDock(dockChoice === 'styled' ? 'native' : 'styled'))} style={attachDropdownItemStyle} title="reader mode: how the input area at the bottom is drawn">
+                  input area: {dockChoice === 'styled' ? 'styled → native' : 'native → styled'}
+                </button>
+              ) : null}
+              <button onClick={act(() => void ctx.detachMember(sid))} style={attachDropdownItemStyle} title="the session keeps running">detach</button>
+              <button onClick={act(() => void copySessionUrl(sid))} style={attachDropdownItemStyle}>copy link</button>
+            </div>
+          </StripMenu>
+        </span>
         {paneItem ? (
           <>
             <button onClick={(e) => { e.stopPropagation(); ctx.reloadViewer(sid); }} style={miniLinkBtnStyle} title="reload">⟳</button>

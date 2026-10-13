@@ -36,7 +36,7 @@ export type DockView =
 
 export interface DockProfile {
   /** Index of the first row of the input area, or null when it cannot be found. */
-  top(rows: ScreenRows, waiting: boolean): number | null;
+  top(rows: ScreenRows, waiting: boolean, caretRow?: number): number | null;
   /**
    * The input area (from `top` down) read as a DockView, or null when its layout isn't recognised,
    * in which case the page shows the real rows instead. `caret` is relative to `rows`.
@@ -96,7 +96,7 @@ const claude: DockProfile = {
     return rows.slice(-8).some((r) => /esc to interr/i.test(r));
   },
   view: (rows, caret, waiting) => claudeView(rows, caret, waiting), // defined below
-  top(rows, waiting) {
+  top(rows, waiting, caretRow) {
     const rules: number[] = [];
     rows.forEach((row, i) => { if (isRule(row)) rules.push(i); });
 
@@ -104,6 +104,13 @@ const claude: DockProfile = {
       let top: number | null = rules.length ? rules[rules.length - 1] : null;
       rows.forEach((row, i) => { if (isBoxTop(row) && (top === null || i > top)) top = i; });
       return top;
+    }
+
+    // While the prompt is idle the cursor sits inside it, between its two rules, however much the agent
+    // draws below (a command menu, a list of background agents): the rule just above the cursor starts it.
+    if (caretRow !== undefined) {
+      const above = rules.filter((i) => i < caretRow).pop();
+      if (above !== undefined && rules.some((i) => i > caretRow) && caretRow - above <= 12) return above;
     }
 
     const last = rules[rules.length - 1];
@@ -129,7 +136,8 @@ const claudeView = (rows: ScreenRows, caret: { x: number; y: number } | null, wa
   if (bottom < 0) return null;
 
   // Every prompt line carries a two-cell gutter: "❯ " on the first, spaces after.
-  const lines = rows.slice(1, bottom).map((r) => r.replace(/^(❯|>)? ?/, '').replace(/^ /, '').trimEnd());
+  // The gutter's second cell is a no-break space on the prompt row ("❯\u00a0"), an ordinary space on the rows below.
+  const lines = rows.slice(1, bottom).map((r) => r.replace(/^(❯|>)?[ \u00a0]?/, '').replace(/^ /, '').trimEnd());
   while (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
   const line = caret ? caret.y - 1 : -1;
   return {
@@ -172,9 +180,10 @@ export function contentRows(rows: ScreenRows): ScreenRows {
 }
 
 /** Number of terminal rows, counted from the bottom of `rows`, that the page leaves uncovered. Pass `contentRows(...)`. */
-export function dockRowCount(agent: ReaderAgent | null, rows: ScreenRows, waiting: boolean): number {
+/** `caretRow`: the terminal cursor's row in `rows`, which pins down an idle prompt wherever it is on the screen. */
+export function dockRowCount(agent: ReaderAgent | null, rows: ScreenRows, waiting: boolean, caretRow?: number): number {
   const profile = agent ? PROFILES[agent] : undefined;
-  const top = profile?.top(rows, waiting) ?? null;
+  const top = profile?.top(rows, waiting, caretRow) ?? null;
   if (top === null) return Math.min(FALLBACK_DOCK_ROWS, rows.length);
   return rows.length - top;
 }

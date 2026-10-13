@@ -64,6 +64,21 @@ describe('a prompt whose top rule carries the session name', () => {
   });
 });
 
+describe('dockRowCount with the cursor', () => {
+  it('finds a prompt that has a long list of agents drawn under it', () => {
+    const bottom = [RULE, '❯ ', RULE, '  ⏵⏵ bypass permissions on', '', '  agents', '  · one', '  · two', '  · three', '  · four'];
+    const rows = screen(bottom, 30);
+    const caretRow = 30 - bottom.length + 1;
+    expect(dockRowCount('claude-code', rows, false)).toBe(FALLBACK_DOCK_ROWS);
+    expect(dockRowCount('claude-code', rows, false, caretRow)).toBe(bottom.length);
+  });
+
+  it('ignores a cursor that is not between two rules', () => {
+    const rows = screen([RULE, '❯ ', RULE, 'status']);
+    expect(dockRowCount('claude-code', rows, false, 3)).toBe(4);
+  });
+});
+
 describe('contentRows', () => {
   it('drops the empty rows under the last thing drawn', () => {
     expect(contentRows(['a', 'b', '', '  ', ''])).toEqual(['a', 'b']);
@@ -86,6 +101,11 @@ describe('dockView · claude-code', () => {
       caret: { line: 1, col: 2 },
       status: [['⏵⏵ bypass permissions on (shift+tab to cycle)', '◐ medium · /effort']],
     });
+  });
+
+  it('treats the no-break space after the prompt mark as part of the gutter', () => {
+    const rows = [RULE, '❯\u00a0안녕 ', RULE, 'status'];
+    expect(dockView('claude-code', rows, { x: 7, y: 1 }, false)).toMatchObject({ lines: ['안녕'], caret: { line: 0, col: 5 } });
   });
 
   it('has no caret when the cursor is outside the prompt', () => {

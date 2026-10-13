@@ -1,11 +1,11 @@
 /* Reader mode: the conversation drawn like Claude's web apps (layout and rhythm only; colours come from the app's tokens). */
 
 .rd-root { position: absolute; top: 0; left: 0; right: 0; background: var(--bg0); z-index: 2; min-height: 0; }
-.rd-scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
+.rd-scroll { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; overflow-anchor: none; }
 .rd-col {
   width: var(--rd-w, 768px); max-width: 100%; margin: 0 auto; box-sizing: border-box;
   padding: 32px 0 20px; color: var(--text); font: 15px/24px var(--sans, system-ui, -apple-system, 'Segoe UI', sans-serif);
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex; flex-direction: column; gap: 10px; min-height: 100%;
 }
 .rd-col > .rd-user { margin-top: 10px; }
 .rd-col > .rd-user:first-child { margin-top: 0; }
@@ -161,3 +161,13 @@
 
 /* text an input method is still composing, drawn at the caret */
 .rd-ime { text-decoration: underline; text-underline-offset: 3px; }
+
+/* the styled dock as the last thing on the page: at the bottom when the conversation is short, after the last line when it is long */
+.rd-flow-dock { margin-top: auto; padding-top: 10px; }
+.rd-flow .rd-composer-wrap, .rd-flow .rd-approval { width: 100%; }
+
+.rd-earlier {
+  align-self: center; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: none; cursor: pointer;
+  color: var(--text-dim); font: 12px var(--mono, monospace);
+}
+.rd-earlier:hover:not(:disabled) { color: var(--text); border-color: var(--line-strong); }

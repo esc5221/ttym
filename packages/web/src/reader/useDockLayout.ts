@@ -78,7 +78,7 @@ export function useDockLayout(
         } else all.push(text);
       }
       const drawn = contentRows(all);
-      const n = dockRowCount(agent, drawn, waiting);
+      const n = dockRowCount(agent, drawn, waiting, buf.cursorY);
       // `r` was read under the transform applied last time; with it removed, the screen's bottom edge is here.
       const bottomUnshifted = r.bottom - shift;
       const dockTop = drawn.length - n;

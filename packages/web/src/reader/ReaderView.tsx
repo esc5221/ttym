@@ -18,7 +18,7 @@ export type DockMode = 'native' | 'styled';
  * and the permission dialog) is the terminal itself showing through, so typing
  * and answering a prompt need nothing from this file.
  */
-export function ReaderView({ sid, state, error, working, layout, dockMode }: {
+export function ReaderView({ sid, state, error, working, layout, dockMode, columnMax, flow = false, onLoadEarlier, loadingEarlier = false }: {
   sid: number;
   state: ReaderState;
   error: string | null;
@@ -26,16 +26,32 @@ export function ReaderView({ sid, state, error, working, layout, dockMode }: {
   working: boolean;
   layout: DockLayout | null;
   dockMode: DockMode;
+  /** Widest the reading column may be, in px; a pane can be far wider than a line is comfortable to read. */
+  columnMax?: number;
+  /** With the styled dock: draw it as the last thing on the page, scrolling with the conversation, instead of pinned to the bottom. */
+  flow?: boolean;
+  /** Fetch the page of history above what is shown (see `state.earlier`). */
+  onLoadEarlier?: () => void;
+  loadingEarlier?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
   const [behind, setBehind] = useState(false);
 
+  // Loading history puts blocks above the ones being read; the scroll position is carried over so the same line stays put.
+  const anchor = useRef<{ height: number; top: number } | null>(null);
+  const requestEarlier = () => {
+    const el = scroller.current;
+    if (!el || !onLoadEarlier || state.earlier === null || loadingEarlier) return;
+    anchor.current = { height: el.scrollHeight, top: el.scrollTop };
+    onLoadEarlier();
+  };
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
     stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     setBehind(!stuck.current);
+    if (el.scrollTop < 300) requestEarlier();
   };
   const toLatest = () => {
     const el = scroller.current;
@@ -43,8 +59,38 @@ export function ReaderView({ sid, state, error, working, layout, dockMode }: {
     stuck.current = true;
     setBehind(false);
   };
-  // Follow new content only while the reader is already at the bottom.
-  useLayoutEffect(() => { if (stuck.current) toLatest(); }, [state.blocks, working, layout?.bottomPx]);
+  // A styled dock that flows with the page ends it, and changes height as someone types or a dialog appears.
+  const styledView = dockMode === 'styled' ? layout?.view ?? null : null;
+  const flowView = flow ? styledView : null;
+  const pinnedView = flow ? null : styledView;
+  const flowSignature = flowView ? JSON.stringify(flowView) : '';
+  const firstId = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const first = state.blocks[0]?.id ?? null;
+    const prepended = anchor.current !== null && firstId.current !== null && first !== firstId.current
+      && state.blocks.some((b) => b.id === firstId.current);
+    firstId.current = first;
+    if (prepended && el && anchor.current) {
+      el.scrollTop = anchor.current.top + (el.scrollHeight - anchor.current.height);
+      anchor.current = null;
+      stuck.current = false;
+      return;
+    }
+    // Follow new content only while the reader is already at the bottom.
+    if (stuck.current) toLatest();
+  }, [state.blocks, working, layout?.bottomPx, flowSignature]);
+  // A conversation too short to scroll has no way to reach its history by scrolling.
+  useEffect(() => {
+    const el = scroller.current;
+    if (el && state.earlier !== null && state.blocks.length > 0 && el.scrollHeight <= el.clientHeight) requestEarlier();
+  }, [state.blocks.length, state.earlier, layout?.bottomPx]);
+  // Typing goes to the terminal; a dock scrolled out of sight must come back so what is typed can be seen.
+  useEffect(() => {
+    if (!flowView) return;
+    const sub = getHost(sid)?.term.onData(() => { if (!stuck.current) toLatest(); });
+    return () => sub?.dispose();
+  }, [sid, flowView !== null]);
 
   // A click that selects nothing hands the keyboard back to the terminal, so typing never needs a click on the dock.
   const refocus = () => {
@@ -53,8 +99,8 @@ export function ReaderView({ sid, state, error, working, layout, dockMode }: {
     if (window.getSelection()?.isCollapsed !== false) getHost(sid)?.focusTerminal();
   };
 
-  // A styled dock stands on top of the terminal rows it copies, so it must be at least as tall as they are.
-  const view = dockMode === 'styled' ? layout?.view ?? null : null;
+  // A pinned styled dock stands on top of the terminal rows it copies, so it must be at least as tall as they are.
+  const view = pinnedView;
   const dockEl = useRef<HTMLDivElement>(null);
   const [dockH, setDockH] = useState(0);
   useEffect(() => {
@@ -65,7 +111,8 @@ export function ReaderView({ sid, state, error, working, layout, dockMode }: {
     setDockH(el.offsetHeight);
     return () => ro.disconnect();
   }, [view !== null]);
-  const bottom = layout ? (view ? Math.max(layout.insetPx + dockH, layout.bottomPx) : layout.bottomPx) : 0;
+  // A flowing dock lives inside the page, so the page covers the terminal's input rows too.
+  const bottom = layout ? (flowView ? 0 : view ? Math.max(layout.insetPx + dockH, layout.bottomPx) : layout.bottomPx) : 0;
 
   // The caption names what the bottom rows are; it shows while the pointer is near them.
   const root = useRef<HTMLDivElement>(null);
@@ -84,21 +131,26 @@ export function ReaderView({ sid, state, error, working, layout, dockMode }: {
   }, []);
 
   const queued = pendingMessages(state);
-  const cssVars = layout ? ({ ['--rd-w' as string]: `${layout.widthPx}px` } as React.CSSProperties) : null;
+  const colW = layout ? Math.min(layout.widthPx, columnMax ?? Infinity) : 0;
+  const cssVars = layout ? ({ ['--rd-w' as string]: `${colW}px` } as React.CSSProperties) : null;
   const style = layout ? { bottom, ...cssVars } : ({ visibility: 'hidden' } as React.CSSProperties);
 
   return (
     <>
     <div className="rd-root" style={style} ref={root}>
       <div className="rd-scroll" ref={scroller} onScroll={onScroll} onMouseUp={refocus}>
-        <div className="rd-col">
+        <div className={`rd-col${flowView ? ' rd-flow' : ''}`}>
+          {state.earlier !== null && state.blocks.length > 0 ? (
+            <button className="rd-earlier" onClick={requestEarlier} disabled={loadingEarlier}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>
+          ) : null}
           <Body state={state} error={error} />
           {queued.map((text, i) => <div key={`q${i}`} className="rd-user rd-queued"><div className="rd-bubble">{text}</div></div>)}
           {working ? <Working since={turnStartedAt(state)} /> : null}
+          {flowView ? <div className="rd-flow-dock"><StyledDock sid={sid} view={flowView} /></div> : null}
         </div>
       </div>
       {behind ? <button className="rd-jump" onClick={() => { toLatest(); getHost(sid)?.focusTerminal(); }}>↓ latest</button> : null}
-      <div className={`rd-hint${near ? ' near' : ''}`}>
+      <div className={`rd-hint${near && !flowView ? ' near' : ''}`}>
         {view ? 'styled copy · typing goes to the terminal underneath' : `live terminal · last ${layout?.rows ?? 0} rows · PTY size unchanged`}
       </div>
     </div>

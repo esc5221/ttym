@@ -15,7 +15,7 @@ import { type ViewerFocus } from '../route.js';
 import { StripMenu, attachDropdownTitleStyle, attachDropdownItemStyle, attachDropdownEmptyStyle } from '../StripMenu.js';
 import { ZenView } from './ZenView.js';
 import { PaneHeader } from './PaneHeader.js';
-import { SessionBody } from './SessionBody.js';
+import { PaneBody } from './PaneBody.js';
 import { WorkspaceSessionsContext, type WorkspaceSessions } from './session-context.js';
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
@@ -528,7 +528,7 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
           onZen={() => openZen(sid)}
           onTerminate={() => void terminateMember(sid)}
         />
-        <SessionBody
+        <PaneBody
           sid={sid}
           viewerOverlay
           terminal={{

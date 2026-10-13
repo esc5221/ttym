@@ -162,7 +162,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
             wrapStyle={split ? { display: 'flex' } : { display: 'flex', justifyContent: 'center' }}
           />
         </div>
-        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} /> : null}
+        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} flow onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
         {split ? (
           <>
             <div className="viewer-splitter col" onPointerDown={startSideDrag} title="drag to resize" />
