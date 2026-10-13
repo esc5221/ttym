@@ -4,7 +4,10 @@ import { parseClaudeLines } from './claude.js';
 
 const T = (s: number) => new Date(Date.UTC(2026, 9, 13, 0, 0, s)).toISOString();
 const line = (o: unknown) => JSON.stringify(o);
-const parse = (...records: unknown[]) => parseClaudeLines(records.map(line));
+const parseRaw = (...records: unknown[]) => parseClaudeLines(records.map(line));
+/** What a record says, without where it sits in the log's tree (that has tests of its own below). */
+const parse = (...records: unknown[]): ReaderUpdate[] =>
+  parseRaw(...records).filter((u) => u.op !== 'link').map((u) => { const { entry: _entry, ...rest } = u as ReaderUpdate & { entry?: string }; return rest as ReaderUpdate; });
 const only = <O extends ReaderUpdate['op']>(updates: ReaderUpdate[], op: O) => updates.filter((u): u is Extract<ReaderUpdate, { op: O }> => u.op === op);
 
 describe('claude transcript → reader updates', () => {
@@ -174,5 +177,39 @@ describe('claude transcript → reader updates', () => {
   it('skips lines that are not JSON and record types it does not know', () => {
     const u = parseClaudeLines(['not json', '', line({ type: 'file-history-snapshot' }), line({ type: 'attachment' }), '[1,2]', line({ type: 'ai-title', aiTitle: 't' })]);
     expect(u).toEqual([{ op: 'title', text: 't' }]);
+  });
+});
+
+describe('the log as a tree', () => {
+  const user = (uuid: string, parentUuid: string | null, text: string, s: number) => ({ type: 'user', uuid, parentUuid, timestamp: T(s), message: { content: text } });
+
+  it('tells how every entry descends from the one before, and puts each update under its entry', () => {
+    const u = parseRaw(
+      user('a', null, 'one', 1),
+      { type: 'attachment', uuid: 'b', parentUuid: 'a', timestamp: T(2) },
+      { type: 'assistant', uuid: 'c', parentUuid: 'b', timestamp: T(3), message: { content: [{ type: 'text', text: 'hello' }] } },
+    );
+    expect(u.filter((x) => x.op === 'link')).toEqual([
+      { op: 'link', entry: 'a', parent: null },
+      { op: 'link', entry: 'b', parent: 'a' },
+      { op: 'link', entry: 'c', parent: 'b' },
+    ]);
+    expect(u.find((x) => x.op === 'user')).toMatchObject({ entry: 'a' });
+    expect(u.find((x) => x.op === 'text')).toMatchObject({ entry: 'c' });
+  });
+
+  it('does not take a compaction\'s logicalParentUuid for a parent', () => {
+    const u = parseRaw({ type: 'system', subtype: 'compact_boundary', uuid: 'x', parentUuid: null, logicalParentUuid: 'later', timestamp: T(1) });
+    expect(u[0]).toEqual({ op: 'link', entry: 'x', parent: null });
+  });
+
+  it('leaves records without a uuid (queue operations, titles) outside the tree', () => {
+    const u = parseRaw({ type: 'queue-operation', operation: 'dequeue', timestamp: T(1) }, { type: 'ai-title', aiTitle: 'T' });
+    expect(u.some((x) => x.op === 'link')).toBe(false);
+  });
+
+  it('does not put a tool result under an entry: it belongs to its call', () => {
+    const u = parseRaw({ type: 'user', uuid: 'r', parentUuid: 'c', timestamp: T(1), message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } });
+    expect(u.find((x) => x.op === 'tool-result')).not.toHaveProperty('entry');
   });
 });

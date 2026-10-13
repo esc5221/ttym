@@ -40,35 +40,47 @@ export interface ReaderPatch {
   truncated?: boolean;
 }
 
+/**
+ * Every update that makes something to read may name the `entry` (record of the agent's log) it came
+ * from. Logs that can be rewound are trees: after a rollback the abandoned messages stay in the file
+ * as a dead branch, and `link` updates say how entries descend from each other so a client can tell
+ * the branch that is still the conversation from the ones that are not.
+ */
 export type ReaderUpdate =
   /** Something the person typed (or a slash command they ran). */
-  | { op: 'user'; id: string; at: number; text: string; images?: number }
+  | { op: 'user'; id: string; at: number; text: string; images?: number; entry?: string }
   /** The agent's words. Markdown. */
-  | { op: 'text'; id: string; at: number; text: string }
+  | { op: 'text'; id: string; at: number; text: string; entry?: string }
   /** The agent's reasoning, when the record keeps any. Not emitted when empty. */
-  | { op: 'thinking'; id: string; at: number; text: string }
+  | { op: 'thinking'; id: string; at: number; text: string; entry?: string }
   /**
    * A tool call has started. `target` is the one-line label (the file, the
    * command, the pattern); `input` is the expanded text of the call; `patch`
    * is present when the call itself says what will change (an edit).
    */
-  | { op: 'tool'; id: string; at: number; name: string; target: string; input: string; patch?: ReaderPatch }
+  | { op: 'tool'; id: string; at: number; name: string; target: string; input: string; patch?: ReaderPatch; entry?: string }
   /** A tool call has finished. `patch`, when present, replaces the one on the call. */
   | { op: 'tool-result'; id: string; at: number; output: string; isError: boolean; truncated?: boolean; patch?: ReaderPatch }
   /** An event that is neither a person nor the agent: a finished background task, an interruption. */
   /** `endsTurn`: the agent stopped what it was doing without a normal end of turn (the person interrupted it). */
-  | { op: 'notice'; id: string; at: number; text: string; endsTurn?: true }
+  | { op: 'notice'; id: string; at: number; text: string; endsTurn?: true; entry?: string }
   /** The conversation was compacted here. */
-  | { op: 'boundary'; id: string; at: number; label: string }
+  | { op: 'boundary'; id: string; at: number; label: string; entry?: string }
   /** The agent finished a turn. */
-  | { op: 'turn-end'; id: string; at: number; durationMs: number }
+  | { op: 'turn-end'; id: string; at: number; durationMs: number; entry?: string }
   /**
    * A message waiting for the agent's next turn. `system` marks one the agent
    * queued for itself (a task notification), which a reader does not show but
    * must still count: a dequeue pops the oldest entry whoever queued it.
    */
   | { op: 'queue'; at: number; action: 'enqueue' | 'dequeue'; text?: string; system?: boolean }
-  | { op: 'title'; text: string };
+  | { op: 'title'; text: string }
+  /**
+   * `entry` follows `parent` in the log's tree; a null parent starts a new line of descent (the first
+   * entry, or the one that begins after a compaction). Sent for every entry, readable or not, in
+   * file order, because chains pass through entries that show nothing.
+   */
+  | { op: 'link'; entry: string; parent: string | null };
 
 export interface ReaderFeed {
   /** Which agent's record this is; null when the session has none. */

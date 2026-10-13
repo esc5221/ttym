@@ -17,6 +17,8 @@ const transcript = (sid: string, content: string, dir = projectDir()) => { mkdir
 beforeAll(() => { home = mkdtempSync(join(tmpdir(), 'ttym-reader-')); process.env.HOME = home; });
 afterAll(() => { process.env.HOME = realHome; rmSync(home, { recursive: true, force: true }); });
 
+const shown = (f: { updates: Array<{ op: string }> }) => f.updates.filter((u) => u.op !== 'link');
+
 describe('readerFeed', () => {
   it('reads a Claude session from the start, then only what was added', async () => {
     const p = transcript('sid-a', user('hello', 1));
@@ -24,12 +26,12 @@ describe('readerFeed', () => {
 
     const first = await readerFeed(meta, { after: null, key: null });
     expect(first).toMatchObject({ agent: 'claude-code', supported: true, key: 'sid-a', reset: true });
-    expect(first.updates).toMatchObject([{ op: 'user', text: 'hello' }]);
+    expect(shown(first)).toMatchObject([{ op: 'user', text: 'hello' }]);
 
     appendFileSync(p, user('again', 2));
     const second = await readerFeed(meta, { after: first.next, key: first.key });
     expect(second.reset).toBe(false);
-    expect(second.updates).toMatchObject([{ op: 'user', text: 'again' }]);
+    expect(shown(second)).toMatchObject([{ op: 'user', text: 'again' }]);
   });
 
   it('starts over when the session id changed (cleared or resumed conversation)', async () => {
@@ -38,20 +40,20 @@ describe('readerFeed', () => {
     const old = await readerFeed({ claudeSessionId: 'sid-old', cwd: CWD }, { after: null, key: null });
     const next = await readerFeed({ claudeSessionId: 'sid-new', cwd: CWD }, { after: old.next, key: old.key });
     expect(next).toMatchObject({ key: 'sid-new', reset: true });
-    expect(next.updates).toMatchObject([{ text: 'new' }]);
+    expect(shown(next)).toMatchObject([{ text: 'new' }]);
   });
 
   it('uses the last session id after the agent has stopped', async () => {
     transcript('sid-last', user('done', 1));
     const feed = await readerFeed({ claudeLastSessionId: 'sid-last', cwd: CWD }, { after: null, key: null });
-    expect(feed.updates).toMatchObject([{ text: 'done' }]);
+    expect(shown(feed)).toMatchObject([{ text: 'done' }]);
   });
 
   it('finds the file under another project directory when the pane has since moved on', async () => {
     transcript('sid-moved', user('where am i', 1), join(home, '.claude', 'projects', '-somewhere-else'));
     const feed = await readerFeed({ claudeSessionId: 'sid-moved', cwd: '/entirely/different' }, { after: null, key: null });
     expect(feed).toMatchObject({ supported: true, key: 'sid-moved' });
-    expect(feed.updates).toMatchObject([{ text: 'where am i' }]);
+    expect(shown(feed)).toMatchObject([{ text: 'where am i' }]);
   });
 
   it('answers an empty, supported feed when the record is not on disk yet', async () => {

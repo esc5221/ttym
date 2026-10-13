@@ -182,3 +182,70 @@ describe('earlier history', () => {
     expect(older.title).toBeNull();
   });
 });
+
+describe('rolled-back branches', () => {
+  const link = (entry: string, parent: string | null): ReaderUpdate => ({ op: 'link', entry, parent });
+  const u = (id: string, entry: string, text = id): ReaderUpdate => ({ op: 'user', id, at: 1, text, entry });
+  const a = (id: string, entry: string): ReaderUpdate => ({ op: 'text', id, at: 2, text: id, entry });
+  const ids = (s: ReturnType<typeof applyFeed>) => s.blocks.map((b) => b.id);
+
+  it('hides what was taken back when the conversation went on from an earlier point', () => {
+    // one → answer → (two → answer2 abandoned) ; three continues from the answer
+    const s = applyFeed(emptyState(), feed([
+      link('e1', null), u('one', 'e1'), link('e2', 'e1'), a('ans1', 'e2'),
+      link('e3', 'e2'), u('two', 'e3'), link('e4', 'e3'), a('ans2', 'e4'),
+      link('e5', 'e2'), u('three', 'e5'), link('e6', 'e5'), a('ans3', 'e6'),
+    ]));
+    expect(ids(s)).toEqual(['one', 'ans1', 'three', 'ans3']);
+    expect(s.raw.map((b) => b.id)).toEqual(['one', 'ans1', 'two', 'ans2', 'three', 'ans3']);
+  });
+
+  it('hides a message from the moment it is taken back, on a later poll', () => {
+    const first = applyFeed(emptyState(), feed([link('e1', null), u('one', 'e1'), link('e2', 'e1'), u('mistyped', 'e2')]));
+    expect(ids(first)).toEqual(['one', 'mistyped']);
+    const then = applyFeed(first, feed([link('e3', 'e1'), u('retyped', 'e3')], { reset: false, next: 200 }));
+    expect(ids(then)).toEqual(['one', 'retyped']);
+  });
+
+  it('keeps every line of descent: history from before a compaction stays', () => {
+    const s = applyFeed(emptyState(), feed([
+      link('a1', null), u('old', 'a1'), link('a2', 'a1'), a('olda', 'a2'),
+      link('b1', null), { op: 'boundary', id: 'bd', at: 1, label: 'compacted', entry: 'b1' }, link('b2', 'b1'), u('new', 'b2'),
+    ]));
+    expect(ids(s)).toEqual(['old', 'olda', 'bd', 'new']);
+  });
+
+  it('shows what the log says nothing about, and what a window cut off from its parent', () => {
+    const s = applyFeed(emptyState(), feed([
+      u('plain', 'unlinked'), link('w2', 'outside-the-window'), u('inwindow', 'w2'),
+    ]));
+    expect(ids(s)).toEqual(['plain', 'inwindow']);
+  });
+
+  it('counts a turn’s tools from its own branch', () => {
+    const t = (id: string, entry: string): ReaderUpdate => ({ op: 'tool', id, at: 1, name: 'Bash', target: id, input: '', entry });
+    const s = applyFeed(emptyState(), feed([
+      link('e1', null), u('go', 'e1'), link('e2', 'e1'), t('dead-tool', 'e2'),
+      link('e3', 'e1'), t('live-tool', 'e3'), link('e4', 'e3'), { op: 'turn-end', id: 'end', at: 5, durationMs: 1000, entry: 'e4' },
+    ]));
+    expect(ids(s)).toEqual(['go', 'live-tool', 'end']);
+    expect(s.blocks.find((b) => b.id === 'end')).toMatchObject({ tools: 1 });
+  });
+
+  it('joins the links of an older page, so history above can be told dead or alive too', () => {
+    const now = applyFeed(emptyState(), feed([link('e5', 'e2'), u('three', 'e5')], { from: 4000 }));
+    expect(ids(now)).toEqual(['three']);
+    const older = applyEarlier(now, feed([link('e1', null), u('one', 'e1'), link('e2', 'e1'), a('ans1', 'e2'), link('e3', 'e2'), u('two', 'e3')], { reset: false, from: 0, next: 50 }));
+    expect(ids(older)).toEqual(['one', 'ans1', 'three']);
+    expect(older.raw.map((b) => b.id)).toContain('two');
+  });
+
+  it('does not treat an interruption that was rolled back as the last word', () => {
+    const s = applyFeed(emptyState(), feed([
+      link('e1', null), u('go', 'e1'), link('e2', 'e1'), { op: 'notice', id: 'stop', at: 3, text: 'Request interrupted by user', endsTurn: true, entry: 'e2' },
+      link('e3', 'e1'), u('again', 'e3'),
+    ]));
+    expect(interrupted(s)).toBe(false);
+    expect(ids(s)).toEqual(['go', 'again']);
+  });
+});

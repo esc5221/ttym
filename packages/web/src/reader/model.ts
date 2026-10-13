@@ -10,7 +10,12 @@ import type { ReaderAgent, ReaderFeed, ReaderPatch, ReaderUpdate } from '@ttym/a
  * browser.
  */
 
-export type Block =
+export type Block = BlockBody & {
+  /** The record of the agent's log this came from, to tell live branches from rolled-back ones (see `link`). */
+  entry?: string;
+};
+
+type BlockBody =
   | { kind: 'user'; id: string; at: number; text: string; images: number }
   | { kind: 'text'; id: string; at: number; text: string }
   | { kind: 'thinking'; id: string; at: number; text: string }
@@ -31,7 +36,12 @@ export interface ReaderState {
   agent: ReaderAgent | null;
   /** Null until the server has answered once. */
   supported: boolean | null;
+  /** What is shown: `raw` without the branches that were rolled back. */
   blocks: Block[];
+  /** Every block received, in order, including the ones on branches that were rolled back. */
+  raw: Block[];
+  /** How the log's entries descend from each other, in file order. */
+  chain: ChainLink[];
   title: string | null;
   queue: QueuedMessage[];
   /** Offset to ask for the page of history above `blocks`; null when they begin at the start of the record. */
@@ -41,40 +51,46 @@ export interface ReaderState {
 }
 
 type ToolResult = Extract<ReaderUpdate, { op: 'tool-result' }>;
+export interface ChainLink { entry: string; parent: string | null }
+
+/** The links kept; more than the blocks need, since most entries show nothing. */
+const MAX_CHAIN = 20_000;
 
 /** A tab left open for days should not grow without bound. */
 export const MAX_BLOCKS = 2000;
 
 export function emptyState(): ReaderState {
-  return { key: null, next: 0, agent: null, supported: null, blocks: [], title: null, queue: [], earlier: null, orphans: {} };
+  return { key: null, next: 0, agent: null, supported: null, blocks: [], raw: [], chain: [], title: null, queue: [], earlier: null, orphans: {} };
 }
 
 export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
   if (!feed.reset && feed.updates.length === 0 && feed.next === state.next && feed.key === state.key
     && feed.agent === state.agent && feed.supported === state.supported) return state;
 
-  const blocks = feed.reset ? [] : state.blocks.slice();
+  const blocks = feed.reset ? [] : state.raw.slice();
+  const chain: ChainLink[] = feed.reset ? [] : state.chain.slice();
+  const linked = new Set(chain.map((l) => l.entry));
   const index = new Map<string, number>();
   blocks.forEach((b, i) => index.set(b.id, i));
   let queue = feed.reset ? [] : state.queue.slice();
   let title = feed.reset ? null : state.title;
   const orphans: Record<string, ToolResult> = feed.reset ? {} : { ...state.orphans };
 
-  const add = (b: Block) => {
+  const add = (b: BlockBody, entry?: string) => {
     if (index.has(b.id)) return; // the same update delivered twice changes nothing
     index.set(b.id, blocks.length);
-    blocks.push(b);
+    blocks.push(entry ? { ...b, entry } : b);
   };
 
   for (const u of feed.updates) {
     switch (u.op) {
-      case 'user': add({ kind: 'user', id: u.id, at: u.at, text: u.text, images: u.images ?? 0 }); break;
-      case 'text': add({ kind: 'text', id: u.id, at: u.at, text: u.text }); break;
-      case 'thinking': add({ kind: 'thinking', id: u.id, at: u.at, text: u.text }); break;
-      case 'notice': add({ kind: 'notice', id: u.id, at: u.at, text: u.text, endsTurn: u.endsTurn === true }); break;
-      case 'boundary': add({ kind: 'boundary', id: u.id, at: u.at, label: u.label }); break;
+      case 'user': add({ kind: 'user', id: u.id, at: u.at, text: u.text, images: u.images ?? 0 }, u.entry); break;
+      case 'text': add({ kind: 'text', id: u.id, at: u.at, text: u.text }, u.entry); break;
+      case 'thinking': add({ kind: 'thinking', id: u.id, at: u.at, text: u.text }, u.entry); break;
+      case 'notice': add({ kind: 'notice', id: u.id, at: u.at, text: u.text, endsTurn: u.endsTurn === true }, u.entry); break;
+      case 'boundary': add({ kind: 'boundary', id: u.id, at: u.at, label: u.label }, u.entry); break;
       case 'tool':
-        add({ kind: 'tool', id: u.id, at: u.at, name: u.name, target: u.target, input: u.input, status: 'running', output: '', truncated: false, ...(u.patch ? { patch: u.patch } : {}) });
+        add({ kind: 'tool', id: u.id, at: u.at, name: u.name, target: u.target, input: u.input, status: 'running', output: '', truncated: false, ...(u.patch ? { patch: u.patch } : {}) }, u.entry);
         break;
       case 'tool-result': {
         // A result whose call is in history we haven't loaded waits for it.
@@ -86,7 +102,7 @@ export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
       }
       case 'turn-end': {
         const summary = summarizeTurn(blocks);
-        add({ kind: 'turn-end', id: u.id, at: u.at, durationMs: u.durationMs, tools: summary.tools, edited: summary.edited });
+        add({ kind: 'turn-end', id: u.id, at: u.at, durationMs: u.durationMs, tools: summary.tools, edited: summary.edited }, u.entry);
         break;
       }
       case 'queue':
@@ -94,16 +110,22 @@ export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
         else queue = queue.slice(1); // a dequeue takes the oldest, whoever queued it
         break;
       case 'title': title = u.text; break;
+      case 'link':
+        if (!linked.has(u.entry)) { linked.add(u.entry); chain.push({ entry: u.entry, parent: u.parent }); }
+        break;
     }
   }
 
   const capped = blocks.length > MAX_BLOCKS ? blocks.slice(blocks.length - MAX_BLOCKS) : blocks;
+  const trimmedChain = chain.length > MAX_CHAIN ? chain.slice(chain.length - MAX_CHAIN) : chain;
   return {
     key: feed.key,
     next: feed.next,
     agent: feed.agent,
     supported: feed.supported,
-    blocks: capped,
+    blocks: shownBlocks(capped, trimmedChain),
+    raw: capped,
+    chain: trimmedChain,
     title,
     queue,
     // Blocks trimmed off the front leave a gap nothing here can offset into, so there is no loading earlier history after that.
@@ -128,9 +150,9 @@ export function applyEarlier(state: ReaderState, feed: ReaderFeed): ReaderState 
     reset: true,
     updates: feed.updates.filter((u) => u.op !== 'queue' && u.op !== 'title'),
   });
-  const held = new Set(state.blocks.map((b) => b.id));
+  const held = new Set(state.raw.map((b) => b.id));
   const orphans = { ...state.orphans };
-  const older = page.blocks
+  const older = page.raw
     .filter((b) => !held.has(b.id))
     .map((b) => {
       if (b.kind !== 'tool') return b;
@@ -139,7 +161,50 @@ export function applyEarlier(state: ReaderState, feed: ReaderFeed): ReaderState 
       delete orphans[b.id];
       return withResult(b, result);
     });
-  return { ...state, blocks: [...older, ...state.blocks], earlier: feed.from > 0 ? feed.from : null, orphans: { ...page.orphans, ...orphans } };
+  const linked = new Set(state.chain.map((l) => l.entry));
+  const chain = [...page.chain.filter((l) => !linked.has(l.entry)), ...state.chain];
+  const raw = [...older, ...state.raw];
+  return { ...state, raw, chain, blocks: shownBlocks(raw, chain), earlier: feed.from > 0 ? feed.from : null, orphans: { ...page.orphans, ...orphans } };
+}
+
+/**
+ * The entries still on the conversation: those from which the latest entry of each line of descent
+ * can be reached by following parents. Entries off that path were rolled back.
+ */
+function liveEntries(chain: ChainLink[]): Set<string> {
+  const parent = new Map(chain.map((l) => [l.entry, l.parent]));
+  const live = new Set<string>();
+  const walk = (from: number, to: number) => {
+    const within = new Set(chain.slice(from, to).map((l) => l.entry));
+    let at: string | null = chain[to - 1]!.entry;
+    while (at && within.has(at) && !live.has(at)) { live.add(at); at = parent.get(at) ?? null; }
+  };
+  let start = 0;
+  for (let i = 1; i < chain.length; i++) {
+    if (chain[i]!.parent === null) { walk(start, i); start = i; }
+  }
+  if (chain.length) walk(start, chain.length);
+  return live;
+}
+
+/**
+ * `raw` without what was rolled back. A block whose entry the chain does not know is shown (nothing says
+ * it is dead). Turn summaries are counted again over what remains, since the tools a turn ran are the ones on its branch.
+ */
+function shownBlocks(raw: Block[], chain: ChainLink[]): Block[] {
+  if (chain.length === 0) return raw;
+  const live = liveEntries(chain);
+  const known = new Set(chain.map((l) => l.entry));
+  const kept = raw.filter((b) => !b.entry || !known.has(b.entry) || live.has(b.entry));
+  if (kept.length === raw.length) return kept;
+  const out: Block[] = [];
+  for (const b of kept) {
+    if (b.kind === 'turn-end') {
+      const s = summarizeTurn(out);
+      out.push(s.tools === b.tools && s.edited.join('\0') === b.edited.join('\0') ? b : { ...b, tools: s.tools, edited: s.edited });
+    } else out.push(b);
+  }
+  return out;
 }
 
 /** The tools and edited files of the turn that is ending: everything since the last prompt or turn end. */

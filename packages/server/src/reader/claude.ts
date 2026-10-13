@@ -48,12 +48,24 @@ export function parseClaudeLines(lines: string[]): ReaderUpdate[] {
     let e: unknown;
     try { e = JSON.parse(line); } catch { continue; }
     if (!isObj(e) || e.isSidechain === true) continue;
+    const entry = str(e.uuid);
+    const before = out.length;
     switch (e.type) {
       case 'user': pushUser(out, e); break;
       case 'assistant': pushAssistant(out, e); break;
       case 'system': pushSystem(out, e); break;
       case 'queue-operation': pushQueue(out, e); break;
       case 'ai-title': { const title = str(e.aiTitle); if (title) out.push({ op: 'title', text: title }); break; }
+    }
+    if (entry) {
+      // Everything this record made belongs to it; and its place in the tree is told even when it made nothing
+      // (an attachment, a hook summary) — the chain of descent runs through those too.
+      for (let i = before; i < out.length; i++) {
+        const u = out[i]!;
+        if (u.op !== 'tool-result' && u.op !== 'queue' && u.op !== 'title' && u.op !== 'link') out[i] = { ...u, entry };
+      }
+      // A compaction's logicalParentUuid is no tree edge (it can name a record that came after it), so only parentUuid counts.
+      out.splice(before, 0, { op: 'link', entry, parent: str(e.parentUuid) ?? null });
     }
   }
   return out;
