@@ -4,6 +4,7 @@ import { AGENT_COLORS, closeBtnStyle, copySessionUrl, miniLinkBtnStyle, type UI_
 import { viewSrc } from '../viewer/content.js';
 import { PaneTabs } from '../viewer/PaneTabs.js';
 import { StripMenu, attachDropdownItemStyle } from '../StripMenu.js';
+import { READER_KEY_LABEL } from '../reader/toggle-key.js';
 import { setPaneDock, setPaneReader, usePaneDock, usePaneReader } from '../reader/paneReader.js';
 import { paneReaderAvailable } from './PaneBody.js';
 import { sleepTitle } from './sleep-text.js';
@@ -134,7 +135,7 @@ export function PaneHeader({ sid, name, cwd, isFocused, dead, zoomed, fit, U, dr
               <button
                 key={m}
                 onClick={(e) => { e.stopPropagation(); if (paneTab !== 'term') viewer.setActive(sid, 'term'); setPaneReader(sid, m === 'reader'); }}
-                title={m === 'reader' ? 'the conversation, laid out to read' : 'the raw terminal'}
+                title={`${m === 'reader' ? 'the conversation, laid out to read' : 'the raw terminal'} · ${READER_KEY_LABEL}`}
                 style={{ padding: '1px 7px', border: 'none', cursor: 'pointer', font: 'inherit', background: on ? 'var(--bg1)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-dim)' }}
               >{m}</button>
             );

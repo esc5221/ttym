@@ -37,6 +37,8 @@ export function setPaneReader(sid: number, on: boolean): void {
   emit();
 }
 
+export const isPaneReader = (sid: number): boolean => loadPanes().has(sid);
+
 export function usePaneReader(sid: number): boolean {
   return useSyncExternalStore(subscribe, () => loadPanes().has(sid));
 }

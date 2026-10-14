@@ -15,8 +15,10 @@ import { type ViewerFocus } from '../route.js';
 import { StripMenu, attachDropdownTitleStyle, attachDropdownItemStyle, attachDropdownEmptyStyle } from '../StripMenu.js';
 import { ZenView } from './ZenView.js';
 import { PaneHeader } from './PaneHeader.js';
-import { PaneBody } from './PaneBody.js';
-import { WorkspaceSessionsContext, type WorkspaceSessions } from './session-context.js';
+import { PaneBody, paneReaderAvailable } from './PaneBody.js';
+import { isPaneReader, setPaneReader } from '../reader/paneReader.js';
+import { isReaderToggleKey } from '../reader/toggle-key.js';
+import { WorkspaceSessionsContext, paneView, type WorkspaceSessions } from './session-context.js';
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
@@ -467,6 +469,24 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
   }), [mux, localEchoEnabled, touch, agentStates, lastAgentIds, deadSessions, markDead, focusedSid, focusSid, bells, ringBell,
     viewer, open, openFull, viewerReload, reloadViewer, selOpen, offerSelection, search,
     fileDropSid, insertPathsIntoPane, sleepAgent, wakeAgent, dismissSleep, restoreAgent, sleepNote, restartAt, detachMember]);
+
+  // ⌘, (Ctrl+,): 포커스 pane의 터미널 ↔ reader. zen 안에서는 ZenView가 같은 키를 듣는다.
+  // reader를 못 쓰는 pane(쉘 등)에서는 키를 건드리지 않는다.
+  useEffect(() => {
+    if (touch) return;
+    const handler = (event: KeyboardEvent) => {
+      if (!isReaderToggleKey(event) || zenSid !== null || open !== null) return;
+      const sid = focusedSid ?? sessionIds[0];
+      if (sid === undefined || !paneReaderAvailable(agentStates[sid]?.kind, deadSessions.has(sid), touch)) return;
+      event.preventDefault();
+      const { tab } = paneView(sessions, sid);
+      // 파일 탭을 보고 있었다면 터미널로 돌아오면서 reader를 켠다 (헤더의 term/reader 버튼과 같다).
+      if (tab !== 'term') { viewer.setActive(sid, 'term'); setPaneReader(sid, true); }
+      else setPaneReader(sid, !isPaneReader(sid));
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [touch, zenSid, open, focusedSid, sessionIds.join(','), agentStates, deadSessions, sessions, viewer]);
 
   const renderPane = useCallback((sid: number, _path: number[]) => {
     if (sid <= 0) {

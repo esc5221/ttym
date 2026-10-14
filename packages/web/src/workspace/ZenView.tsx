@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatCwd } from '@ttym/shared';
 import { beginDragGuard, getHost } from '@ttym/ui';
+import { isReaderToggleKey, READER_KEY_LABEL } from '../reader/toggle-key.js';
 import { readZenFontDelta, writeZenFontDelta, readZenCols, writeZenCols, readZenReader, writeZenReader, readZenReaderDock, writeZenReaderDock, READER_COLUMN_PX, ZEN_DEFAULT_COLS, ZEN_COLS_MIN, ZEN_COLS_MAX, miniLinkBtnStyle, type AgentState } from '../app-shared.js';
 import { SessionBody } from './SessionBody.js';
 import { type DockMode } from '../reader/ReaderView.js';
@@ -75,6 +76,17 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
   // 140칸으로 그려진 화면이 접혀서(reflow) 에이전트가 다시 그릴 때까지 입력창 줄이 깨진다.
   const fixedCols = split ? undefined : readerOn ? Math.max(ZEN_COLS_MIN, Math.floor(READER_COLUMN_PX / (dock?.cellW ?? fontSize * 0.6))) : cols;
   const setReader = (on: boolean) => { setReaderPref(on); writeZenReader(on); };
+  // ⌘, (Ctrl+,): 터미널 ↔ reader. 옆 뷰어와 나란히 서 있을 때는 reader가 꺼져 있으니 건드리지 않는다.
+  useEffect(() => {
+    if (split) return;
+    const handler = (event: KeyboardEvent) => {
+      if (!isReaderToggleKey(event)) return;
+      event.preventDefault();
+      setReader(!readerOn);
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [split, readerOn]);
   useEffect(() => {
     if (!readerOn) return;
     const host = getHost(sid);
@@ -111,7 +123,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
               {(['terminal', 'reader'] as const).map((m) => {
                 const on = (m === 'reader') === readerOn;
-                return <button key={m} onClick={() => setReader(m === 'reader')} style={{ ...miniLinkBtnStyle, ...(on ? { color: 'var(--accent)' } : null) }} title={m === 'reader' ? 'conversation, laid out to read' : 'the raw terminal'}>{m}</button>;
+                return <button key={m} onClick={() => setReader(m === 'reader')} style={{ ...miniLinkBtnStyle, ...(on ? { color: 'var(--accent)' } : null) }} title={`${m === 'reader' ? 'conversation, laid out to read' : 'the raw terminal'} · ${READER_KEY_LABEL}`}>{m}</button>;
               })}
             </span>
           )}
