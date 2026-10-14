@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SESSION_REF, matchSessionRefs } from './session-links.js';
+import { SESSION_REF, matchSessionRefs } from './session-ref.js';
 
 const refs = (s: string) => [...s.matchAll(SESSION_REF)].map((m) => m[0]);
 const parts = (s: string) => [...s.matchAll(SESSION_REF)].map((m) => [m[1], m[2]]);

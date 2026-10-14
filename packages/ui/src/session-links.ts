@@ -1,4 +1,5 @@
 import type { IBufferLine, ILink, ILinkProvider, Terminal as XTerm } from '@xterm/xterm';
+import { matchSessionRefs } from '@ttym/shared';
 
 /**
  * 터미널 글자 속의 `%1297`을 그 세션으로 가는 링크로 만든다.
@@ -7,10 +8,6 @@ import type { IBufferLine, ILink, ILinkProvider, Terminal as XTerm } from '@xter
  * 언급하면 그 자리에서 눌러 열 수 있어야 한다. 무엇을 여는지는 앱이 정한다 — 이 패키지는
  * 앱의 라우트를 모른다. 핸들러가 없으면 링크를 만들지 않는다.
  */
-
-/** `%1297`, 다른 머신이면 `box%1297`. 앞이 글자·%·/ 이면 아니다(`a%20b`, URL 인코딩).
- *  뒤가 글자면 아니다(`%10s` printf 서식). 이름이 알려진 머신이 아니면 링크가 아니다(provider에서 거른다). */
-export const SESSION_REF = /(?<![\w%/-])(?:([A-Za-z][\w-]*))?%(\d{1,4})(?!\w)/g;
 
 export interface SessionLinkHandler {
   /** `host`는 다른 머신의 세션일 때만 있다. */
@@ -31,29 +28,6 @@ export function setSessionLinkHandler(next: SessionLinkHandler | null): void {
 /** 터미널 밖(reader)에서 같은 링크를 누르거나 올렸을 때 같은 핸들러로 보낸다. 핸들러가 없으면 아무 일도 없다. */
 export const sessionLinkHandler = (): SessionLinkHandler | null => handler;
 
-export interface SessionRefMatch {
-  /** `text` 안의 UTF-16 위치. end는 마지막 글자 다음. */
-  start: number;
-  end: number;
-  sessionId: number;
-  host?: string;
-}
-
-/**
- * 글자 속의 세션 참조들. 터미널(셀 좌표로 옮김)과 reader(DOM 글자 노드)가 같은 규칙을 쓰도록
- * 여기 하나만 둔다. `hosts`가 없거나 모르는 이름의 `box%78`은 뺀다.
- */
-export function matchSessionRefs(text: string, hosts?: ReadonlySet<string>): SessionRefMatch[] {
-  const out: SessionRefMatch[] = [];
-  for (const m of text.matchAll(SESSION_REF)) {
-    const sessionId = parseInt(m[2], 10);
-    if (!sessionId) continue;
-    const host = m[1];
-    if (host && !hosts?.has(host)) continue;
-    out.push({ start: m.index!, end: m.index! + m[0].length, sessionId, host });
-  }
-  return out;
-}
 
 /** 줄 문자열의 각 UTF-16 위치가 몇 번째 칸(0부터)인지. 한글처럼 두 칸짜리 글자가 있으면
  *  문자열 위치와 칸 위치가 어긋나므로, 셀을 따라가며 직접 센다. */
