@@ -28,6 +28,33 @@ export function setSessionLinkHandler(next: SessionLinkHandler | null): void {
   handler = next;
 }
 
+/** 터미널 밖(reader)에서 같은 링크를 누르거나 올렸을 때 같은 핸들러로 보낸다. 핸들러가 없으면 아무 일도 없다. */
+export const sessionLinkHandler = (): SessionLinkHandler | null => handler;
+
+export interface SessionRefMatch {
+  /** `text` 안의 UTF-16 위치. end는 마지막 글자 다음. */
+  start: number;
+  end: number;
+  sessionId: number;
+  host?: string;
+}
+
+/**
+ * 글자 속의 세션 참조들. 터미널(셀 좌표로 옮김)과 reader(DOM 글자 노드)가 같은 규칙을 쓰도록
+ * 여기 하나만 둔다. `hosts`가 없거나 모르는 이름의 `box%78`은 뺀다.
+ */
+export function matchSessionRefs(text: string, hosts?: ReadonlySet<string>): SessionRefMatch[] {
+  const out: SessionRefMatch[] = [];
+  for (const m of text.matchAll(SESSION_REF)) {
+    const sessionId = parseInt(m[2], 10);
+    if (!sessionId) continue;
+    const host = m[1];
+    if (host && !hosts?.has(host)) continue;
+    out.push({ start: m.index!, end: m.index! + m[0].length, sessionId, host });
+  }
+  return out;
+}
+
 /** 줄 문자열의 각 UTF-16 위치가 몇 번째 칸(0부터)인지. 한글처럼 두 칸짜리 글자가 있으면
  *  문자열 위치와 칸 위치가 어긋나므로, 셀을 따라가며 직접 센다. */
 export function columnsOf(line: IBufferLine, cols: number): { text: string; col: number[] } {
@@ -51,16 +78,12 @@ export function sessionLinkProvider(term: XTerm): ILinkProvider {
       if (!line) { callback(undefined); return; }
       const { text, col } = columnsOf(line, term.cols);
       const links: ILink[] = [];
-      for (const m of text.matchAll(SESSION_REF)) {
-        const start = m.index!;
-        const end = start + m[0].length - 1;
-        const host = m[1];
-        const sessionId = parseInt(m[2], 10);
-        if (!sessionId) continue;
-        if (host && !handler?.hosts?.().has(host)) continue;
+      for (const m of matchSessionRefs(text, handler?.hosts?.())) {
+        const { sessionId, host } = m;
+        const last = m.end - 1;
         links.push({
-          range: { start: { x: col[start] + 1, y }, end: { x: col[end] + 1, y } },
-          text: m[0],
+          range: { start: { x: col[m.start] + 1, y }, end: { x: col[last] + 1, y } },
+          text: text.slice(m.start, m.end),
           decorations: { underline: true, pointerCursor: true },
           activate: (event) => handler?.open(sessionId, event, host),
           hover: (event) => handler?.hover?.(sessionId, event, host),

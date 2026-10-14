@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SESSION_REF } from './session-links.js';
+import { SESSION_REF, matchSessionRefs } from './session-links.js';
 
 const refs = (s: string) => [...s.matchAll(SESSION_REF)].map((m) => m[0]);
 const parts = (s: string) => [...s.matchAll(SESSION_REF)].map((m) => [m[1], m[2]]);
@@ -25,5 +25,23 @@ describe('SESSION_REF', () => {
   it('does not take the tail of a longer word or a path', () => {
     expect(refs('x/box%78')).toEqual([]);
     expect(refs('%%78')).toEqual([]);
+  });
+});
+
+describe('matchSessionRefs', () => {
+  const hosts = new Set(['box']);
+  const text = 'see box%78, mac%9 and %5.';
+
+  it('returns positions in the text, and only known machines', () => {
+    const found = matchSessionRefs(text, hosts);
+    expect(found.map((m) => [text.slice(m.start, m.end), m.sessionId, m.host])).toEqual([['box%78', 78, 'box'], ['%5', 5, undefined]]);
+  });
+
+  it('drops every machine-qualified ref when no machines are known', () => {
+    expect(matchSessionRefs(text).map((m) => m.sessionId)).toEqual([5]);
+  });
+
+  it('skips %0', () => {
+    expect(matchSessionRefs('%0 %3').map((m) => m.sessionId)).toEqual([3]);
   });
 });
