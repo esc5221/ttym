@@ -4,7 +4,7 @@ import type { ReaderPatch } from '@ttym/api';
 import '../viewer/viewer.css';
 import './reader.css';
 import { cachedMarkdown, renderMarkdown } from './markdown.js';
-import { formatDuration, groupRuns, pendingMessages, turnStartedAt, type Block, type ReaderState } from './model.js';
+import { attachSummaries, formatDuration, groupRuns, pendingMessages, turnStartedAt, type Block, type ReaderState } from './model.js';
 import { Linkified, refLinkHandlers } from './ref-links.js';
 import { StyledDock } from './StyledDock.js';
 import type { DockLayout } from './useDockLayout.js';
@@ -188,7 +188,7 @@ function Body({ state, error }: { state: ReaderState; error: string | null }) {
   return (
     <>
       {error ? <div className="rd-notice">Can’t refresh: {error}</div> : null}
-      {groupRuns(state.blocks, narrow).map((g) => Array.isArray(g)
+      {groupRuns(attachSummaries(state.blocks), narrow).map((g) => Array.isArray(g)
         ? <ToolGroup key={g[0].id} tools={g} />
         : <BlockView key={g.id} block={g} />)}
     </>
@@ -207,7 +207,8 @@ function BlockView({ block: b }: { block: Block }) {
     case 'thinking':
       return <details className="rd-think"><summary>Thinking</summary><div className="rd-think-body">{b.text}</div></details>;
     case 'notice': return <div className="rd-notice">{b.text}</div>;
-    case 'boundary': return <div className="rd-boundary"><span>{b.label}</span></div>;
+    case 'boundary': return <Compaction label={b.label} summary={b.summary} />;
+    case 'summary': return <Compaction label="Conversation compacted" summary={b.text} />;
     case 'tool': return <ToolRow tool={b} />;
     case 'turn-end': {
       const parts = [`Worked for ${formatDuration(b.durationMs)}`];
@@ -216,6 +217,18 @@ function BlockView({ block: b }: { block: Block }) {
       return <div className="rd-turn-end">{parts.join(' · ')}</div>;
     }
   }
+}
+
+/** The line where the conversation was compacted. Its summary is long and for the agent, so it stays shut until asked for. */
+function Compaction({ label, summary }: { label: string; summary?: string }) {
+  const [open, setOpen] = useState(false);
+  if (!summary) return <div className="rd-boundary"><span>{label}</span></div>;
+  return (
+    <details className="rd-compact" onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+      <summary className="rd-boundary"><span>{label} · summary {open ? '▾' : '▸'}</span></summary>
+      {open ? <div className="rd-compact-body"><Markdown text={summary} /></div> : null}
+    </details>
+  );
 }
 
 const baseName = (path: string) => path.split('/').pop() || path;

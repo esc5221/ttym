@@ -30,6 +30,8 @@ import type { TranscriptSource } from './source.js';
 const MAX_OUTPUT = 12_000;
 const MAX_INPUT = 4_000;
 const MAX_TARGET = 200;
+/** A compaction summary is a page or two; the cap only guards against a runaway one. */
+const MAX_SUMMARY = 40_000;
 const MAX_QUEUE_TEXT = 300;
 const MAX_PATCH_LINES = 400;
 
@@ -79,6 +81,14 @@ const idOf = (e: Json, at: number, i = 0): string => `${str(e.uuid) ?? at}:${i}`
 function pushUser(out: ReaderUpdate[], e: Json): void {
   const at = atOf(e);
   const content = isObj(e.message) ? e.message.content : undefined;
+
+  // After a compaction the harness writes its summary as a user message; it is not what the person typed.
+  if (e.isCompactSummary === true) {
+    const text = (typeof content === 'string' ? content
+      : Array.isArray(content) ? content.map((b) => (isObj(b) && b.type === 'text' ? str(b.text) ?? '' : '')).join('\n') : '').trim();
+    if (text) out.push({ op: 'summary', id: idOf(e, at), at, text: clip(text, MAX_SUMMARY) });
+    return;
+  }
 
   if (typeof content === 'string') {
     if (e.isMeta === true) return;

@@ -20,7 +20,8 @@ type BlockBody =
   | { kind: 'text'; id: string; at: number; text: string }
   | { kind: 'thinking'; id: string; at: number; text: string }
   | { kind: 'notice'; id: string; at: number; text: string; endsTurn: boolean }
-  | { kind: 'boundary'; id: string; at: number; label: string }
+  | { kind: 'boundary'; id: string; at: number; label: string; /** The summary that followed it; filled in by `attachSummaries`. */ summary?: string }
+  | { kind: 'summary'; id: string; at: number; text: string }
   | {
       kind: 'tool'; id: string; at: number; name: string; target: string; input: string;
       status: 'running' | 'ok' | 'error'; output: string; truncated: boolean; endedAt?: number; patch?: ReaderPatch;
@@ -89,6 +90,7 @@ export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
       case 'thinking': add({ kind: 'thinking', id: u.id, at: u.at, text: u.text }, u.entry); break;
       case 'notice': add({ kind: 'notice', id: u.id, at: u.at, text: u.text, endsTurn: u.endsTurn === true }, u.entry); break;
       case 'boundary': add({ kind: 'boundary', id: u.id, at: u.at, label: u.label }, u.entry); break;
+      case 'summary': add({ kind: 'summary', id: u.id, at: u.at, text: u.text }, u.entry); break;
       case 'tool':
         add({ kind: 'tool', id: u.id, at: u.at, name: u.name, target: u.target, input: u.input, status: 'running', output: '', truncated: false, ...(u.patch ? { patch: u.patch } : {}) }, u.entry);
         break;
@@ -273,3 +275,18 @@ export function groupRuns(blocks: Block[], fold: boolean): (Block | Extract<Bloc
   return out;
 }
 
+
+/**
+ * A compaction is two records, the boundary and the summary that follows it. They are one thing on the page:
+ * a summary right after a boundary moves into it. One with no boundary before it (the boundary is in history
+ * not loaded yet) stays as it is and is drawn as a compaction of its own.
+ */
+export function attachSummaries(blocks: Block[]): Block[] {
+  const out: Block[] = [];
+  for (const b of blocks) {
+    const prev = out[out.length - 1];
+    if (b.kind === 'summary' && prev?.kind === 'boundary' && prev.summary === undefined) out[out.length - 1] = { ...prev, summary: b.text };
+    else out.push(b);
+  }
+  return out;
+}

@@ -66,6 +66,8 @@ export type ReaderUpdate =
   | { op: 'notice'; id: string; at: number; text: string; endsTurn?: true; entry?: string }
   /** The conversation was compacted here. */
   | { op: 'boundary'; id: string; at: number; label: string; entry?: string }
+  /** What the agent wrote down to carry on after a compaction. It follows the boundary and is not something the person said. */
+  | { op: 'summary'; id: string; at: number; text: string; entry?: string }
   /** The agent finished a turn. */
   | { op: 'turn-end'; id: string; at: number; durationMs: number; entry?: string }
   /**

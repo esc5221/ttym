@@ -155,6 +155,19 @@ describe('claude transcript → reader updates', () => {
       ]);
     });
 
+    it('reads the summary written after a compaction as a summary, not as something the person said', () => {
+      const u = parse(
+        { type: 'system', subtype: 'compact_boundary', uuid: 'c1', timestamp: T(1) },
+        { type: 'user', uuid: 's1', parentUuid: 'c1', timestamp: T(2), isCompactSummary: true, message: { role: 'user', content: 'This session is being continued from a previous conversation.\n\nSummary: …' } },
+        { type: 'user', uuid: 's2', parentUuid: 's1', timestamp: T(3), isCompactSummary: true, message: { role: 'user', content: [{ type: 'text', text: 'in blocks' }] } },
+      );
+      expect(u.filter((x) => x.op !== 'link')).toMatchObject([
+        { op: 'boundary' },
+        { op: 'summary', id: 's1:0', text: 'This session is being continued from a previous conversation.\n\nSummary: …' },
+        { op: 'summary', id: 's2:0', text: 'in blocks' },
+      ]);
+    });
+
     it('reads the queue, marking what the agent queued for itself', () => {
       const u = parse(
         { type: 'queue-operation', operation: 'enqueue', timestamp: T(1), content: 'also fix the README' },

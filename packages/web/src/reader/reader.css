@@ -85,6 +85,10 @@
 .rd-notice { color: var(--text-dim); font-size: var(--rd-s13); line-height: 1.54; text-align: center; }
 .rd-boundary { display: flex; align-items: center; gap: 12px; color: var(--text-dim); font-size: var(--rd-s12); margin: 14px 0; }
 .rd-boundary::before, .rd-boundary::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+.rd-compact > summary { list-style: none; cursor: pointer; opacity: .75; }
+.rd-compact > summary::-webkit-details-marker { display: none; }
+.rd-compact > summary:hover, .rd-compact[open] > summary { opacity: 1; }
+.rd-compact-body { max-height: 50vh; overflow-y: auto; margin: 0 0 14px; color: var(--text-soft); font-size: var(--rd-s13); }
 .rd-turn-end { color: var(--text-dim); font-size: var(--rd-s12); line-height: 1.5; margin: 2px 0 10px; }
 
 .rd-working { display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: var(--rd-s13); }

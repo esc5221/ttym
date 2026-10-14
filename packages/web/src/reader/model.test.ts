@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ReaderFeed, ReaderUpdate } from '@ttym/api';
-import { MAX_BLOCKS, applyEarlier, applyFeed, emptyState, formatDuration, interrupted, pendingMessages, turnStartedAt } from './model.js';
+import { MAX_BLOCKS, applyEarlier, attachSummaries, applyFeed, emptyState, formatDuration, interrupted, pendingMessages, turnStartedAt } from './model.js';
 
 const feed = (updates: ReaderUpdate[], over: Partial<ReaderFeed> = {}): ReaderFeed =>
   ({ agent: 'claude-code', supported: true, key: 'k1', next: 100, reset: true, from: 0, updates, ...over });
@@ -247,5 +247,24 @@ describe('rolled-back branches', () => {
     ]));
     expect(interrupted(s)).toBe(false);
     expect(ids(s)).toEqual(['go', 'again']);
+  });
+});
+
+describe('attachSummaries', () => {
+  const b = (updates: ReaderUpdate[]) => applyFeed(emptyState(), feed(updates)).blocks;
+
+  it('moves the summary after a boundary into it', () => {
+    const out = attachSummaries(b([{ op: 'text', id: 'a', at: 1, text: 'x' }, { op: 'boundary', id: 'c', at: 2, label: 'compacted' }, { op: 'summary', id: 's', at: 3, text: 'what happened' }, user('u', 4)]));
+    expect(out.map((x) => x.kind)).toEqual(['text', 'boundary', 'user']);
+    expect(out[1]).toMatchObject({ summary: 'what happened' });
+  });
+
+  it('leaves a summary with no boundary before it', () => {
+    expect(attachSummaries(b([user('u', 1), { op: 'summary', id: 's', at: 2, text: 't' }])).map((x) => x.kind)).toEqual(['user', 'summary']);
+  });
+
+  it('is not a turn start: a summary does not count as something the person said', () => {
+    const s = applyFeed(emptyState(), feed([user('u', 5), { op: 'summary', id: 's', at: 9, text: 't' }]));
+    expect(turnStartedAt(s)).toBe(5);
   });
 });
