@@ -190,10 +190,10 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
     }
     return undefined;
   }, [sessionCwds]);
-  const offerSelection = useCallback((sid: number, pane: HTMLElement, px: number, py: number) => {
+  const offerSelection = useCallback((sid: number, pane: HTMLElement, px: number, py: number, readText?: () => string) => {
     // 선택은 mouseup 뒤에 확정된다 — 한 틱 늦게 읽는다.
     setTimeout(() => {
-      const text = getHost(sid)?.term.getSelection() ?? '';
+      const text = (readText ? readText() : getHost(sid)?.term.getSelection()) ?? '';
       const candidate = parsePathCandidate(text, sessionCwds[sid], homeDir);
       if (!candidate) { setSelOpen((cur) => (cur?.sid === sid ? null : cur)); return; }
       // 놓은 자리가 pane 밖(옆 패널 등)일 수 있다 — pane 안으로 끌어온다.

@@ -1,9 +1,10 @@
 import { forwardRef } from 'react';
-import { Terminal, beginDragGuard, getHost } from '@ttym/ui';
-import { actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle, uploadDroppedFiles } from '../app-shared.js';
+import { Terminal, getHost } from '@ttym/ui';
+import { actionBtnStyle, emptyPaneStyle, miniLinkBtnStyle } from '../app-shared.js';
 import { SelectionOpen } from '../viewer/SelectionOpen.js';
 import { ViewerPanel } from '../viewer/ViewerPanel.js';
 import { ageText, sleepTitle } from './sleep-text.js';
+import { PANE_BODY_ATTR, usePaneFileDrop, usePaneSelection } from './pane-input.js';
 import { paneView, useWorkspaceSessions } from './session-context.js';
 
 export interface SessionBodyProps {
@@ -47,40 +48,18 @@ export const SessionBody = forwardRef<HTMLDivElement, SessionBodyProps>(function
   const asleep = sleep?.state === 'sleeping' || sleep?.state === 'waking';
   const view = paneView(ctx, sid, showFullInPlace);
   const covered = viewerOverlay && view.item !== null;
+  const fileDrop = usePaneFileDrop(sid);
+  const beginSelection = usePaneSelection(sid);
 
   return (
     <div
       ref={ref}
+      {...{ [PANE_BODY_ATTR]: sid }}
       onMouseDown={(e) => {
         ctx.focusSid(sid);
-        if (covered || e.button !== 0) return;
-        // 선택은 pane 밖에서 끝날 수 있다 — 옆 패널 위에서 놓으면 mouseup이 그쪽으로 간다.
-        // 그래서 mouseup은 window에서 받고, 그 사이 iframe이 포인터를 못 가져가게 막는다.
-        const pane = e.currentTarget;
-        beginDragGuard();
-        const up = (ev: MouseEvent) => {
-          window.removeEventListener('mouseup', up, true);
-          if (ev.button === 0) ctx.offerSelection(sid, pane, ev.clientX, ev.clientY);
-        };
-        window.addEventListener('mouseup', up, true);
+        if (!covered) beginSelection(e);
       }}
-      onDragOver={(e) => {
-        // 파일 드래그만 받는다 — 헤더의 pane 교환 드래그는 Files 타입이 없다.
-        if (!e.dataTransfer.types.includes('Files')) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-        ctx.setFileDropSid(sid);
-      }}
-      onDragLeave={() => ctx.setFileDropSid((cur) => (cur === sid ? null : cur))}
-      onDrop={(e) => {
-        if (!e.dataTransfer.types.includes('Files')) return;
-        e.preventDefault();
-        ctx.setFileDropSid(null);
-        const files = Array.from(e.dataTransfer.files);
-        void uploadDroppedFiles(files)
-          .then((paths) => ctx.insertPathsIntoPane(sid, paths))
-          .catch(() => {});
-      }}
+      {...fileDrop}
       style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column', ...style }}
     >
       {search?.sid === sid ? (

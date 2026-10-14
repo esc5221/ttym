@@ -38,8 +38,9 @@ export interface WorkspaceSessions {
 
   selOpen: SelectionTarget | null;
   setSelOpen: React.Dispatch<React.SetStateAction<SelectionTarget | null>>;
-  /** 선택을 끝낸 자리(clientX/Y)에 경로 open 메뉴를 띄운다. 놓은 곳이 pane 밖이어도 된다. */
-  offerSelection: (sid: number, pane: HTMLElement, clientX: number, clientY: number) => void;
+  /** 선택을 끝낸 자리(clientX/Y)에 경로 open 메뉴를 띄운다. 놓은 곳이 pane 밖이어도 된다.
+   *  `readText`: 선택된 글자를 읽는 법 — 안 주면 터미널의 선택. */
+  offerSelection: (sid: number, pane: HTMLElement, clientX: number, clientY: number, readText?: () => string) => void;
 
   search: { sid: number; query: string; index: number; count: number } | null;
   setSearch: React.Dispatch<React.SetStateAction<{ sid: number; query: string; index: number; count: number } | null>>;
