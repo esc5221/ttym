@@ -13,6 +13,8 @@ import { SessionPeek } from './SessionPeek.js';
 import { SettingsModal } from './SettingsModal.js';
 import { WorkspacePage } from './workspace/WorkspacePage.js';
 import { usePhoneImmersive } from './phone-immersive.js';
+import { parseAccent, BRAND_ACCENT } from './favicon.js';
+import { useTabIdentity } from './tab-identity.js';
 
 /** crypto.randomUUID fallback for non-secure contexts (HTTP over LAN) */
 function uuid(): string {
@@ -907,6 +909,9 @@ function App() {
   const [fontSize, setFontSize] = useState(14);
   // 빈 문자열 = 플랫폼 기본에 맡긴다 (맥=Menlo, 그 외=Monoplex KR Nerd).
   const [fontFamily, setFontFamily] = useState('');
+  // 이 서버의 탭 아이콘 색과 이름 — config `instance-color`·`instance-name`. 없으면 브랜드 색, 이름 없음.
+  const [instanceAccent, setInstanceAccent] = useState(BRAND_ACCENT);
+  const [instanceName, setInstanceName] = useState('');
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   /** stream 이름의 순서 — 서버 목록. 빈 stream은 여기에만 있다. */
   const [streams, setStreams] = useState<string[]>([]);
@@ -1096,6 +1101,17 @@ function App() {
     }) : undefined;
     return () => { cancelled = true; window.clearInterval(fallback); unsubscribe?.(); };
   }, [connected, workspaces.map((w) => w.id + ':' + layoutToSessionIds(w.layout).join('.')).join('|')]);
+
+  // 탭 아이콘과 제목: 모든 workspace의 에이전트 상태를 요약해 보인다 (favicon.ts).
+  const tabBase = route.page === 'workspace' ? (workspaces.find((w) => w.id === route.id)?.name ?? '')
+    : route.page === 'session' || route.page === 'viewer' ? `%${route.id}` : '';
+  const tabWorkspace = route.page === 'workspace' ? workspaces.find((w) => w.id === route.id) : undefined;
+  const tabScopeKey = tabWorkspace ? layoutToSessionIds(tabWorkspace.layout).join('.') : '';
+  const tabScope = useMemo(() => (tabWorkspace ? new Set(tabScopeKey ? tabScopeKey.split('.').map(Number) : []) : null), [tabWorkspace?.id, tabScopeKey]);
+  // 색은 stream 단위다: 같은 stream의 탭은 같은 색이고, stream이 없는 workspace는 자기 id로 색을 받는다.
+  const tabColorKey = tabWorkspace ? (tabWorkspace.map?.stream?.trim() ? `stream:${tabWorkspace.map.stream.trim()}` : tabWorkspace.id) : '';
+  const tabIdentity = useMemo(() => (tabWorkspace ? { key: tabColorKey, name: tabWorkspace.name } : undefined), [tabColorKey, tabWorkspace?.name]);
+  useTabIdentity({ agentStates, connected, base: tabBase, accent: instanceAccent, instance: instanceName, identity: tabIdentity, scope: tabScope });
 
   // 세션 단독 화면(#s/번호)은 주변 workspace로 돌아갈 길이 없다. 그 세션이 workspace에 속해 있으면
   // 그 workspace의 zen으로 간다 — 터미널 속 box%78 링크가 다른 머신의 웹을 이 주소로 열기 때문이다.
@@ -1379,6 +1395,8 @@ function App() {
       setMainView(values['main-view']);
       try { localStorage.setItem(MAIN_VIEW_STORAGE_KEY, values['main-view']); } catch {}
     }
+    setInstanceAccent(parseAccent(values['instance-color']));
+    setInstanceName((values['instance-name'] ?? '').trim());
     if (values['local-echo'] !== undefined) setLocalEchoEnabled(parseLocalEchoConfig(values['local-echo']));
     if (values['font-size'] !== undefined) {
       const size = Number(values['font-size']);

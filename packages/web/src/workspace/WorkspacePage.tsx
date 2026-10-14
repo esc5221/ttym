@@ -448,14 +448,6 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
     return () => window.removeEventListener('keydown', handler, true);
   }, [doSplit, sessionIds.join(','), focusedSid]);
 
-  // 탭 제목
-  useEffect(() => {
-    if (!ws) return;
-    const label = ws.name;
-    document.title = sessionIds.length > 0 ? `${label} (${sessionIds.length})` : label;
-    return () => { document.title = 'ttym'; };
-  }, [ws?.name, sessionIds.length]);
-
   const markDead = useCallback((sid: number) => setDeadSessions((prev) => new Set(prev).add(sid)), []);
   const focusSid = useCallback((sid: number) => {
     setFocusedSid(sid);
