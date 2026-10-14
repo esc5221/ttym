@@ -1,11 +1,12 @@
 import { highlightHtml, languageForTag } from '../viewer/highlight.js';
+import { linkifyTextNodes } from './ref-links.js';
 
 /**
  * The agent's words, as HTML. Same pipeline as the viewer's markdown tab
  * (marked → DOMPurify → highlight.js for fenced code), loaded on first use.
  *
  * Text arrives once and never changes, and the page re-renders often, so
- * results are kept by text. A page of a long conversation would otherwise
+ * results are kept by text (session references are linked as they were when the text was first rendered). A page of a long conversation would otherwise
  * parse every block again on each poll.
  */
 
@@ -38,6 +39,8 @@ export async function renderMarkdown(text: string): Promise<string> {
     const colored = await highlightHtml(code.textContent ?? '', lang);
     if (colored !== null) code.innerHTML = colored;
   }
+
+  linkifyTextNodes(doc);
 
   const html = doc.body.innerHTML;
   if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value as string);

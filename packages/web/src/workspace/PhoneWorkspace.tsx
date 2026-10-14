@@ -7,7 +7,8 @@ import { useSwipe } from '../useSwipe.js';
 import { usePinchZoom } from '../usePinchZoom.js';
 import { PaneTabs } from '../viewer/PaneTabs.js';
 import { SessionBody } from './SessionBody.js';
-import { ReaderView, type DockMode } from '../reader/ReaderView.js';
+import { type DockMode } from '../reader/ReaderView.js';
+import { WorkspaceReader } from './WorkspaceReader.js';
 import { useReader } from '../reader/useReader.js';
 import { ImmersiveChip } from './ImmersiveChip.js';
 import { PaneMenu } from './PaneMenu.js';
@@ -358,7 +359,7 @@ function FocusView({
           // 손가락 하나에 스크롤이 두 번 걸린다. 빌려 쓰면 넘칠 것이 없다.
           terminal={{ fontSize, geometry: 'borrow', enableWebgl: false }}
         />
-        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} fontSize={fontSize} topInset={immersive ? 44 : undefined} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+        {readerOn ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} fontSize={fontSize} topInset={immersive ? 44 : undefined} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
       </div>
 
       {immersive ? (

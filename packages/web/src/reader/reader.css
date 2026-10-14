@@ -35,7 +35,7 @@
 .rd-md h1, .rd-md h2 { font-size: var(--rd-s18); line-height: 1.44; font-weight: 600; margin: calc(var(--rd-fs, 15px) * 1.6) 0 calc(var(--rd-fs, 15px) * .4); }
 .rd-md h3 { font-size: var(--rd-s16); line-height: 1.5; font-weight: 600; margin: calc(var(--rd-fs, 15px) * 1.333) 0 calc(var(--rd-fs, 15px) * .267); }
 .rd-md h4, .rd-md h5, .rd-md h6 { font-size: var(--rd-fs, 15px); line-height: 1.6; font-weight: 600; margin: calc(var(--rd-fs, 15px) * 1.067) 0 calc(var(--rd-fs, 15px) * .267); }
-.rd-md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.rd-md a, .rd-bubble a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .rd-md hr { border: 0; border-top: 1px solid var(--line); margin: calc(var(--rd-fs, 15px) * 1.6) 0; }
 .rd-md blockquote { padding-left: 14px; border-left: 2px solid var(--line-strong); color: var(--text-soft); }
 .rd-md :not(pre) > code {
@@ -184,3 +184,6 @@
   .rd-turn-end { font-size: var(--rd-s12); opacity: .7; }
   .rd-tool-body { margin-left: 8px; }
 }
+
+/* a session reference in the text: looks like a link, goes where the terminal's %id goes */
+.rd-ref { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }

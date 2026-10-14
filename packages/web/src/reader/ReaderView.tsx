@@ -5,6 +5,7 @@ import '../viewer/viewer.css';
 import './reader.css';
 import { cachedMarkdown, renderMarkdown } from './markdown.js';
 import { formatDuration, groupRuns, pendingMessages, turnStartedAt, type Block, type ReaderState } from './model.js';
+import { Linkified, refLinkHandlers } from './ref-links.js';
 import { StyledDock } from './StyledDock.js';
 import type { DockLayout } from './useDockLayout.js';
 
@@ -18,7 +19,7 @@ export type DockMode = 'native' | 'styled';
  * and the permission dialog) is the terminal itself showing through, so typing
  * and answering a prompt need nothing from this file.
  */
-export function ReaderView({ sid, state, error, working, layout, dockMode, columnMax, flow = false, onLoadEarlier, loadingEarlier = false, fontSize, topInset }: {
+export function ReaderView({ sid, state, error, working, layout, dockMode, columnMax, flow = false, onLoadEarlier, loadingEarlier = false, fontSize, topInset, paneProps }: {
   sid: number;
   state: ReaderState;
   error: string | null;
@@ -37,6 +38,8 @@ export function ReaderView({ sid, state, error, working, layout, dockMode, colum
   fontSize?: number;
   /** Space to keep clear above the first line (px), for something floating over the top of the page. */
   topInset?: number;
+  /** What the pane does with the pointer apart from reading (dropped files, selecting a path); the page carries it so it works over the text too. */
+  paneProps?: React.HTMLAttributes<HTMLDivElement>;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
@@ -149,8 +152,8 @@ export function ReaderView({ sid, state, error, working, layout, dockMode, colum
 
   return (
     <>
-    <div className="rd-root" style={style} ref={root}>
-      <div className="rd-scroll" ref={scroller} onScroll={onScroll} onMouseUp={refocus}>
+    <div className="rd-root" style={style} ref={root} {...paneProps}>
+      <div className="rd-scroll" ref={scroller} onScroll={onScroll} onMouseUp={refocus} {...refLinkHandlers}>
         <div className={`rd-col${flowView ? ' rd-flow' : ''}`}>
           {state.earlier !== null && state.blocks.length > 0 ? (
             <button className="rd-earlier" onClick={requestEarlier} disabled={loadingEarlier}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>
@@ -197,7 +200,7 @@ function BlockView({ block: b }: { block: Block }) {
     case 'user':
       return (
         <div className="rd-user" title={new Date(b.at).toLocaleString()}>
-          <div className="rd-bubble">{b.text}{b.images ? <span className="rd-dim"> · {b.images} image{b.images > 1 ? 's' : ''}</span> : null}</div>
+          <div className="rd-bubble"><Linkified text={b.text} />{b.images ? <span className="rd-dim"> · {b.images} image{b.images > 1 ? 's' : ''}</span> : null}</div>
         </div>
       );
     case 'text': return <Markdown text={b.text} />;

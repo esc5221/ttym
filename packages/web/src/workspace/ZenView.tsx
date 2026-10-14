@@ -4,7 +4,8 @@ import { formatCwd } from '@ttym/shared';
 import { beginDragGuard, getHost } from '@ttym/ui';
 import { readZenFontDelta, writeZenFontDelta, readZenCols, writeZenCols, readZenReader, writeZenReader, readZenReaderDock, writeZenReaderDock, READER_COLUMN_PX, ZEN_DEFAULT_COLS, ZEN_COLS_MIN, ZEN_COLS_MAX, miniLinkBtnStyle, type AgentState } from '../app-shared.js';
 import { SessionBody } from './SessionBody.js';
-import { ReaderView, type DockMode } from '../reader/ReaderView.js';
+import { type DockMode } from '../reader/ReaderView.js';
+import { WorkspaceReader } from './WorkspaceReader.js';
 import { useReader } from '../reader/useReader.js';
 
 /** zen 읽기 모드 — 크롬을 전부 걷고 한 pane만 고정 폭으로 크게 읽는다.
@@ -162,7 +163,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
             wrapStyle={split ? { display: 'flex' } : { display: 'flex', justifyContent: 'center' }}
           />
         </div>
-        {readerOn ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} flow fontSize={fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+        {readerOn ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} flow fontSize={fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
         {split ? (
           <>
             <div className="viewer-splitter col" onPointerDown={startSideDrag} title="drag to resize" />

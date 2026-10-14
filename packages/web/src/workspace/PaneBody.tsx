@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { READER_COLUMN_PX } from '../app-shared.js';
-import { ReaderView, type DockMode } from '../reader/ReaderView.js';
+import { type DockMode } from '../reader/ReaderView.js';
+import { WorkspaceReader } from './WorkspaceReader.js';
 import { usePaneDock, usePaneReader } from '../reader/paneReader.js';
 import { useReader } from '../reader/useReader.js';
 import { SessionBody, type SessionBodyProps } from './SessionBody.js';
@@ -54,7 +55,7 @@ export function PaneBody(props: SessionBodyProps) {
   return (
     <div ref={stageRef} style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <SessionBody {...bodyProps} />
-      {on ? <ReaderView sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} columnMax={READER_COLUMN_PX} fontSize={props.terminal.fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+      {on ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} columnMax={READER_COLUMN_PX} fontSize={props.terminal.fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
     </div>
   );
 }
