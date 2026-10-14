@@ -297,6 +297,12 @@ function pushQueue(out: ReaderUpdate[], e: Json): void {
     out.push({ op: 'queue', at, action: 'enqueue', ...(text !== undefined ? { text: clip(text, MAX_QUEUE_TEXT) } : {}), system: text === undefined || text.trimStart().startsWith('<') });
   } else if (e.operation === 'dequeue') {
     out.push({ op: 'queue', at, action: 'dequeue' });
+  } else if (e.operation === 'remove') {
+    // Taken out of the queue by name (merged into the turn that was running). Without the text there is nothing to match.
+    const text = str(e.content);
+    if (text !== undefined) out.push({ op: 'queue', at, action: 'remove', text: clip(text, MAX_QUEUE_TEXT) });
+  } else if (e.operation === 'popAll') {
+    out.push({ op: 'queue', at, action: 'clear' });
   }
 }
 

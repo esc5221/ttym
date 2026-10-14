@@ -73,9 +73,12 @@ export type ReaderUpdate =
   /**
    * A message waiting for the agent's next turn. `system` marks one the agent
    * queued for itself (a task notification), which a reader does not show but
-   * must still count: a dequeue pops the oldest entry whoever queued it.
+   * must still count: a dequeue takes the next entry to run, which is the oldest typed by the person if any
+   * (what the person types goes ahead of what the agent queued for itself).
+   * `remove`: that entry (matched by `text`) left the queue without a dequeue, absorbed into the turn running.
+   * `clear`: the person took their queued messages back into the input.
    */
-  | { op: 'queue'; at: number; action: 'enqueue' | 'dequeue'; text?: string; system?: boolean }
+  | { op: 'queue'; at: number; action: 'enqueue' | 'dequeue' | 'remove' | 'clear'; text?: string; system?: boolean }
   | { op: 'title'; text: string }
   /**
    * `entry` follows `parent` in the log's tree; a null parent starts a new line of descent (the first

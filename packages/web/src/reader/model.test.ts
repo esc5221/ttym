@@ -115,10 +115,36 @@ describe('applyFeed', () => {
       expect(pendingMessages(s)).toEqual(['fix the README']);
     });
 
-    it('lets a dequeue take the oldest entry even when that one was the agent’s own', () => {
+    it('lets a dequeue take what the person typed before what the agent queued for itself', () => {
       const s = applyFeed(emptyState(), feed([enq('<task-notification>', true), enq('mine'), deq]));
-      expect(pendingMessages(s)).toEqual(['mine']);
-      expect(applyFeed(s, feed([deq], { reset: false })).queue).toEqual([]);
+      expect(pendingMessages(s)).toEqual([]);
+      expect(s.queue.map((q) => q.system)).toEqual([true]);
+    });
+
+    it('takes the oldest entry when only the agent’s own are left', () => {
+      const s = applyFeed(emptyState(), feed([enq('<a>', true), enq('<b>', true), deq]));
+      expect(s.queue.map((q) => q.text)).toEqual(['<b>']);
+    });
+
+    it('drops an entry removed by name, and the person’s own when they take them back', () => {
+      const rm = (text: string): ReaderUpdate => ({ op: 'queue', at: 3, action: 'remove', text });
+      const s = applyFeed(emptyState(), feed([enq('<a>', true), enq('keep'), enq('<b>', true), rm('<a>'), rm('not there')]));
+      expect(s.queue.map((q) => q.text)).toEqual(['keep', '<b>']);
+      const cleared = applyFeed(s, feed([{ op: 'queue', at: 4, action: 'clear' }], { reset: false }));
+      expect(cleared.queue.map((q) => q.text)).toEqual(['<b>']);
+    });
+
+    it('stops showing a message as waiting once it is on the page as a prompt', () => {
+      // the queue never said it left (a missed dequeue), but the prompt itself arrived
+      const s = applyFeed(emptyState(), feed([enq('현황 체크'), enq('<n>', true), user('u1', 5, '현황 체크 ')]));
+      expect(pendingMessages(s)).toEqual([]);
+      expect(s.queue).toHaveLength(1);
+    });
+
+    it('matches a long message by its start', () => {
+      const long = 'x'.repeat(400);
+      const s = applyFeed(emptyState(), feed([enq(`${'x'.repeat(299)}…`), user('u1', 5, long)]));
+      expect(pendingMessages(s)).toEqual([]);
     });
 
     it('does not fail on a dequeue with nothing queued', () => {

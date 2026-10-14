@@ -182,6 +182,17 @@ describe('claude transcript → reader updates', () => {
       ]);
     });
 
+    it('reads a removal by name and the person taking their queued messages back', () => {
+      const u = parse(
+        { type: 'queue-operation', operation: 'remove', timestamp: T(1), content: '<cross-session-message from="x">hi', reason: 'absorbed_mid_turn' },
+        { type: 'queue-operation', operation: 'popAll', timestamp: T(2), content: 'deploy it too' },
+      );
+      expect(u).toMatchObject([
+        { op: 'queue', action: 'remove', text: '<cross-session-message from="x">hi' },
+        { op: 'queue', action: 'clear' },
+      ]);
+    });
+
     it('reads the generated title', () => {
       expect(parse({ type: 'ai-title', aiTitle: 'gpai-monorepo PR #1245' })).toEqual([{ op: 'title', text: 'gpai-monorepo PR #1245' }]);
     });
