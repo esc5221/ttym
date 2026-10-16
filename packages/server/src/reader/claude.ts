@@ -109,6 +109,15 @@ function pushUser(out: ReaderUpdate[], e: Json): void {
   pushUserText(out, e, at, texts.join('\n'), images);
 }
 
+const PASTE_OPEN = /<pasted_content id="[^"]*">/;
+const PASTE_BLOCK = /<pasted_content id="([^"]*)">([\s\S]*?)(?:<\/pasted_content id="\1">|$)/g;
+const MAX_PASTE = 1500;
+
+/** A paste can be a whole log; the bubble keeps its start, and the rest is in the terminal. */
+function clipPaste(body: string): string {
+  return body.length > MAX_PASTE ? `${body.slice(0, MAX_PASTE)}\n… (pasted, ${body.length - MAX_PASTE} more characters)` : body;
+}
+
 /**
  * Typed text is plain. Everything else the harness writes into a user message
  * is wrapped in a tag: `<command-name>` is a slash command the person ran,
@@ -120,6 +129,13 @@ function pushUserText(out: ReaderUpdate[], e: Json, at: number, raw: string, ima
   const id = idOf(e, at);
   if (!text) {
     if (images) out.push({ op: 'user', id, at, text: '', images });
+    return;
+  }
+  // Claude Code wraps what was pasted into the prompt in <pasted_content id="n">…</pasted_content id="n">, with the person's own
+  // words around it. That is typed text however it starts, and what the paste holds (a log, another session's tags) is not for parsing.
+  if (PASTE_OPEN.test(text)) {
+    const unwrapped = text.replace(PASTE_BLOCK, (_m, _id, body: string) => clipPaste(body.trim())).trim();
+    out.push({ op: 'user', id, at, text: unwrapped, ...(images ? { images } : {}) });
     return;
   }
   if (text.startsWith('[Request interrupted')) {

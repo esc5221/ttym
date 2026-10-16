@@ -57,6 +57,12 @@ describe('a prompt whose top rule carries the session name', () => {
     expect(dockView('claude-code', rows.slice(-4), { x: 2, y: 1 }, false)).toMatchObject({ kind: 'prompt', lines: [''] });
   });
 
+  it('finds it when the name is long and in wide characters, so the dashes are under half of the row', () => {
+    const long = '─'.repeat(27) + ' 그 파비콘이 다 똑같아서 별 의미가 없는느낌. 바꿔볼래? 진단. (Branch) ─';
+    const rows = screen([long, '❯ ', RULE, '  ⏵⏵ bypass permissions on (shift+tab to cycle)']);
+    expect(dockRowCount('claude-code', rows, false)).toBe(4);
+  });
+
   it('does not take a line of prose that happens to start with dashes for a rule', () => {
     const rows = screen(['──────── is how it starts, then words, and no closing rule', '❯ ', RULE, 'status']);
     // only the real bottom rule counts, so the uncovered rows start there
@@ -140,8 +146,107 @@ describe('dockBusy · claude-code', () => {
     expect(dockBusy('claude-code', idle, 100)).toBe(false);
   });
 
-  it('does not guess on a narrow screen, or for an agent it has no profile for', () => {
+  it('does not guess on a narrow screen, or when no agent is known', () => {
     expect(dockBusy('claude-code', idle, 44)).toBeNull();
-    expect(dockBusy('codex', running, 100)).toBeNull();
+    expect(dockBusy(null, running, 100)).toBeNull();
+  });
+});
+
+// Screens captured from the agents themselves (Codex 0.159, Antigravity CLI 1.3.5), widths as they came.
+const RULE80 = '─'.repeat(80);
+
+describe('antigravity', () => {
+  const idle = screen(['some answer', '', RULE80, '>', RULE80, '? for shortcuts                                        Gemini 3.8 Flash · mediu']);
+  const typed = screen(['', RULE80, '> fix the failing test in', '  src/a.ts', RULE80, '? for shortcuts                                        Gemini 3.8 Flash · mediu']);
+  const busy = screen(['> Run the shell command', '⣟  Generating...', RULE80, '>', RULE80, 'esc to cancel                                          Gemini 3.8 Flash · mediu']);
+  const dialog = screen([
+    '● Ran (echo second-run)', '', 'Command', RULE80, '', 'Requesting permission for:', '   echo second-run && ls /private/tmp | head -3', '',
+    'Run this command?', '> 1. Yes, run command', "  2. Yes, and always allow in this conversation for commands that start with", "'echo'",
+    "  3. Yes, and always allow for commands that start with 'echo' (Persist to", 'settings.json)', '  4. No, cancel', '',
+    '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command', 'esc to cancel                                          Gemini 3.8 Flash · mediu',
+  ]);
+
+  it('finds the prompt between its rules, as it does for Claude Code', () => {
+    expect(dockRowCount('agy', idle, false)).toBe(4);
+    expect(dockView('agy', idle.slice(-4), { x: 2, y: 1 }, false)).toMatchObject({ kind: 'prompt', lines: [''], status: [['? for shortcuts', 'Gemini 3.8 Flash · mediu']] });
+  });
+
+  it('reads what is being typed, over several rows', () => {
+    const n = dockRowCount('agy', typed, false);
+    expect(n).toBe(5);
+    expect(dockView('agy', typed.slice(-n), { x: 5, y: 2 }, false)).toMatchObject({ lines: ['fix the failing test in', 'src/a.ts'], caret: { line: 1, col: 3 } });
+  });
+
+  it('says a turn is running from the status row, and idle from its shortcuts hint', () => {
+    expect(dockBusy('agy', contentRows(busy), 80)).toBe(true);
+    expect(dockBusy('agy', contentRows(idle), 80)).toBe(false);
+  });
+
+  it('finds the permission dialog by its words, from the rule above it, and reads its answers', () => {
+    const n = dockRowCount('agy', dialog, false);
+    expect(n).toBe(15);
+    const view = dockView('agy', dialog.slice(-n), null, false);
+    expect(view).toMatchObject({
+      kind: 'dialog', title: 'Requesting permission for:', detail: ['echo second-run && ls /private/tmp | head -3'], question: 'Run this command?',
+      hint: '↑/↓ Navigate · tab Amend · ctrl+g edit/expand command',
+    });
+    expect(view).toMatchObject({ kind: 'dialog', options: [
+      { n: 1, label: 'Yes, run command', selected: true },
+      { n: 2, selected: false }, { n: 3, selected: false }, { n: 4, label: 'No, cancel', selected: false },
+    ] });
+    if (view?.kind === 'dialog') expect(view.options[1].label).toContain("start with 'echo'");
+    expect(dockBusy('agy', contentRows(dialog), 80)).toBeNull();
+  });
+
+  it('treats a permission dialog that has been answered as history', () => {
+    const answered = screen(['Requesting permission for:', '   ls', 'Run this command?', '> 1. Yes', '', RULE80, '>', RULE80, '? for shortcuts      Gemini']);
+    expect(dockRowCount('agy', answered, false, 17)).toBe(4);
+  });
+});
+
+describe('codex', () => {
+  const STATUS = ['  GPT-6.1-Sol medium · /private/tmp', '  ? for shortcuts                                     ⚠ 2 warnings · f2 to view'];
+  const idle = screen(['  >_ OpenAI Codex (v0.159.0)', '', '› Ask Codex to do anything', '', ...STATUS]);
+  const typed = screen(['• earlier answer', '', '› Run this exact shell command: sleep 8;', '  touch /tmp/x; echo ok', '', ...STATUS]);
+  const busy = screen(['› go', '', '◦ Working (3s • esc to interrupt)', '', '› Ask Codex to do anything', '', ...STATUS]);
+  const dialog = screen([
+    '› Run this exact shell command', '', '• Running sleep 8; touch /tmp/x', '', '  Would you like to run the following command?', '', '  Environment: local', '',
+    '  Reason: The sandbox blocked creating the file. Allow the exact command to', '  run outside the sandbox?', '', '  $ sleep 8; touch /tmp/x; echo ok', '',
+    '› 1. Yes, proceed (y)', "  2. Yes, and don't ask again for commands that start with `sleep 8` (p)", '  3. No, and tell Codex what to do differently (esc)', '', '  Press enter to confirm or esc to cancel',
+  ]);
+
+  it('starts at the prompt row and keeps the status rows under it', () => {
+    expect(dockRowCount('codex', idle, false)).toBe(4);
+    const view = dockView('codex', idle.slice(-4), { x: 2, y: 0 }, false);
+    expect(view).toMatchObject({ kind: 'prompt', lines: [''], placeholder: 'Ask Codex to do anything', caret: { line: 0, col: 0 } });
+    expect(view).toMatchObject({ status: [['GPT-6.1-Sol medium · /private/tmp'], ['? for shortcuts', '⚠ 2 warnings · f2 to view']] });
+  });
+
+  it('reads typed text that wrapped, and does not take it for the hint', () => {
+    const n = dockRowCount('codex', typed, false, 17);
+    expect(n).toBe(5);
+    expect(dockView('codex', typed.slice(-n), { x: 16, y: 1 }, false)).toMatchObject({ lines: ['Run this exact shell command: sleep 8;', 'touch /tmp/x; echo ok'], caret: { line: 1, col: 14 } });
+    expect(dockView('codex', typed.slice(-n), { x: 16, y: 1 }, false)).not.toHaveProperty('placeholder');
+  });
+
+  it('takes the prompt nearest above the cursor, not an earlier message that began with the same sign', () => {
+    expect(dockRowCount('codex', busy, false, busy.length - 4)).toBe(4);
+  });
+
+  it('is busy while "esc to interrupt" shows', () => {
+    expect(dockBusy('codex', contentRows(busy), 100)).toBe(true);
+    expect(dockBusy('codex', contentRows(idle), 100)).toBe(false);
+  });
+
+  it('shows an approval dialog from its question down, with its numbered answers', () => {
+    const n = dockRowCount('codex', dialog, false);
+    expect(n).toBe(14);
+    const view = dockView('codex', dialog.slice(-n), null, false);
+    expect(view).toMatchObject({ kind: 'dialog', title: 'Would you like to run the following command?', hint: 'Press enter to confirm or esc to cancel' });
+    if (view?.kind === 'dialog') {
+      expect(view.options.map((o) => o.n)).toEqual([1, 2, 3]);
+      expect(view.options[0]).toMatchObject({ label: 'Yes, proceed (y)', selected: true });
+      expect(view.detail.some((d) => d.startsWith('$ sleep 8'))).toBe(true);
+    }
   });
 });

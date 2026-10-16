@@ -61,8 +61,8 @@ describe('readerFeed', () => {
     expect(feed).toEqual({ agent: 'claude-code', supported: true, key: null, next: 0, reset: true, from: 0, updates: [] });
   });
 
-  it('says so when the session has no agent, or an agent with no parser yet', async () => {
+  it('says so when the session has no agent, and has nothing yet for a Codex session whose rollout is not written', async () => {
     expect(await readerFeed({ cwd: CWD }, { after: null, key: null })).toMatchObject({ agent: null, supported: false, updates: [] });
-    expect(await readerFeed({ codexSessionId: 'c1', cwd: CWD }, { after: null, key: null })).toMatchObject({ agent: 'codex', supported: false, updates: [] });
+    expect(await readerFeed({ codexSessionId: 'c1', cwd: CWD }, { after: null, key: null })).toMatchObject({ agent: 'codex', supported: true, key: null, updates: [] });
   });
 });

@@ -1,4 +1,5 @@
 import { highlightHtml, languageForTag } from '../viewer/highlight.js';
+import { markMermaidBlocks } from './mermaid.js';
 import { linkifyTextNodes } from './ref-links.js';
 
 /**
@@ -31,6 +32,7 @@ export async function renderMarkdown(text: string): Promise<string> {
     a.setAttribute('target', '_blank');
     a.setAttribute('rel', 'noreferrer noopener');
   }
+  markMermaidBlocks(doc);
   for (const code of Array.from(doc.querySelectorAll('pre > code'))) {
     const tag = Array.from(code.classList).find((c) => c.startsWith('language-'))?.slice('language-'.length) ?? '';
     const lang = languageForTag(tag);

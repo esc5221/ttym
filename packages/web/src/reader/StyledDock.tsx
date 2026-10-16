@@ -83,7 +83,10 @@ export function StyledDock({ sid, view }: { sid: number; view: DockView }) {
           return (
             <div key={i} className="rd-crow">
               <span className="rd-pm">{i === 0 ? '❯' : ' '}</span>
-              <span className="rd-ctext">{caret?.line === i ? <WithCaret text={line} col={caret.col} composing={composing} /> : line || ' '}</span>
+              <span className="rd-ctext">
+                {caret?.line === i ? <WithCaret text={line} col={caret.col} composing={composing} /> : line || ' '}
+                {i === 0 && view.placeholder && !line ? <span className="rd-ph">{view.placeholder}</span> : null}
+              </span>
             </div>
           );
         })}

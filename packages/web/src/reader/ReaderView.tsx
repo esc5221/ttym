@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { getHost } from '@ttym/ui';
 import type { ReaderPatch } from '@ttym/api';
 import '../viewer/viewer.css';
 import './reader.css';
 import { cachedMarkdown, renderMarkdown } from './markdown.js';
+import { currentTheme, hydrateMermaid } from './mermaid.js';
 import { attachSummaries, formatDuration, groupRuns, pendingMessages, turnStartedAt, type Block, type ReaderState } from './model.js';
 import { Linkified, refLinkHandlers } from './ref-links.js';
 import { StyledDock } from './StyledDock.js';
@@ -233,6 +234,15 @@ function Compaction({ label, summary }: { label: string; summary?: string }) {
 
 const baseName = (path: string) => path.split('/').pop() || path;
 
+/** The page's colour scheme (the `data-theme` on the root), so what was drawn in one is drawn again in the other. */
+function useThemeName(): 'light' | 'dark' {
+  return useSyncExternalStore((notify) => {
+    const mo = new MutationObserver(notify);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => mo.disconnect();
+  }, currentTheme);
+}
+
 function Markdown({ text }: { text: string }) {
   const [html, setHtml] = useState<string | undefined>(() => cachedMarkdown(text));
   useEffect(() => {
@@ -240,8 +250,11 @@ function Markdown({ text }: { text: string }) {
     if (html === undefined) renderMarkdown(text).then((h) => { if (live) setHtml(h); }, () => {});
     return () => { live = false; };
   }, [text, html]);
+  const box = useRef<HTMLDivElement>(null);
+  const theme = useThemeName();
+  useEffect(() => (html !== undefined && box.current ? hydrateMermaid(box.current) : undefined), [html, theme]);
   if (html === undefined) return <div className="rd-md rd-plain">{text}</div>;
-  return <div className="rd-md" dangerouslySetInnerHTML={{ __html: html }} />;
+  return <div className="rd-md" ref={box} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 type ToolBlock = Extract<Block, { kind: 'tool' }>;

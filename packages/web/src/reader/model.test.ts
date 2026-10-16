@@ -100,6 +100,18 @@ describe('applyFeed', () => {
       expect(turnStartedAt(again)).toBe(30);
     });
 
+    it('shows a prompt that was cut off and sent again, longer, once', () => {
+      const s = applyFeed(emptyState(), feed([user('u1', 10, 'fix the height'), stop, user('u2', 70, 'fix the height. also the drag')]));
+      expect(s.blocks.filter((b) => b.kind === 'user').map((b) => b.id)).toEqual(['u2']);
+    });
+
+    it('keeps two different prompts, and two identical ones with no interruption between', () => {
+      const a = applyFeed(emptyState(), feed([user('u1', 10, 'one'), stop, user('u2', 70, 'two')]));
+      expect(a.blocks.filter((b) => b.kind === 'user')).toHaveLength(2);
+      const b = applyFeed(emptyState(), feed([user('u1', 10, 'again'), user('u2', 70, 'again')]));
+      expect(b.blocks.filter((x) => x.kind === 'user')).toHaveLength(2);
+    });
+
     it('does not count an ordinary notice as an interruption', () => {
       const s = applyFeed(emptyState(), feed([user('u1', 10), { op: 'notice', id: 'n2', at: 12, text: 'Task finished' }]));
       expect(interrupted(s)).toBe(false);

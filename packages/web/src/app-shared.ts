@@ -133,7 +133,7 @@ export function readUiStyle(): UiStyle {
 }
 
 // 에이전트 식별색 — 정체는 이름의 색, 활동은 4px 점. 필 배지는 쓰지 않는다.
-export const AGENT_COLORS: Record<string, string> = { 'claude-code': 'var(--agent-claude)', codex: 'var(--agent-codex)' };
+export const AGENT_COLORS: Record<string, string> = { 'claude-code': 'var(--agent-claude)', codex: 'var(--agent-codex)', agy: 'var(--agent-agy)' };
 
 export interface AgentSleep {
   state: 'sleeping' | 'waking' | 'failed';
@@ -144,7 +144,7 @@ export interface AgentSleep {
   queued?: number;
   dropped?: number;
 }
-export interface AgentState { kind: 'claude-code' | 'codex' | null; active: boolean; sleep?: AgentSleep | null; waiting?: string | null }
+export interface AgentState { kind: 'claude-code' | 'codex' | 'agy' | null; active: boolean; sleep?: AgentSleep | null; waiting?: string | null }
 
 /** '0' 꺼짐 · '1' classic(처음부터 있던 방식) · '2' tolerant. 예전에 저장된 '1'은 그대로 classic이다. */
 export function readLocalEchoEnabled(): LocalEchoSetting {
@@ -277,24 +277,8 @@ export function writeZenFontDelta(value: number): void {
   try { localStorage.setItem(ZEN_FONT_DELTA_STORAGE_KEY, String(value)); } catch {}
 }
 
-/** zen의 reader 모드(대화를 읽기 좋은 웹으로 보기). 이 기기의 선택으로 기억한다. */
-export const ZEN_READER_STORAGE_KEY = 'ttym-zen-reader';
 /** reader 모드에서 터미널을 맞추는 본문 폭(px). 줄 길이를 읽기 좋게 두는 값이라 cols가 아니라 px로 둔다. */
 export const READER_COLUMN_PX = 768;
-
-/** reader 모드 아래 입력 영역을 그리는 방식. native = 터미널 줄 그대로, styled = 같은 내용을 페이지 스타일로 다시 그린 것. */
-export const ZEN_READER_DOCK_STORAGE_KEY = 'ttym-zen-reader-dock';
-
-export function readZenReaderDock(): 'native' | 'styled' {
-  try { return localStorage.getItem(ZEN_READER_DOCK_STORAGE_KEY) === 'styled' ? 'styled' : 'native'; } catch { return 'native'; }
-}
-
-export function writeZenReaderDock(mode: 'native' | 'styled'): void {
-  try {
-    if (mode === 'styled') localStorage.setItem(ZEN_READER_DOCK_STORAGE_KEY, mode);
-    else localStorage.removeItem(ZEN_READER_DOCK_STORAGE_KEY);
-  } catch {}
-}
 
 /** 폰의 reader 모드와 아래 입력 영역 방식. zen과 따로 기억한다. */
 export const PHONE_READER_STORAGE_KEY = 'ttym-phone-reader';
@@ -314,17 +298,6 @@ export function readPhoneReaderDock(): 'native' | 'styled' {
 
 export function writePhoneReaderDock(mode: 'native' | 'styled'): void {
   try { if (mode === 'styled') localStorage.setItem(PHONE_READER_DOCK_STORAGE_KEY, mode); else localStorage.removeItem(PHONE_READER_DOCK_STORAGE_KEY); } catch {}
-}
-
-export function readZenReader(): boolean {
-  try { return localStorage.getItem(ZEN_READER_STORAGE_KEY) === '1'; } catch { return false; }
-}
-
-export function writeZenReader(on: boolean): void {
-  try {
-    if (on) localStorage.setItem(ZEN_READER_STORAGE_KEY, '1');
-    else localStorage.removeItem(ZEN_READER_STORAGE_KEY);
-  } catch {}
 }
 
 export const PHONE_FONT_SIZE_STORAGE_KEY = 'ttym-phone-font-size';

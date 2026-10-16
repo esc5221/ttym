@@ -12,7 +12,7 @@ const NARROW_MARGIN_PX = 24;
 
 /** Whether a grid pane can show reader mode at all: an agent that has a reader, on its terminal tab, on a pointer device. */
 export function paneReaderAvailable(agentKind: string | null | undefined, dead: boolean, touch: boolean): boolean {
-  return agentKind === 'claude-code' && !dead && !touch;
+  return (agentKind === 'claude-code' || agentKind === 'codex' || agentKind === 'agy') && !dead && !touch;
 }
 
 /**

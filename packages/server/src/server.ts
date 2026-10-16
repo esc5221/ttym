@@ -10,6 +10,8 @@ import { WorkspaceStore } from './workspace-store.js';
 import headless from '@xterm/headless';
 import { screenTail } from './screen-tail.js';
 import { readerFeed } from './reader/index.js';
+import { findAgyIn, listProcesses } from './reader/agy.js';
+import { findCodexIn } from './reader/codex.js';
 import { readTurn, renderFull, renderOutline } from './agent-turn.js';
 import { InteractionStore, turnRange, type StopReport } from './interaction.js';
 import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
@@ -842,7 +844,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     const beforeRaw = url.searchParams.get('before');
     const before = beforeRaw !== null && /^\d+$/.test(beforeRaw) ? parseInt(beforeRaw, 10) : null;
     manager.getMeta(id)
-      .then((meta) => readerFeed(meta, { after, key, before }))
+      .then((meta) => readerFeed(meta, { after, key, before }, { pid: manager.get(id)?.childPid || undefined }))
       .then((feed) => json(200, feed))
       .catch((e) => { log(`HTTP TRANSCRIPT session=${id} failed: ${String((e as Error).message ?? e)}`); json(500, { error: 'transcript read failed' }); });
     return true;
@@ -986,10 +988,14 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
   // 요청 수를 줄이는 게 옳은 방향이지, keep-alive를 되살리는 게 아니다.
   if (path === '/api/agent-states' && req.method === 'GET') {
     const sessions = manager.list();
-    Promise.all(sessions.map(async (info) => {
+    // Antigravity leaves nothing in meta, and Codex's hooks may name another pane (see reader/codex.ts), so a pane running either is
+    // found as a process (what runs now outranks what meta remembers).
+    listProcesses().then((procs) => Promise.all(sessions.map(async (info) => {
       const meta = await manager.getMeta(info.id);
-      return [info.id, { kind: agentKindOf(meta), active: agentIsActive(meta), sleep: sleeper?.stateOf(info.id) ?? null, waiting: agentWaiting.get(info.id) ?? null }] as const;
-    })).then((entries) => {
+      const shell = manager.get(info.id)?.childPid;
+      const kind = shell && findAgyIn(procs, shell) ? 'agy' as const : shell && findCodexIn(procs, shell) ? 'codex' as const : agentKindOf(meta);
+      return [info.id, { kind, active: kind === 'agy' ? false : agentIsActive(meta), sleep: sleeper?.stateOf(info.id) ?? null, waiting: agentWaiting.get(info.id) ?? null }] as const;
+    }))).then((entries) => {
       json(200, Object.fromEntries(entries));
     }).catch(() => json(500, { error: 'assembly failed' }));
     return true;

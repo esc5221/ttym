@@ -230,6 +230,30 @@ function liveEntries(chain: ChainLink[]): Set<string> {
  * it is dead). Turn summaries are counted again over what remains, since the tools a turn ran are the ones on its branch.
  */
 function shownBlocks(raw: Block[], chain: ChainLink[]): Block[] {
+  return withoutResent(shownByChain(raw, chain));
+}
+
+/**
+ * A prompt that was cut off by an interruption and then sent again, longer or the same, is one message to read: the
+ * log keeps both. Only notices (the interruption itself) may lie between the two, and the later one must begin
+ * with the earlier one's words.
+ */
+function withoutResent(blocks: Block[]): Block[] {
+  let out: Block[] | null = null;
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]!;
+    if (b.kind !== 'user' || !b.text.trim()) continue;
+    let j = i + 1;
+    while (j < blocks.length && blocks[j]!.kind === 'notice') j++;
+    const next = blocks[j];
+    if (j === i + 1 || next?.kind !== 'user' || !next.text.trim().startsWith(b.text.trim())) continue;
+    out ??= blocks.slice();
+    out[i] = null as unknown as Block;
+  }
+  return out ? out.filter(Boolean) : blocks;
+}
+
+function shownByChain(raw: Block[], chain: ChainLink[]): Block[] {
   if (chain.length === 0) return raw;
   const live = liveEntries(chain);
   const known = new Set(chain.map((l) => l.entry));

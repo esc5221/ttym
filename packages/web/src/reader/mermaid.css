@@ -1,0 +1,24 @@
+/* mermaid figures in rendered markdown (reader and viewer) */
+figure.rd-mmd { position: relative; margin: 14px 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg1); overflow: hidden; }
+figure.rd-mmd > pre { margin: 0; border: 0; border-radius: 0; }
+figure.rd-mmd[data-state='loading'] > pre { opacity: .6; }
+.rd-mmd-svg { overflow-x: auto; padding: 12px; cursor: zoom-in; }
+.rd-mmd-svg svg { display: block; max-width: none; margin: 0 auto; }
+.rd-mmd-src { margin: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; }
+.rd-mmd-err { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--err); font: 12px/1.5 var(--mono, ui-monospace, Menlo, monospace); white-space: pre-wrap; }
+
+.rd-mmd-bar { position: absolute; top: 6px; right: 6px; z-index: 1; display: flex; gap: 4px; opacity: 0; transition: opacity .15s ease; }
+figure.rd-mmd:hover .rd-mmd-bar, figure.rd-mmd:focus-within .rd-mmd-bar { opacity: 1; }
+@media (hover: none) { .rd-mmd-bar { opacity: 1; } }
+.rd-mmd-btn {
+  font: 11px/1 var(--sans, system-ui, sans-serif); color: var(--text-soft); background: var(--bg2); border: 1px solid var(--line-strong);
+  border-radius: 6px; padding: 5px 8px; cursor: pointer;
+}
+.rd-mmd-btn:hover, .rd-mmd-btn[aria-pressed='true'] { color: var(--text); background: var(--bg3); }
+
+.rd-mmd-zoom { position: fixed; inset: 0; z-index: 10000; background: var(--bg0); display: flex; flex-direction: column; }
+.rd-mmd-zoom-bar { display: flex; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg1); padding-top: max(8px, env(safe-area-inset-top)); }
+.rd-mmd-zoom-bar .rd-mmd-btn { font-size: 13px; padding: 8px 12px; }
+.rd-mmd-zoom-bar .rd-mmd-btn:last-child { margin-left: auto; }
+.rd-mmd-zoom-stage { position: relative; flex: 1; overflow: hidden; touch-action: none; cursor: grab; }
+.rd-mmd-zoom-stage:active { cursor: grabbing; }

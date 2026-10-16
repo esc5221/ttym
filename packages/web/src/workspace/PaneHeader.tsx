@@ -4,9 +4,9 @@ import { AGENT_COLORS, closeBtnStyle, copySessionUrl, miniLinkBtnStyle, type UI_
 import { viewSrc } from '../viewer/content.js';
 import { PaneTabs } from '../viewer/PaneTabs.js';
 import { StripMenu, attachDropdownItemStyle } from '../StripMenu.js';
-import { READER_KEY_LABEL } from '../reader/toggle-key.js';
 import { setPaneDock, setPaneReader, usePaneDock, usePaneReader } from '../reader/paneReader.js';
 import { paneReaderAvailable } from './PaneBody.js';
+import { ReaderSwitch } from './ReaderSwitch.js';
 import { sleepTitle } from './sleep-text.js';
 import { paneView, useWorkspaceSessions } from './session-context.js';
 
@@ -128,19 +128,11 @@ export function PaneHeader({ sid, name, cwd, isFocused, dead, zoomed, fit, U, dr
       </span>
       {readerAvail ? (
         // 같은 세션을 보는 두 가지 방식. 터미널 탭 바로 옆에 항상 보여서, 지금 어느 쪽인지 호버 없이 안다.
-        <span style={{ display: 'inline-flex', flexShrink: 0, margin: '0 0 0 6px', border: '1px solid var(--line-strong)', borderRadius: 4, overflow: 'hidden', fontFamily: 'var(--mono)', fontSize: 10 }}>
-          {(['term', 'reader'] as const).map((m) => {
-            const on = paneTab === 'term' && (m === 'reader') === readerOn;
-            return (
-              <button
-                key={m}
-                onClick={(e) => { e.stopPropagation(); if (paneTab !== 'term') viewer.setActive(sid, 'term'); setPaneReader(sid, m === 'reader'); }}
-                title={`${m === 'reader' ? 'the conversation, laid out to read' : 'the raw terminal'} · ${READER_KEY_LABEL}`}
-                style={{ padding: '1px 7px', border: 'none', cursor: 'pointer', font: 'inherit', background: on ? 'var(--bg1)' : 'transparent', color: on ? 'var(--accent)' : 'var(--text-dim)' }}
-              >{m}</button>
-            );
-          })}
-        </span>
+        <ReaderSwitch
+          margin="0 0 0 6px"
+          active={paneTab === 'term' ? (readerOn ? 'reader' : 'term') : null}
+          onPick={(m) => { if (paneTab !== 'term') viewer.setActive(sid, 'term'); setPaneReader(sid, m === 'reader'); }}
+        />
       ) : null}
       <span
         onClick={() => { if (paneTab !== 'term') viewer.setActive(sid, 'term'); }}

@@ -11,6 +11,13 @@
 
 [ -z "$TTYM_SESSION_ID" ] && exit 0
 
+# A claude started inside another claude (claude -p from a Bash tool) is not this pane's agent.
+_LIB="$(dirname "$0")/ttym-hook-nested.sh"
+if [ -r "$_LIB" ]; then
+  . "$_LIB"
+  if ttym_nested_claude; then cat >/dev/null; exit 0; fi
+fi
+
 BASE="http://127.0.0.1:${TTYM_PORT:-7690}"
 
 curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \

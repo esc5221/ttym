@@ -43,6 +43,18 @@ describe('claude transcript → reader updates', () => {
       expect(only(u, 'notice').map((n) => n.endsTurn)).toEqual([undefined, true]);
     });
 
+    it('shows a prompt that starts with a paste, unwrapped and clipped, and ignores tags inside the paste', () => {
+      const paste = '<pasted_content id="7">\n<command-name>/x</command-name>\nlog line\n</pasted_content id="7">\n\n 이거 찾아줘';
+      const long = `<pasted_content id="8">\n${'a'.repeat(2000)}\n</pasted_content id="8">`;
+      const u = parse(
+        { type: 'user', uuid: 'p1', timestamp: T(1), origin: { kind: 'human' }, message: { content: `\n\n${paste}` } },
+        { type: 'user', uuid: 'p2', timestamp: T(2), origin: { kind: 'human' }, message: { content: [{ type: 'text', text: long }] } },
+      );
+      const users = only(u, 'user');
+      expect(users[0]!.text).toBe('<command-name>/x</command-name>\nlog line\n\n 이거 찾아줘');
+      expect(users[1]!.text).toMatch(/^a{1500}\n… \(pasted, 500 more characters\)$/);
+    });
+
     it('drops harness-injected text (isMeta) and subagent records', () => {
       const u = parse(
         { type: 'user', timestamp: T(1), isMeta: true, message: { content: 'Base directory for this skill: /x' } },

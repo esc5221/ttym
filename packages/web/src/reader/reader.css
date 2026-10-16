@@ -128,6 +128,7 @@
 .rd-composer:hover { border-color: var(--text-dim); }
 .rd-crow { display: flex; gap: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rd-pm { color: var(--accent); flex-shrink: 0; }
+.rd-ph { color: var(--text-dim); }
 .rd-caret { background: var(--term-fg, var(--text)); color: var(--term-bg, var(--bg0)); animation: rd-blink 1.1s steps(1) infinite; }
 /* status rows overlap the padding under the box, so the dock's height doesn't change when they show */
 .rd-meta {

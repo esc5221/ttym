@@ -20,6 +20,11 @@ export function useReader(
   const dock = useDockLayout(stage, sid, transcript.state.agent ?? agent?.kind ?? null, !!agent?.waiting, on);
   // The agent's own flag says a turn is running; an interruption in the transcript overrides a flag that never cleared.
   // A screen that plainly shows no turn running also overrides it (Esc before the first token leaves the flag on).
-  const working = !!agent?.active && !interrupted(transcript.state) && dock?.busy !== false;
+  // Claude Code reports it through its hooks. Codex's reach a pane only when it runs its own server (they come from a shared one
+  // otherwise), and Antigravity has none, so for those the screen is also evidence: "esc to interrupt" is on it while a turn runs.
+  const busy = dock?.busy;
+  const flagged = !!agent?.active && busy !== false;
+  const running = agent?.kind === 'claude-code' ? flagged : agent?.kind === 'codex' ? flagged || busy === true : busy === true;
+  const working = running && !interrupted(transcript.state);
   return { transcript, dock, working };
 }

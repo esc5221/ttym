@@ -19,7 +19,7 @@
  * ask from any offset — and puts the (small) pairing logic in the reducer.
  */
 
-export type ReaderAgent = 'claude-code' | 'codex';
+export type ReaderAgent = 'claude-code' | 'codex' | 'agy';
 
 /** One line of a diff. `op` is the unified-diff marker: context, added, removed. */
 export interface ReaderPatchLine {
