@@ -1,3 +1,4 @@
+import { setReaderLive, useReaderLive } from './reader/paneReader.js';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { refreshTerminalThemes, type LocalEchoSetting } from '@ttym/ui';
@@ -235,6 +236,7 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
   return (
     <>
       <SleepAfterField />
+      <ReaderLiveField />
       <ResumeFlagsField
         agent="claude"
         configKey="agent-claude-resume-flags"
@@ -314,6 +316,18 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
             </span>
           ) : null}
         </span>
+      </Field>
+    );
+  }
+
+  function ReaderLiveField() {
+    const on = useReaderLive();
+    return (
+      <Field
+        label="reader live text"
+        hint="in reader mode, show the message Claude Code is writing as it is drawn in the terminal, instead of when it ends. read from the terminal in this browser; nothing is sent. only for the pane you are looking at."
+      >
+        <Segmented options={['on', 'off'] as const} value={on ? 'on' : 'off'} onChange={(v) => setReaderLive(v === 'on')} />
       </Field>
     );
   }

@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { getHost } from '@ttym/ui';
 import type { ReaderPatch } from '@ttym/api';
 import '../viewer/viewer.css';
 import './reader.css';
-import { cachedMarkdown, renderMarkdown } from './markdown.js';
+import { cachedMarkdown, renderMarkdown, renderMarkdownNow } from './markdown.js';
 import { currentTheme, hydrateMermaid } from './mermaid.js';
+import { splitMarkdown, type LiveText } from './live.js';
 import { attachSummaries, formatDuration, groupRuns, pendingMessages, turnStartedAt, type Block, type ReaderState } from './model.js';
 import { Linkified, refLinkHandlers } from './ref-links.js';
 import { StyledDock } from './StyledDock.js';
@@ -20,12 +21,14 @@ export type DockMode = 'native' | 'styled';
  * and the permission dialog) is the terminal itself showing through, so typing
  * and answering a prompt need nothing from this file.
  */
-export function ReaderView({ sid, state, error, working, layout, dockMode, columnMax, flow = false, onLoadEarlier, loadingEarlier = false, fontSize, topInset, paneProps }: {
+export function ReaderView({ sid, state, error, working, live = null, layout, dockMode, columnMax, flow = false, onLoadEarlier, loadingEarlier = false, fontSize, topInset, paneProps }: {
   sid: number;
   state: ReaderState;
   error: string | null;
   /** The agent is mid-turn (from its own hooks), which the transcript alone can't say. */
   working: boolean;
+  /** The message being written, which the record does not have yet (see live.ts). */
+  live?: LiveText | null;
   layout: DockLayout | null;
   dockMode: DockMode;
   /** Widest the reading column may be, in px; a pane can be far wider than a line is comfortable to read. */
@@ -54,19 +57,33 @@ export function ReaderView({ sid, state, error, working, layout, dockMode, colum
     anchor.current = { height: el.scrollHeight, top: el.scrollTop };
     onLoadEarlier();
   };
+  // The position the page itself last scrolled to. The scroll event that follows arrives after the content has grown
+  // again (a message being written grows every few frames), and would read as the person leaving the bottom.
+  const ownScroll = useRef(-1);
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
+    if (ownScroll.current >= 0 && Math.abs(el.scrollTop - ownScroll.current) < 2) { ownScroll.current = -1; return; }
+    ownScroll.current = -1;
     stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     setBehind(!stuck.current);
     if (el.scrollTop < 300) requestEarlier();
   };
   const toLatest = () => {
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) { el.scrollTop = el.scrollHeight; ownScroll.current = el.scrollTop; }
     stuck.current = true;
     setBehind(false);
   };
+  // Content that grows with no render of this component (a block's HTML arriving, an image, a diagram) still has to be followed.
+  const col = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = col.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => { if (stuck.current) { const sc = scroller.current; if (sc) { sc.scrollTop = sc.scrollHeight; ownScroll.current = sc.scrollTop; } } });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   // A styled dock that flows with the page ends it, and changes height as someone types or a dialog appears.
   const styledView = dockMode === 'styled' ? layout?.view ?? null : null;
   const flowView = flow ? styledView : null;
@@ -87,7 +104,7 @@ export function ReaderView({ sid, state, error, working, layout, dockMode, colum
     }
     // Follow new content only while the reader is already at the bottom.
     if (stuck.current) toLatest();
-  }, [state.blocks, working, layout?.bottomPx, flowSignature]);
+  }, [state.blocks, working, live?.text.length, layout?.bottomPx, flowSignature]);
   // A conversation too short to scroll has no way to reach its history by scrolling.
   useEffect(() => {
     const el = scroller.current;
@@ -155,13 +172,14 @@ export function ReaderView({ sid, state, error, working, layout, dockMode, colum
     <>
     <div className="rd-root" style={style} ref={root} {...paneProps}>
       <div className="rd-scroll" ref={scroller} onScroll={onScroll} onMouseUp={refocus} {...refLinkHandlers}>
-        <div className={`rd-col${flowView ? ' rd-flow' : ''}`}>
+        <div className={`rd-col${flowView ? ' rd-flow' : ''}`} ref={col}>
           {state.earlier !== null && state.blocks.length > 0 ? (
             <button className="rd-earlier" onClick={requestEarlier} disabled={loadingEarlier}>{loadingEarlier ? 'Loading earlier messages…' : 'Load earlier messages'}</button>
           ) : null}
           <Body state={state} error={error} />
+          {live ? <LiveMessage text={live.text} done={live.done} /> : null}
           {queued.map((text, i) => <div key={`q${i}`} className="rd-user rd-queued"><div className="rd-bubble">{text}</div></div>)}
-          {working ? <Working since={turnStartedAt(state)} /> : null}
+          {working && !live ? <Working since={turnStartedAt(state)} /> : null}
           {flowView ? <div className="rd-flow-dock"><StyledDock sid={sid} view={flowView} /></div> : null}
         </div>
       </div>
@@ -243,13 +261,57 @@ function useThemeName(): 'light' | 'dark' {
   }, currentTheme);
 }
 
+/**
+ * A message as it is being written. Cut into blocks at blank lines: a finished block never changes, so it is
+ * rendered once and left alone (the memo keeps React from even looking at it on the next flush), and only the
+ * block at the end is rendered again as lines arrive. Parsing the whole message on every flush would cost more each
+ * time the message grew.
+ *
+ * The blocks sit directly in one `rd-md` box, with nothing of their own between them, so the paragraph and heading
+ * margins collapse the way they do in a message rendered whole. That is what makes the swap to the record's copy
+ * (same words, rendered whole) land on the same pixels instead of jumping.
+ */
+const LiveMessage = memo(function LiveMessage({ text, done }: { text: string; done: boolean }) {
+  const { closed, open } = useMemo(() => splitMarkdown(text), [text]);
+  const pieces = open.trim() ? [...closed, open] : closed;
+  return (
+    <div className="rd-md rd-live">
+      {pieces.map((b, i) => <LivePiece key={i} text={b} open={!done && i === closed.length} />)}
+      {!done ? <span className="rd-caret" aria-hidden /> : null}
+    </div>
+  );
+});
+
+/**
+ * One block of a message being written. While it is the open end it is rendered cheaply on every change; once its
+ * end has been seen the same element is rendered fully (colour, diagrams) and not touched again. The previous
+ * rendering stays up until the next is ready, so a block never falls back to plain text in between.
+ */
+const LivePiece = memo(function LivePiece({ text, open }: { text: string; open: boolean }) {
+  const [html, setHtml] = useState<string | undefined>(() => (open ? undefined : renderMarkdownNow(text)));
+  const latest = useRef(0);
+  useEffect(() => {
+    const mine = ++latest.current;
+    const apply = (h: string) => { if (latest.current === mine) setHtml(h); };
+    if (!open) { const hit = cachedMarkdown(text); if (hit !== undefined) { setHtml(hit); return; } }
+    renderMarkdown(text, { live: open }).then(apply, () => {});
+  }, [text, open]);
+  const box = useRef<HTMLDivElement>(null);
+  const theme = useThemeName();
+  useEffect(() => (!open && html !== undefined && box.current ? hydrateMermaid(box.current) : undefined), [html, open, theme]);
+  if (html === undefined) return <div className="rd-live-block rd-plain">{text}</div>;
+  return <div className="rd-live-block" ref={box} dangerouslySetInnerHTML={{ __html: html }} />;
+});
+
 function Markdown({ text }: { text: string }) {
-  const [html, setHtml] = useState<string | undefined>(() => cachedMarkdown(text));
+  const [html, setHtml] = useState<string | undefined>(() => renderMarkdownNow(text));
   useEffect(() => {
     let live = true;
-    if (html === undefined) renderMarkdown(text).then((h) => { if (live) setHtml(h); }, () => {});
+    // Drawn at once without colour is what the first paint may hold; the kept (full) render is what stays.
+    if (cachedMarkdown(text) === undefined) renderMarkdown(text).then((h) => { if (live) setHtml(h); }, () => {});
+    else if (html !== cachedMarkdown(text)) setHtml(cachedMarkdown(text));
     return () => { live = false; };
-  }, [text, html]);
+  }, [text]);
   const box = useRef<HTMLDivElement>(null);
   const theme = useThemeName();
   useEffect(() => (html !== undefined && box.current ? hydrateMermaid(box.current) : undefined), [html, theme]);

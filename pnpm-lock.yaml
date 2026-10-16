@@ -188,6 +188,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.0.0
         version: 4.7.0(vite@5.4.21(@types/node@25.4.0)(terser@5.50.0))
+      '@xterm/headless':
+        specifier: 6.0.0
+        version: 6.0.0
       terser:
         specifier: ^5.50.0
         version: 5.50.0

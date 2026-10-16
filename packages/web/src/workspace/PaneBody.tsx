@@ -26,7 +26,7 @@ export function PaneBody(props: SessionBodyProps) {
   const view = paneView(ctx, sid);
   const on = usePaneReader(sid) && paneReaderAvailable(agent?.kind, ctx.deadSessions.has(sid), ctx.touch) && view.item === null;
   const stageRef = useRef<HTMLDivElement>(null);
-  const { transcript, dock, working } = useReader(sid, agent, stageRef, on);
+  const { transcript, dock, working, live } = useReader(sid, agent, stageRef, on, undefined, ctx.focusedSid === sid);
   const chosen = usePaneDock();
   const dockMode: DockMode = chosen ?? 'native';
 
@@ -55,7 +55,7 @@ export function PaneBody(props: SessionBodyProps) {
   return (
     <div ref={stageRef} style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
       <SessionBody {...bodyProps} />
-      {on ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} columnMax={READER_COLUMN_PX} fontSize={props.terminal.fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+      {on ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} live={live} layout={dock} dockMode={dockMode} columnMax={READER_COLUMN_PX} fontSize={props.terminal.fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
     </div>
   );
 }

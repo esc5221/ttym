@@ -73,7 +73,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
   const readerOn = usePaneReader(sid) && readerAvail;
   const dockMode: DockMode = usePaneDock() ?? 'native';
   const stageRef = useRef<HTMLDivElement>(null);
-  const { transcript, dock, working } = useReader(sid, agent, stageRef, readerOn);
+  const { transcript, dock, working, live } = useReader(sid, agent, stageRef, readerOn);
   // 왼쪽 영역 폭. 본문 폭보다 넉넉하면 터미널을 본문 폭에 맞춰 빌려 가운데에 세우고(grid pane과 같은 규칙), 좁으면 영역을 따른다.
   const [stageWidth, setStageWidth] = useState(0);
   useEffect(() => {
@@ -184,7 +184,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
             }}
             wrapStyle={split && fixedCols === undefined ? { display: 'flex' } : { display: 'flex', justifyContent: 'center' }}
           />
-          {readerOn ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} flow fontSize={fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+          {readerOn ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} live={live} layout={dock} dockMode={dockMode} flow fontSize={fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
         </div>
         {split ? (
           <>

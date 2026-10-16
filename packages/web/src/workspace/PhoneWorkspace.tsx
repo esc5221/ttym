@@ -262,7 +262,7 @@ function FocusView({
     onFontSize(stepped);
   }, onTerminal);
 
-  const { transcript, dock, working } = useReader(sid, agent, stageRef, readerOn, 2000);
+  const { transcript, dock, working, live } = useReader(sid, agent, stageRef, readerOn, 2000);
   const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
   const cwd = sessionCwds[sid];
   const menuProps = {
@@ -359,7 +359,7 @@ function FocusView({
           // 손가락 하나에 스크롤이 두 번 걸린다. 빌려 쓰면 넘칠 것이 없다.
           terminal={{ fontSize, geometry: 'borrow', enableWebgl: false }}
         />
-        {readerOn ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} layout={dock} dockMode={dockMode} fontSize={fontSize} topInset={immersive ? 44 : undefined} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+        {readerOn ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} live={live} layout={dock} dockMode={dockMode} fontSize={fontSize} topInset={immersive ? 44 : undefined} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
       </div>
 
       {immersive ? (

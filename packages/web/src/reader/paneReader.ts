@@ -62,3 +62,23 @@ export function setPaneDock(mode: PaneDock): void {
 export function usePaneDock(): PaneDock | null {
   return useSyncExternalStore(subscribe, loadDock);
 }
+
+/** Whether reader mode shows a message while the agent is still writing it (read off the terminal). On unless switched off in this browser. */
+const LIVE_KEY = 'ttym-reader-live';
+let liveOn: boolean | undefined;
+
+function loadLive(): boolean {
+  if (liveOn !== undefined) return liveOn;
+  try { liveOn = localStorage.getItem(LIVE_KEY) !== 'off'; } catch { liveOn = true; }
+  return liveOn;
+}
+
+export function setReaderLive(on: boolean): void {
+  liveOn = on;
+  try { localStorage.setItem(LIVE_KEY, on ? 'on' : 'off'); } catch {}
+  emit();
+}
+
+export function useReaderLive(): boolean {
+  return useSyncExternalStore(subscribe, loadLive);
+}

@@ -192,3 +192,21 @@
 
 /* a session reference in the text: looks like a link, goes where the terminal's %id goes */
 .rd-ref { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+
+/* The message being written (live.ts). Its blocks sit straight in one .rd-md box so margins collapse as in a whole message. */
+.rd-live { overflow-anchor: none; }
+.rd-live > .rd-live-block:first-child > :first-child { margin-top: 0; }
+.rd-live > .rd-live-block:last-of-type > :last-child { margin-bottom: 0; }
+.rd-live-block { animation: rd-live-in 140ms ease-out; }
+@keyframes rd-live-in { from { opacity: 0; } to { opacity: 1; } }
+/* Takes no height, so it appearing and going changes nothing below it; the dot is drawn in the gap under the last line. */
+.rd-caret { display: block; height: 0; position: relative; }
+.rd-caret::before {
+  content: ''; position: absolute; left: 1px; top: 7px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent); animation: rd-caret 1s ease-in-out infinite;
+}
+@keyframes rd-caret { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .rd-live-block { animation: none; }
+  .rd-caret::before { animation: none; opacity: 0.7; }
+}
