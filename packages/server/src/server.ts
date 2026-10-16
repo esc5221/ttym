@@ -511,6 +511,10 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     // DELETE /api/sessions/:id
     if (req.method === 'DELETE') {
       manager.destroy(id);
+      // 죽인 세션이 워크스페이스 멤버로 남으면 status 'missing' 유령 창이 attach를 반복한다.
+      for (const ws of workspaceStore.list()) {
+        if (ws.members.some((m) => m.sessionId === id)) workspaceStore.removeMember(ws.id, id);
+      }
       log(`HTTP DESTROY session=${id}`);
       json(200, { ok: true });
       return true;

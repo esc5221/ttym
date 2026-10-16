@@ -174,6 +174,10 @@ function renderScreen(screen: string): string {
 async function fetchScreen(port: number, sessionId: number): Promise<string> {
   const raw = hasFlag('--raw');
   const result = await fetchJson(port, `/api/sessions/${sessionId}/screen${raw ? '' : '?format=text'}`);
+  if (result?.error) {
+    console.error(`no such session: %${sessionId} (${result.error})`);
+    process.exit(EXIT.NOT_FOUND);
+  }
   const screen = result?.screen ?? '';
   return result?.format === 'text' ? (screen.endsWith('\n') || !screen ? screen : `${screen}\n`) : renderScreen(screen);
 }
