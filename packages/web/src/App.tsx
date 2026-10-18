@@ -11,6 +11,7 @@ import { DashboardPage } from './DashboardPage.js';
 import { MapPage } from './MapPage.js';
 import { SessionPeek } from './SessionPeek.js';
 import { SettingsModal } from './SettingsModal.js';
+import { SearchPalette } from './SearchPalette.js';
 import { WorkspacePage } from './workspace/WorkspacePage.js';
 import { usePhoneImmersive } from './phone-immersive.js';
 import { parseAccent, BRAND_ACCENT } from './favicon.js';
@@ -1605,6 +1606,7 @@ function App() {
           onRename={(ws) => { setRenamingId(ws.id); setRenameDraft(ws.name); }}
           onDelete={(ws) => { void deleteWorkspace(ws); }}
         />
+        <SearchPalette />
         <SettingsModal
           localEchoEnabled={localEchoEnabled}
           onLocalEchoChange={(value) => { handleLocalEchoChange(value); patchConfig({ 'local-echo': String(value) }); }}

@@ -202,6 +202,30 @@ ttym map refresh --dry-run      # 프롬프트만 출력
 - 데이터: 세션 요약은 meta.mapSummary(annotations), 배치는 workspace.map, 읽기는 `GET /api/map`.
 - 신선도는 seq 기반 — 요약 후 출력이 흐르면 stale. 주기는 서버 내장: config `map-interval = 10m`(기본 off).
 
+## 세션 찾기 (search)
+
+질의 한 줄로 "그 세션이 어느 거였더라"를 찾는다. 웹 ⌘K(Mac) · Ctrl+Shift+K(그 외, Ctrl+K는 readline이라 안 씀), CLI `ttym search`.
+
+```sh
+ttym search 마인크래프트 서버 고치던 거      # AI(키가 있을 때) → 없거나 실패하면 글자 일치
+ttym search 서버 복구 --lex                  # 이 머신 안에서만. 밖으로 아무것도 안 나간다
+ttym search ... --json                       # { query, hits: [{id, workspace, member, title, note, p, via}], ai }
+```
+
+- 서버: packages/server/src/search/ (decisions·corpus·service). `GET /api/search?q=&mode=lex|ai`,
+  키는 `GET|POST /api/search/api-key`(write-only). 웹: SearchPalette.tsx, 설정의 search 섹션.
+- 방식: decisions 모델(Jev)에 세션마다 `noul` 질문("이 세션이 찾는 것인가?")을 한 요청으로 보내고 확률로 정렬한다.
+  문서 = workspace 이름 / 요약 제목 / 요약 노트 || 사용자가 보낸 프롬프트 앞 2개(120자). 확률 0.5 미만은 버린다.
+  실측(세션 135개, 내가 만든 질의 45개): 단어가 안 겹치는 질의 top1 18/18, 제목에 없는 내용 질의는 프롬프트를 붙여야 13/13
+  (붙이지 않으면 1/13). 질의당 약 0.5초·$0.0003~0.0007. 요약이 없는 새 세션은 프롬프트로만 찾힌다.
+- 설정(config, map처럼 키는 config에 넣지 않는다): `search-url`(decisions 엔드포인트 전체 주소, 기본
+  `https://openrouter.ai/api/alpha/decisions` — 공식 주소로 바꿔 쓸 수 있다, OpenRouter와 같은 요청·응답 모양을 가정),
+  `search-model`(기본 `typesafe/jev-1.14`), `search-timeout`(ms, 8000), `search-prompts = off`(프롬프트는 모델에 안 보냄),
+  `search-exclude-streams = a, b`(그 줄기는 모델에 안 보냄). 키: `~/.ttym/search-api-key`(0600) > `TTYM_SEARCH_API_KEY` > `OPENROUTER_API_KEY`.
+- **키를 넣는 것이 외부 전송의 동의다.** 세션 제목·요약·workspace 이름·(켜 두면) 프롬프트 앞부분이 그 주소로 나간다.
+  키가 없으면 글자 일치(`lex`)만 돌고 아무것도 나가지 않는다.
+- 엔드포인트가 alpha다. 실패하면(시간 초과·4xx/5xx) 글자 일치로 내려앉고 이유를 UI 아래 줄·CLI stderr에 적는다.
+
 ## Stop Hook (scripts/ttym-claude-stop-hook.sh)
 
 Claude Code 턴 종료 시 발동 (Stop·StopFailure·SessionEnd). Codex는 scripts/ttym-codex-stop-hook.sh로 같은 일:

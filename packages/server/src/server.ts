@@ -28,6 +28,8 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { RemoteStore } from './remote/store.js';
 import { gate, gateUpgrade, type RemoteContext } from './remote/http.js';
 import { ConsumerStore, GrantStore, type Grant } from './embed/store.js';
+import { SearchService } from './search/service.js';
+import { userTextsOf } from './search/corpus.js';
 import { handleEmbedHttp, EMBED_WS_PATH, workspaceOfFn, listenEmbedAdmin } from './embed/http.js';
 import { authorizeInbound, canWrite, filterList, filterOutbound, outOfScope } from './embed/authorize.js';
 
@@ -302,7 +304,7 @@ export function utf8Pieces(bytes: Buffer, max: number): Buffer[] {
 /** Claude panes on a permission prompt or dialog → what for. Filled by the waiting sweep. */
 const agentWaiting = new Map<number, string>();
 
-function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void, viewer?: { store: ViewerStore; service: ViewerService }, sleeper?: AgentSleeper): boolean {
+function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void, viewer?: { store: ViewerStore; service: ViewerService }, sleeper?: AgentSleeper, search?: SearchService): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
 
@@ -1117,6 +1119,31 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     }
   }
 
+  // GET /api/search?q=…&mode=lex|ai — 질의 한 줄로 세션 찾기(웹 Cmd+K, `ttym search`).
+  // lex는 이 머신 안에서 글자 겹침만, ai는 decisions 모델에 세션별로 묻는다(키가 있을 때만). 설정은 search-*.
+  if (path === '/api/search' && req.method === 'GET' && search) {
+    const q = (url.searchParams.get('q') ?? '').slice(0, 300);
+    const run = url.searchParams.get('mode') === 'lex' ? search.searchLex(q) : search.searchAi(q);
+    run.then((r) => json(200, r)).catch((e) => { log(`HTTP SEARCH failed: ${String((e as Error).message ?? e)}`); json(500, { error: 'search failed' }); });
+    return true;
+  }
+
+  // GET|POST /api/search/api-key — map/api-key와 같은 규칙: write-only, 파일(0600)로만 산다.
+  if (path === '/api/search/api-key' && search) {
+    if (req.method === 'GET') { search.keyState().then((r) => json(200, r)); return true; }
+    if (req.method === 'POST') {
+      readBody().then(async (body) => {
+        try {
+          const { key } = JSON.parse(body);
+          if (typeof key !== 'string') { json(400, { error: 'key must be string' }); return; }
+          await search.setKey(key);
+          json(200, await search.keyState());
+        } catch { json(400, { error: 'invalid body' }); }
+      });
+      return true;
+    }
+  }
+
   // GET|POST /api/custom-css — 사용자 스타일시트(~/.ttym/custom.css)의 편집 창구.
   // 파일이 진실이고 설정 UI는 편집기일 뿐이다: 에디터로 직접 고쳐도 똑같이 산다.
   // config에 담지 않는 이유는 포맷이다 — config는 한 줄 `key = value`라 여러 줄
@@ -1584,6 +1611,21 @@ export async function createServer(port: number): Promise<TtymServer> {
   const embedConsumers = new ConsumerStore(resolve(getHomeDir(), 'embed-consumers.json'), log);
   const grants = new GrantStore(embedConsumers);
   const workspaceOf = workspaceOfFn(workspaceStore);
+  const searchService = new SearchService({
+    homeDir: getHomeDir(),
+    config: () => configStore.get(),
+    sessions: async () => Promise.all(manager.list().map(async (info) => {
+      const raw = (await manager.getMeta(info.id)).mapSummary;
+      const sm = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+      return { id: info.id, lastSeq: info.lastSeq, title: typeof sm.title === 'string' ? sm.title : '', note: typeof sm.note === 'string' ? sm.note : '' };
+    })),
+    workspaces: () => workspaceStore.list().map((w) => ({ id: w.id, name: w.name, stream: w.map?.stream ?? null, members: w.members.map((m) => ({ sessionId: m.sessionId, name: m.name })) })),
+    userTexts: async (id) => {
+      const feed = await readerFeed(await manager.getMeta(id), { after: null, key: null }, { pid: manager.get(id)?.childPid || undefined });
+      return userTextsOf(feed.updates);
+    },
+    log,
+  });
   const embedDeps = { consumers: embedConsumers, grants, manager, workspaces: workspaceStore, webDist: DEMO_DIST_DIR, log };
 
   const httpServer = createHttpServer((req, res) => {
@@ -1601,7 +1643,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     if (handleEmbedHttp(req, res, embedDeps)) return;
     // /view/<cap>/… before the SPA catch-all, which would otherwise answer with index.html.
     if (handleViewContent(req, res, (req.url || '/').split('?')[0]!, { store: viewerStore })) return;
-    if (handleHttpApi(manager, workspaceStore, interactions, configStore, req, res, broadcastAgentState, broadcastConfig, viewer, sleeper ?? undefined)) return;
+    if (handleHttpApi(manager, workspaceStore, interactions, configStore, req, res, broadcastAgentState, broadcastConfig, viewer, sleeper ?? undefined, searchService)) return;
     if (handleDemoApp(req, res)) return;
     res.writeHead(404);
     res.end('not found');

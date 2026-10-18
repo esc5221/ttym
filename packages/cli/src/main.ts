@@ -7,6 +7,7 @@ import { cmdAttach } from './attach.js';
 import { cmdMeta, cmdCurrent, cmdWorkspace } from './workspace.js';
 import { cmdAgent } from './agent.js';
 import { cmdMap } from './map.js';
+import { cmdSearch } from './search.js';
 import { cmdService } from './service.js';
 import { cmdRemote } from './remote.js';
 import { cmdEmbed } from './embed.js';
@@ -50,6 +51,7 @@ function printHelp() {
   console.log('  open <path|url>... [--to <addr>] [--full|--pane] [--root <dir>]  Open inside the pane (md·csv·html·images·dirs·urls)');
   console.log('  view list|close              Viewer tabs of a pane (close <target> | --id <vid> | --all)');
   console.log('  map refresh [--model haiku]  AI-summarize stale sessions into the work map');
+  console.log('  search <query…> [--lex]      Which session is it? (AI over summaries and prompts; --lex stays on this machine)');
   console.log('  status                       Show server & session info');
   console.log('  current                      Show current workspace/member context');
   console.log('  workspace <command>          Workspace/member control plane');
@@ -100,6 +102,7 @@ switch (cmd) {
   case 'meta':    await cmdMeta(); break;
   case 'agent':   await cmdAgent(); break;
   case 'map':     await cmdMap(); break;
+  case 'search':  await cmdSearch(); break;
   case 'service': await cmdService(); break;
   case 'remote':  await cmdRemote(); break;
   case 'embed':   await cmdEmbed(); break;

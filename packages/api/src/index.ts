@@ -16,6 +16,7 @@ export * from './interactions.js';
 export * from './config.js';
 export * from './views.js';
 export * from './reader.js';
+export * from './search.js';
 export type { ScreenRun, ScreenTail } from '@ttym/protocol';
 export type { ViewItem, ViewerState, ViewRenderer, ViewPresentation, ViewChangeEvent, ViewOpenRequest } from '@ttym/protocol';
 export type { ReaderAgent, ReaderFeed, ReaderUpdate, ReaderPatch, ReaderHunk, ReaderPatchLine } from '@ttym/protocol';

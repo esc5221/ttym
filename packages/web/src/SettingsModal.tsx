@@ -2,7 +2,9 @@ import { setReaderLive, useReaderLive } from './reader/paneReader.js';
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { refreshTerminalThemes, type LocalEchoSetting } from '@ttym/ui';
+import * as api from '@ttym/api';
 import { API_BASE, actionBtnStyle, type UiStyle } from './app-shared.js';
+import { SEARCH_KEY_LABEL } from './search-key.js';
 
 /**
  * 설정 모달 — 좌측 섹션 내비 + 우측 필드 패널 (Linear/Slack preferences 모양).
@@ -12,8 +14,8 @@ import { API_BASE, actionBtnStyle, type UiStyle } from './app-shared.js';
  * 요약 지시문은 서버의 map-prompt(GET/PUT — 비우면 기본값 복귀).
  */
 
-type Section = 'general' | 'appearance' | 'agents' | 'map';
-const SECTIONS: Section[] = ['general', 'appearance', 'agents', 'map'];
+type Section = 'general' | 'appearance' | 'agents' | 'map' | 'search';
+const SECTIONS: Section[] = ['general', 'appearance', 'agents', 'map', 'search'];
 
 interface Props {
   localEchoEnabled: LocalEchoSetting;
@@ -79,6 +81,7 @@ export function SettingsModal(props: Props) {
                 {section === 'appearance' ? <AppearanceSection {...props} /> : null}
                 {section === 'agents' ? <AgentsSection onPatchConfig={props.onPatchConfig} /> : null}
                 {section === 'map' ? <MapSection onPatchConfig={props.onPatchConfig} /> : null}
+                {section === 'search' ? <SearchSection onPatchConfig={props.onPatchConfig} /> : null}
               </div>
             </div>
           </div>
@@ -364,6 +367,80 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
       </Field>
     );
   }
+}
+
+function SearchSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }) {
+  const [url, setUrl] = useState('');
+  const [model, setModel] = useState('');
+  const [prompts, setPrompts] = useState(true);
+  const [exclude, setExclude] = useState('');
+  const [keyState, setKeyState] = useState<{ set: boolean; source: 'file' | 'env' | null } | null>(null);
+  const [keyDraft, setKeyDraft] = useState('');
+  const [savedFlash, setSavedFlash] = useState('');
+
+  useEffect(() => {
+    void fetch(`${API_BASE}/api/config`).then((r) => r.json()).then(({ values }) => {
+      setUrl(values['search-url'] ?? '');
+      setModel(values['search-model'] ?? '');
+      setPrompts(!['off', '0', 'false', 'no'].includes((values['search-prompts'] ?? '').toLowerCase()));
+      setExclude(values['search-exclude-streams'] ?? '');
+    }).catch(() => {});
+    void api.getSearchKeyState(API_BASE).then(setKeyState).catch(() => {});
+  }, []);
+
+  const flash = (msg: string) => { setSavedFlash(msg); setTimeout(() => setSavedFlash(''), 1500); };
+
+  const save = () => {
+    onPatchConfig({
+      'search-url': url.trim() || null,
+      'search-model': model.trim() || null,
+      'search-prompts': prompts ? null : 'off',
+      'search-exclude-streams': exclude.trim() || null,
+    });
+    flash('saved');
+  };
+
+  const saveKey = async () => {
+    const res = await api.setSearchKey(API_BASE, keyDraft).catch(() => null);
+    if (res) { setKeyState(res); setKeyDraft(''); flash(keyDraft.trim() ? 'key stored' : 'key cleared'); }
+  };
+
+  return (
+    <>
+      <div style={hintStyle}>
+        {SEARCH_KEY_LABEL} 로 세션을 내용으로 찾는다. 키가 없으면 이 머신 안의 글자 일치만 돈다.
+        키를 넣으면 세션 제목·한 줄 요약·workspace 이름(과 아래 설정에 따라 프롬프트 앞부분)이 아래 주소의 모델로 나간다.
+      </div>
+      <Field label={`api key ${keyState === null ? '' : keyState.set ? `· set (${keyState.source})` : '· not set'}`} hint="write-only: stored as ~/.ttym/search-api-key (0600), never sent back. env: TTYM_SEARCH_API_KEY · OPENROUTER_API_KEY">
+        <span style={{ display: 'inline-flex', gap: 6 }}>
+          <input
+            type="password"
+            value={keyDraft}
+            onChange={(e) => setKeyDraft(e.target.value)}
+            placeholder={keyState?.set ? '(replace)' : 'sk-…'}
+            style={{ ...inputStyle, width: 200 }}
+          />
+          <button onClick={() => void saveKey()} style={actionBtnStyle}>{keyDraft.trim() ? 'store' : 'clear'}</button>
+        </span>
+      </Field>
+      <Field label="url" hint="decisions 엔드포인트 전체 주소 · 비우면 https://openrouter.ai/api/alpha/decisions · 공식 주소로 바꿔 쓸 수 있다">
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://openrouter.ai/api/alpha/decisions" style={{ ...inputStyle, width: 300 }} />
+      </Field>
+      <Field label="model" hint="비우면 typesafe/jev-1.14">
+        <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="typesafe/jev-1.14" style={{ ...inputStyle, width: 220 }} />
+      </Field>
+      <Field label="send prompts" hint="on = 세션마다 내가 보낸 프롬프트 앞 2개(120자)도 모델에 보낸다 (내용으로 찾으려면 필요) · off = 제목·요약·이름만">
+        <Segmented options={['off', 'on'] as const} value={prompts ? 'on' : 'off'} onChange={(v) => setPrompts(v === 'on')} />
+      </Field>
+      <Field label="exclude streams" hint="쉼표로 구분한 stream 이름 — 그 줄기의 세션은 모델에 보내지 않는다 (글자 일치로는 여전히 찾힌다)">
+        <input value={exclude} onChange={(e) => setExclude(e.target.value)} placeholder="e.g. 회사, gpai" style={{ ...inputStyle, width: 220 }} />
+      </Field>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center' }}>
+        <span style={flashStyle}>{savedFlash}</span>
+        <button onClick={save} style={actionBtnStyle}>save</button>
+      </div>
+    </>
+  );
 }
 
 function MapSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }) {
