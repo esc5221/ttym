@@ -89,6 +89,12 @@ export interface SleeperDeps {
   };
   hasPendingInteraction(sessionId: number): boolean;
   listProcesses(): Promise<ProcInfo[]>;
+  /**
+   * The same list, possibly a moment old (psProcessesCached). Only the idle sweep reads it: it decides
+   * about many panes at once and nothing it does depends on the last second. waitGone/waitReady and
+   * the manual entry points keep listProcesses — they ask what is true now. Falls back to listProcesses.
+   */
+  recentProcesses?(): Promise<ProcInfo[]>;
   /** Claude Code's own status for a process (~/.claude/sessions/<pid>.json), or null when absent. */
   agentStatus(pid: number): Promise<AgentStatusFile | null>;
   kill(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
@@ -318,6 +324,18 @@ export async function psProcesses(): Promise<ProcInfo[]> {
   });
 }
 
+/**
+ * `ps` shared by everything that asks within a moment (the waiting sweep, the idle sweep, the
+ * readers' polling pages). Callers that need the state of this instant call psProcesses.
+ */
+export const PS_SHARE_MS = 2000;
+let psShared: { at: number; procs: Promise<ProcInfo[]> } | undefined;
+export function psProcessesCached(maxAgeMs = PS_SHARE_MS): Promise<ProcInfo[]> {
+  const now = Date.now();
+  if (!psShared || now - psShared.at > maxAgeMs) psShared = { at: now, procs: psProcesses() };
+  return psShared.procs;
+}
+
 interface Live {
   state: SleepState;
   queue: Buffer[];
@@ -413,8 +431,10 @@ export class AgentSleeper {
   /**
    * Put one pane's agent to sleep. A manual request skips the idle clocks but
    * never the safety checks (mid-turn, pending interaction, pinned).
+   * `procs`: a process table the caller already has (the idle sweep reads one per round for all
+   * panes); without it this asks `ps` itself, once, after the refusals that need no process.
    */
-  async sleep(id: number, reason: 'idle' | 'manual'): Promise<{ ok: true } | { ok: false; error: string }> {
+  async sleep(id: number, reason: 'idle' | 'manual', procs?: ProcInfo[]): Promise<{ ok: true } | { ok: false; error: string }> {
     if (this.live.get(id)?.state.state === 'failed') this.live.delete(id); // a failed wake does not block a new sleep
     if (this.live.has(id) || this.inFlight.has(id)) return { ok: false, error: 'already sleeping' };
     const session = this.deps.sessions.get(id);
@@ -422,13 +442,13 @@ export class AgentSleeper {
     const meta = await this.deps.sessions.getMeta(id);
     const refuse = await this.refusal(id, session, meta, reason === 'idle');
     if (refuse) return { ok: false, error: refuse };
-    const procs = await this.deps.listProcesses();
-    const agent = findAgentProcess(procs, session.childPid);
+    const table = procs ?? await this.deps.listProcesses();
+    const agent = findAgentProcess(table, session.childPid);
     if (!agent) return { ok: false, error: 'no agent process under this pane' };
     const kind = KINDS[agent.kind];
     const agentSessionId = (meta[kind.idKey] ?? meta[kind.lastKey]) as string | null | undefined;
     if (typeof agentSessionId !== 'string' || !agentSessionId) return { ok: false, error: `no ${agent.kind} session id to resume from` };
-    const busy = await this.whyBusy(agent, procs, session, meta);
+    const busy = await this.whyBusy(agent, table, session, meta);
     if (busy) return { ok: false, error: busy };
 
     this.inFlight.add(id);
@@ -734,9 +754,17 @@ export class AgentSleeper {
     }
   }
 
+  /**
+   * One pass over the idle panes. The process table is read once, lazily — only when some pane has
+   * got past the idle clocks — and shared by every pane's agent lookup and busy check. A pane
+   * with no agent under it costs no `ps` at all. After a pane is put to sleep the table is
+   * dropped: its agent is gone and the next pane is decided on a fresh read.
+   */
   private async sweep(): Promise<void> {
     if (this.afterMs <= 0) return;
     let put = 0;
+    let table: ProcInfo[] | null = null;
+    const read = this.deps.recentProcesses ?? this.deps.listProcesses;
     for (const id of this.deps.sessions.ids()) {
       if (put >= SLEEP_BATCH) break;
       if (this.live.has(id) || this.inFlight.has(id)) continue;
@@ -744,8 +772,9 @@ export class AgentSleeper {
       if (!session || session.isDead) continue;
       const meta = await this.deps.sessions.getMeta(id);
       if (await this.refusal(id, session, meta, true)) continue;
-      const r = await this.sleep(id, 'idle');
-      if (r.ok) { put++; await this.delay(3000); }
+      table ??= await read();
+      const r = await this.sleep(id, 'idle', table);
+      if (r.ok) { put++; table = null; await this.delay(3000); }
     }
   }
 }

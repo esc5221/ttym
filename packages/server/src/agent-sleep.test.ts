@@ -427,6 +427,89 @@ describe('auto sleep', () => {
   });
 });
 
+describe('idle sweep reads the process table once', () => {
+  /** N panes, each its own shell pid; `agentIn` names the ones that run a claude. */
+  function many(n: number, agentIn: number[], extra: { recent?: boolean } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'ttym-sweep-'));
+    const sessions = new Map<number, FakeSession>();
+    const metas = new Map<number, Record<string, unknown>>();
+    for (let i = 1; i <= n; i++) {
+      const s = new FakeSession(i);
+      s.childPid = 1000 + i * 10;
+      s.lastInputAt = Date.now() - 3_600_000;
+      s.lastOutputAt = Date.now() - 3_600_000;
+      sessions.set(i, s);
+      metas.set(i, { claudeLastSessionId: `sid-${i}` });
+    }
+    const table: ProcInfo[] = agentIn.map((i) => ({ pid: 1000 + i * 10 + 1, ppid: 1000 + i * 10, rss: 300 * 1048576, command: '/Users/x/.local/share/claude/versions/2.1.269' }));
+    const calls = { list: 0, recent: 0 };
+    let alive = true;
+    const sleeper = new AgentSleeper({
+      sessions: {
+        get: (id) => sessions.get(id) as unknown as Session | undefined,
+        ids: () => [...sessions.keys()],
+        getMeta: async (id) => metas.get(id) ?? {},
+        setMeta: async (id, patch) => { metas.set(id, { ...(metas.get(id) ?? {}), ...patch }); },
+      },
+      hasPendingInteraction: () => false,
+      listProcesses: async () => { calls.list++; return alive ? table : []; },
+      ...(extra.recent ? { recentProcesses: async () => { calls.recent++; return table; } } : {}),
+      agentStatus: async () => ({ status: 'idle' as const }),
+      kill: () => {},
+      onState: () => {},
+      resnapshot: () => {},
+      port: 7692,
+      runtimeDir: dir,
+      log: () => {},
+      timeScale: 0.01,
+    });
+    sleeper.configure({ 'agent-sleep-after': '1m' });
+    // The first Ctrl-C takes the agent down, as it does in the real thing.
+    for (const s of sessions.values()) s.writeRaw = (d) => { s.raw.push(d.toString('latin1')); if (d.toString('latin1') === '\x03') alive = false; };
+    const sweep = () => (sleeper as unknown as { sweep(): Promise<void> }).sweep();
+    return { sleeper, sessions, calls, sweep, cleanup: () => { sleeper.stop(); rmSync(dir, { recursive: true, force: true }); } };
+  }
+
+  it('168 idle shell panes with no agent cost one ps, not one each', async () => {
+    const m = many(168, []);
+    await m.sweep();
+    expect(m.calls.list).toBe(1);
+    m.cleanup();
+  });
+
+  it('no pane past the idle clocks → no ps at all', async () => {
+    const m = many(5, [1]);
+    for (const s of m.sessions.values()) s.lastInputAt = Date.now();
+    await m.sweep();
+    expect(m.calls.list).toBe(0);
+    m.cleanup();
+  });
+
+  it('uses recentProcesses for the sweep, and listProcesses only for waiting out the agent', async () => {
+    const m = many(20, [3], { recent: true });
+    await m.sweep();
+    expect(m.calls.recent).toBe(2); // one read, one fresh read after pane 3 went down
+    expect(m.sessions.get(3)!.raw.filter((r) => r === '\x03').length).toBeGreaterThan(0);
+    expect(m.calls.list).toBeGreaterThan(0); // waitGone asks what is true now
+    m.cleanup();
+  });
+
+  it('decides each pane as before: the pane with an agent sleeps, the others are skipped', async () => {
+    const m = many(6, [4]);
+    await m.sweep();
+    expect(m.sleeper.stateOf(4)).toMatchObject({ state: 'sleeping', reason: 'idle' });
+    for (const id of [1, 2, 3, 5, 6]) expect(m.sleeper.stateOf(id)).toBeNull();
+    m.cleanup();
+  });
+
+  it('a manual sleep still reads ps itself', async () => {
+    const m = many(1, [1]);
+    expect(await m.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
+    expect(m.calls.list).toBeGreaterThan(0);
+    m.cleanup();
+  });
+});
+
 describe('restart', () => {
   let h: ReturnType<typeof harness>;
   afterEach(() => h.cleanup());

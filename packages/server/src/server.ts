@@ -22,7 +22,7 @@ import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { ViewerStore } from './viewer/store.js';
 import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
-import { AgentSleeper, SUBMIT_GAP_MS, findAgentProcess, psProcesses, readAgentStatus, turnIsStale, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, SUBMIT_GAP_MS, findAgentProcess, psProcesses, psProcessesCached, readAgentStatus, turnIsStale, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { RemoteStore } from './remote/store.js';
@@ -1790,7 +1790,10 @@ export async function createServer(port: number): Promise<TtymServer> {
   // command?" looked exactly like one quietly working. A sweep reads the files and
   // broadcasts only the changes — one ps per sweep, and only while a Claude pane exists.
   const WAITING_SWEEP_MS = 3_000;
+  let waitingSweepRunning = false; // a sweep that outlasts its interval is not stacked on
   const waitingSweep = setInterval(() => {
+    if (waitingSweepRunning) return;
+    waitingSweepRunning = true;
     void (async () => {
       const claudePanes: Array<{ id: number; shellPid: number; meta: Record<string, unknown> }> = [];
       for (const info of manager.list()) {
@@ -1802,7 +1805,7 @@ export async function createServer(port: number): Promise<TtymServer> {
       }
       const seen = new Set<number>();
       if (claudePanes.length > 0) {
-        const procs = await psProcesses().catch(() => null);
+        const procs = await psProcessesCached().catch(() => null);
         if (!procs) return;
         for (const pane of claudePanes) {
           const agent = findAgentProcess(procs, pane.shellPid);
@@ -1827,7 +1830,7 @@ export async function createServer(port: number): Promise<TtymServer> {
         agentWaiting.delete(id);
         manager.getMeta(id).then((meta) => broadcastAgentState(id, meta)).catch(() => {});
       }
-    })().catch(() => {});
+    })().catch(() => {}).finally(() => { waitingSweepRunning = false; });
   }, WAITING_SWEEP_MS);
   waitingSweep.unref();
 
@@ -2509,6 +2512,7 @@ export async function createServer(port: number): Promise<TtymServer> {
     },
     hasPendingInteraction: (id) => interactions.hasPending(id),
     listProcesses: psProcesses,
+    recentProcesses: psProcessesCached,
     agentStatus: readAgentStatus,
     kill: (pid, signal) => { try { process.kill(pid, signal); } catch {} },
     onState: (id, _sleep: SleepState | null) => { void manager.getMeta(id).then((meta) => broadcastAgentState(id, meta)); },

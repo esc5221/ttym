@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { access, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { ReaderPatch, ReaderPatchLine, ReaderUpdate } from '@ttym/protocol';
-import { psProcesses, type ProcInfo } from '../agent-sleep.js';
+import { psProcessesCached, type ProcInfo } from '../agent-sleep.js';
 import { all, decode, first, msg, num, text, type Message } from './agy-wire.js';
 import * as F from './agy-fields.js';
 import type { CursorSource, LocatedRecord } from './source.js';
@@ -338,12 +338,9 @@ export async function readAgy(
 
 const PRESENCE = /\/presence\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.lock$/;
 
-/** `ps` is shared by everything that asks within a moment; a polling page asks every second. */
-let procsCache: { at: number; procs: Promise<ProcInfo[]> } | undefined;
+/** `ps` is shared by everything that asks within a moment (agent-sleep.ts psProcessesCached); a polling page asks every second. */
 function processes(): Promise<ProcInfo[]> {
-  const now = Date.now();
-  if (!procsCache || now - procsCache.at > 2000) procsCache = { at: now, procs: psProcesses() };
-  return procsCache.procs;
+  return psProcessesCached();
 }
 
 const NOT_A_CONVERSATION = new Set(['update', 'install', 'changelog', 'models', 'plugin', 'plugins', 'mcp', 'agent', 'agents', 'remote-control', 'mic-serve', 'help']);
