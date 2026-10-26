@@ -105,7 +105,7 @@ const MAP_CSS = `
   flex:0 0 100%; width:100%; display:flex; flex-wrap:wrap; gap:calc(var(--wu)*0.7);
 }
 .wmb-agent {
-  display:flex; align-items:center; gap:calc(var(--wu)*0.6);
+  display:flex; align-items:flex-start; gap:calc(var(--wu)*0.6);
   min-width:calc(var(--wu)*13.5); max-width:calc(var(--wu)*22); min-height:calc(var(--wu)*2.7);
   padding:calc(var(--wu)*0.5) calc(var(--wu)*0.85);
   border:1px solid var(--wm-line); border-radius:7px;
@@ -115,16 +115,24 @@ const MAP_CSS = `
 .wmb-agent:hover { border-color:var(--wm-dim); background:color-mix(in srgb, var(--wm-tx) 6%, transparent); }
 .wmb-agent.claude { --adot:var(--wm-claude); }
 .wmb-agent.codex { --adot:var(--wm-codex); }
-.wmb-agent .adot { flex:0 0 auto; width:calc(var(--wu)*0.42); height:calc(var(--wu)*0.42); border-radius:50%; background:var(--adot, var(--wm-dim)); }
+.wmb-agent .adot { flex:0 0 auto; width:calc(var(--wu)*0.42); height:calc(var(--wu)*0.42); margin-top:calc(var(--wu)*0.42); border-radius:50%; background:var(--adot, var(--wm-dim)); }
 .wmb-agent.live .adot { animation:wmb-live 1.8s ease-out infinite; }
 @keyframes wmb-live { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--adot) 55%, transparent); } 70%,100% { box-shadow:0 0 0 calc(var(--wu)*0.4) transparent; } }
 .wmb-agent .meat { min-width:0; display:flex; flex-direction:column; line-height:1.3; }
 .wmb-agent .meat b { font-size:calc(var(--wu)*0.88); font-weight:650; color:var(--wm-tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .wmb-agent .meat small { font-size:calc(var(--wu)*0.72); color:var(--wm-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .wmb-agent .meat .wsn { color:var(--wm-soft); }
+/* 요약 한 줄(note): 카드 폭에서 두 줄까지. 요약 전 세션은 이 줄이 없다. */
+.wmb-agent .meat .note { font-size:calc(var(--wu)*0.76); color:var(--wm-soft); margin-top:calc(var(--wu)*0.15); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.wmb-more {
+  align-self:center; padding:calc(var(--wu)*0.3) calc(var(--wu)*0.8); font:inherit; font-size:calc(var(--wu)*0.78);
+  color:var(--wm-dim); background:none; border:1px dashed var(--wm-line); border-radius:7px; cursor:pointer;
+}
+.wmb-more:hover { color:var(--wm-tx); border-color:var(--wm-dim); }
 /* 모바일: 한 줄에 하나씩 꽉 차게, 터치 타깃 크게. */
 @media (max-width:560px) {
   .wmb-agent { max-width:none; flex:1 1 100%; min-height:calc(var(--wu)*3.1); }
+  .wmb-more { flex:1 1 100%; min-height:calc(var(--wu)*2.6); }
 }
 /* 보드: stream 칸이 가로로 늘어서되, 화면 폭을 넘으면 아래로 접힌다(wrap) —
    오른쪽으로 튀어나가는 가로 스크롤 대신 세로 스크롤. 칸 하나가 stream, 그 안에
@@ -225,6 +233,9 @@ const MAP_CSS = `
 body.wmb-dragging { cursor:grabbing; user-select:none; }
 `;
 
+/** 상단 카드 행에 처음부터 보이는 세션 수. 폰은 한 줄에 하나라 이 값이 곧 세로 길이다. */
+const TOP_AGENT_MAX = 8;
+
 function ensureMapCss() {
   const el = document.getElementById('wmap-css');
   if (el) { el.textContent = MAP_CSS; return; }
@@ -279,6 +290,7 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
   const [refreshing, setRefreshing] = useState(false);
   // 상단 세션 카드 순서를 이 세션(새로고침 전까지) 동안 고정한다.
   const topOrderRef = useRef<number[]>([]);
+  const [topExpanded, setTopExpanded] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -447,18 +459,20 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
 
     // 상단 세션 카드: 에이전트가 실제로 돌았던(agentActiveAt 있는) 세션을 최신순 후보로.
     // 순서는 첫 로드 때 잡아 topOrderRef에 고정 — 폴링/라이브 갱신으로 재정렬되지
-    // 않는다(내용만 갱신). 사라진 것만 빠지고, 빈 슬롯(<3)만 새 후보로 채운다.
+    // 않는다(내용만 갱신). 사라진 것만 빠지고, 빈 슬롯(<TOP_AGENT_MAX)만 새 후보로 채운다.
+    // 넘치는 후보는 topMore로 — "+N more"를 누르면 이어서 보인다.
     const cands = data.sessions
       .filter((s) => (s.agentKind === 'claude-code' || s.agentKind === 'codex') && typeof s.agentActiveAt === 'number')
       .sort((a, b) => (b.agentActiveAt as number) - (a.agentActiveAt as number));
     const candIds = new Set(cands.map((s) => s.id));
     let order = topOrderRef.current.filter((id) => candIds.has(id));
-    for (const s of cands) { if (order.length >= 3) break; if (!order.includes(s.id)) order.push(s.id); }
-    order = order.slice(0, 3);
+    for (const s of cands) { if (order.length >= TOP_AGENT_MAX) break; if (!order.includes(s.id)) order.push(s.id); }
+    order = order.slice(0, TOP_AGENT_MAX);
     topOrderRef.current = order;
     const topSessions = order.map((id) => sessionById.get(id)).filter((s): s is MapSessionRow => !!s);
+    const topMore = cands.filter((s) => !order.includes(s.id));
 
-    return { sessionById, columns, standalone, counts, newestSummary, summarized, wsBySession, topSessions };
+    return { sessionById, columns, standalone, counts, newestSummary, summarized, wsBySession, topSessions, topMore };
   }, [data]);
 
   // ── 드래그: 카드는 칸 사이로, 머리는 좌우로 ──
@@ -662,9 +676,10 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
       <div className="wmb-board">
         {view.topSessions.length > 0 ? (
         <div className="wmb-agents">
-          {view.topSessions.map((s) => {
+          {(topExpanded ? [...view.topSessions, ...view.topMore] : view.topSessions).map((s) => {
             const loc = view.wsBySession.get(s.id);
             const title = s.summary?.title || loc?.wsName || `#${s.id}`;
+            const sum = s.summary;
             return (
               <div
                 key={s.id}
@@ -682,11 +697,18 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
                     <span className="wsn">{loc?.wsName ?? `#${s.id}`}</span>
                     {' · '}
                     {s.agentActive ? 'working' : ago(s.agentActiveAt ?? undefined, now)}
+                    {sum?.status ? <> <span className={`st ${sum.status}`}>{sum.statusNote || sum.status}</span></> : null}
                   </small>
+                  {sum?.note ? <span className="note">{sum.note}</span> : null}
                 </span>
               </div>
             );
           })}
+          {view.topMore.length > 0 ? (
+            <button className="wmb-more" onClick={() => setTopExpanded((v) => !v)}>
+              {topExpanded ? 'less' : `+${view.topMore.length} more`}
+            </button>
+          ) : null}
         </div>
         ) : null}
         {cols.map((g) => {
