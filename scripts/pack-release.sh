@@ -26,7 +26,7 @@ rm -rf "$stage"; mkdir -p "$stage/dist" "$stage/packages/web" "$stage/scripts"
 cp "$DIST/ttym" "$DIST/ttym-server.js" "$DIST/package.json" "$stage/dist/"
 cp "$HOLDER" "$stage/dist/ttym-holder"
 cp -R "$ROOT/packages/web/dist" "$stage/packages/web/dist"
-cp "$ROOT"/scripts/ttym-*-hook.sh "$ROOT/scripts/ttym-shell-integration.zsh" "$stage/scripts/"
+cp "$ROOT"/scripts/ttym-*-hook.sh "$ROOT/scripts/ttym-hook-nested.sh" "$ROOT/scripts/ttym-shell-integration.zsh" "$stage/scripts/"
 cp "$ROOT/LICENSE" "$stage/"
 chmod 755 "$stage/dist/ttym" "$stage/dist/ttym-holder" "$stage/scripts/"*.sh
 printf '{ "kind": "release", "repo": "esc5221/ttym", "version": "%s", "platform": "%s" }\n' "$VERSION" "$PLATFORM" > "$stage/install.json"

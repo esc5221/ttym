@@ -26,7 +26,7 @@ cp "$ROOT/README.md" "$STAGE/ttym/"
 [ -f "$ROOT/packages/web/dist/index.html" ] || { echo "packages/web/dist 없음 — scripts/build.sh 먼저"; exit 1; }
 mkdir -p "$STAGE/ttym/packages/web" "$STAGE/ttym/scripts"
 cp -R "$ROOT/packages/web/dist" "$STAGE/ttym/packages/web/dist"
-cp "$ROOT"/scripts/ttym-*-hook.sh "$ROOT/scripts/ttym-shell-integration.zsh" "$STAGE/ttym/scripts/"
+cp "$ROOT"/scripts/ttym-*-hook.sh "$ROOT/scripts/ttym-hook-nested.sh" "$ROOT/scripts/ttym-shell-integration.zsh" "$STAGE/ttym/scripts/"
 chmod 755 "$STAGE/ttym/scripts/"*.sh
 node - <<NODE
 const fs = require('fs');

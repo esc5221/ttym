@@ -88,6 +88,9 @@ export function renderSystemdUnit(opts: {
     `Environment=TTYM_HOME=${opts.homeDir}`,
     ...(opts.bind ? [`Environment=TTYM_BIND=${opts.bind}`] : []),
   ].join('\n');
+  // KillMode=process: the holders are the server's children, so they sit in its cgroup, and the
+  // default (control-group) SIGTERMs every one of them on stop or restart — each pane and the
+  // agent in it gone (measured 2026-10-29: 0.4 s, all panes). Only the server is the service.
   return `[Unit]
 Description=ttym server
 
@@ -95,6 +98,7 @@ Description=ttym server
 ExecStart=${opts.nodePath} ${opts.serverJs}
 Restart=on-failure
 RestartSec=10
+KillMode=process
 ${envLines}
 
 [Install]
