@@ -47,6 +47,8 @@ describe('service 파일 렌더러 — 설치 시점 생성, 정적 출하 금�
     const unit = renderSystemdUnit({ ...base, bind: null });
     expect(unit).toContain('Restart=on-failure');
     expect(unit).toContain('RestartSec=10');
+    // 기본(control-group)이면 재시작이 cgroup 안의 holder 를 모두 죽인다
+    expect(unit).toContain('KillMode=process');
     expect(unit).toContain('Environment=PORT=7690');
     expect(unit).not.toContain('TTYM_BIND');
   });
