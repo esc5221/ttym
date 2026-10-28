@@ -61,9 +61,14 @@ export interface Interaction {
   prompt: string;
   status: InteractionStatus;
   transcript: string | null;
+  /** Set with status 'failed' when the turn was cut off: API error, Esc, a denied prompt. */
+  interrupted?: AgentInterrupted;
   createdAt: number;
   completedAt: number | null;
 }
+
+/** How a Claude turn ended without an answer. error: API error / connection lost (StopFailure) · interrupted: no Stop came (Esc, a denied prompt). */
+export interface AgentInterrupted { at: number; reason: 'error' | 'interrupted'; message?: string }
 
 /** Server-owned view of a session, assembled by GET /runtime. Read-only. */
 export interface SessionRuntime {

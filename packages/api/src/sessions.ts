@@ -1,6 +1,6 @@
 import { request, type BaseUrl } from './transport.js';
 import type { ScreenTail } from '@ttym/protocol';
-import type { SessionAnnotations, SessionInfo, SessionMeta, SessionRuntime } from './types.js';
+import type { AgentInterrupted, SessionAnnotations, SessionInfo, SessionMeta, SessionRuntime } from './types.js';
 
 export function listSessions(base: BaseUrl): Promise<SessionInfo[]> {
   return request(base, '/api/sessions');
@@ -79,7 +79,7 @@ export interface AgentSleepInfo {
   dropped?: number;
 }
 
-export function getAgentStates(base: BaseUrl): Promise<Record<number, { kind: string | null; active: boolean; sleep?: AgentSleepInfo | null; waiting?: string | null }>> {
+export function getAgentStates(base: BaseUrl): Promise<Record<number, { kind: string | null; active: boolean; sleep?: AgentSleepInfo | null; waiting?: string | null; interrupted?: AgentInterrupted | null }>> {
   return request(base, '/api/agent-states');
 }
 

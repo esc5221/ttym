@@ -51,8 +51,11 @@ export interface SleepState {
 
 export interface ProcInfo { pid: number; ppid: number; rss: number; command: string }
 
-/** ~/.claude/sessions/<pid>.json — written by Claude Code for `claude ps`. `waiting` names a permission prompt or dialog. */
-export interface AgentStatusFile { status: 'busy' | 'idle' | 'waiting'; waitingFor?: string; updatedAt?: number }
+/**
+ * ~/.claude/sessions/<pid>.json — written by Claude Code for `claude ps`. `waiting` names a permission prompt or dialog.
+ * `shell` (2.1.3xx) is idle with a background shell still running: the turn is over, the work is not.
+ */
+export interface AgentStatusFile { status: 'busy' | 'idle' | 'waiting' | 'shell'; waitingFor?: string; updatedAt?: number }
 
 /**
  * A turn the hooks say is running while Claude Code says it is idle.
@@ -61,15 +64,17 @@ export interface AgentStatusFile { status: 'busy' | 'idle' | 'waiting'; waitingF
  * the person cuts short (Esc, which also takes the prompt back out of the conversation) never
  * fires Stop, and the flags stayed on for up to 15 minutes: the tab dot kept pulsing and a
  * sleep was refused as "mid-turn". The status file is written by Claude Code itself, and an
- * `idle` stamped after the last activity the hooks reported means nothing has run since.
- * A prompt submitted after that idle re-stamps agentActiveAt later than it, so a turn that
- * has only just begun never reads as stale.
+ * `idle` stamped after the turn opened means nothing has run since: within a turn Claude says busy
+ * (or waiting) until it ends. A prompt submitted after that idle opens its turn later than it, so a
+ * turn that has only just begun never reads as stale. The turn's own start (claudeTurnAt), not the
+ * liveness stamp: tool calls re-stamp agentActiveAt, and an Esc right after one left the idle within
+ * the margin of it — the turn never cleared.
  */
 export const STALE_TURN_MARGIN_MS = 1000;
 export function turnIsStale(meta: Record<string, unknown>, status: AgentStatusFile | null): boolean {
   if (meta.claudeActive !== true && meta.claudeTurnOpen !== true) return false;
-  if (status?.status !== 'idle' || typeof status.updatedAt !== 'number') return false;
-  const stamp = meta.agentActiveAt;
+  if ((status?.status !== 'idle' && status?.status !== 'shell') || typeof status.updatedAt !== 'number') return false;
+  const stamp = typeof meta.claudeTurnAt === 'number' ? meta.claudeTurnAt : meta.agentActiveAt;
   return typeof stamp !== 'number' || status.updatedAt > stamp + STALE_TURN_MARGIN_MS;
 }
 
@@ -253,8 +258,18 @@ function shellQuote(arg: string): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-/** The agent process under a shell: child or grandchild whose command names claude/codex. */
+/**
+ * The agent process of a pane: the pane's own process when the holder started the agent directly
+ * (`workspace add --cmd claude`), else a child or grandchild of its shell whose command names claude/codex.
+ * Looking only below the root missed the direct case, and with it the stale-turn check, the
+ * permission-prompt sweep and sleep for those panes.
+ */
 export function findAgentProcess(procs: ProcInfo[], shellPid: number): (ProcInfo & { kind: 'claude' | 'codex' }) | null {
+  const root = procs.find((p) => p.pid === shellPid);
+  if (root) {
+    const m = AGENT_RE.exec(root.command.trim().split(/\s+/)[0] ?? '');
+    if (m && isInteractiveAgent(root.command, m[2] as 'claude' | 'codex')) return { ...root, kind: m[2] as 'claude' | 'codex' };
+  }
   const byParent = new Map<number, ProcInfo[]>();
   for (const p of procs) {
     const list = byParent.get(p.ppid) ?? [];
@@ -303,7 +318,7 @@ export async function readAgentStatus(pid: number, home = process.env.CLAUDE_CON
   try {
     const raw = JSON.parse(await readFile(resolve(home, 'sessions', `${pid}.json`), 'utf8')) as Record<string, unknown>;
     const status = raw.status;
-    if (status !== 'busy' && status !== 'idle' && status !== 'waiting') return null;
+    if (status !== 'busy' && status !== 'idle' && status !== 'waiting' && status !== 'shell') return null;
     return { status, waitingFor: typeof raw.waitingFor === 'string' ? raw.waitingFor : undefined, updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : undefined };
   } catch { return null; }
 }
@@ -445,6 +460,8 @@ export class AgentSleeper {
     const table = procs ?? await this.deps.listProcesses();
     const agent = findAgentProcess(table, session.childPid);
     if (!agent) return { ok: false, error: 'no agent process under this pane' };
+    // Started without a shell (`--cmd claude`): taking the agent down ends the PTY, and there is no shell to type the resume into.
+    if (agent.pid === session.childPid) return { ok: false, error: 'the agent is the pane itself (no shell to resume in)' };
     const kind = KINDS[agent.kind];
     const agentSessionId = (meta[kind.idKey] ?? meta[kind.lastKey]) as string | null | undefined;
     if (typeof agentSessionId !== 'string' || !agentSessionId) return { ok: false, error: `no ${agent.kind} session id to resume from` };
@@ -668,6 +685,7 @@ export class AgentSleeper {
     const status = await this.deps.agentStatus(agent.pid);
     if (status?.status === 'waiting') return `agent is waiting for you (${status.waitingFor ?? 'input needed'})`;
     if (status?.status === 'busy') return 'agent is busy';
+    if (status?.status === 'shell') return 'a background shell is still running';
     if (meta.claudeTurnOpen === true && !turnIsStale(meta, status)) return 'agent is mid-turn';
     const inFlight = meta.claudeInFlight as InFlight | null | undefined;
     if (inFlight && typeof inFlight === 'object') {

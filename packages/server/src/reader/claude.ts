@@ -91,7 +91,7 @@ function pushUser(out: ReaderUpdate[], e: Json): void {
   }
 
   if (typeof content === 'string') {
-    if (e.isMeta === true) return;
+    if (e.isMeta === true) { pushDelivered(out, at, content); return; }
     pushUserText(out, e, at, content, 0);
     return;
   }
@@ -105,9 +105,23 @@ function pushUser(out: ReaderUpdate[], e: Json): void {
     else if (b.type === 'text' && typeof b.text === 'string') texts.push(b.text);
     else if (b.type === 'image') images++;
   }
-  if (e.isMeta === true) return;
+  if (e.isMeta === true) { pushDelivered(out, at, texts.join('\n')); return; }
   pushUserText(out, e, at, texts.join('\n'), images);
 }
+
+/**
+ * A message from another session (a subagent's hand-back, a cross-session message) reaches the agent as a meta
+ * user record: "Another Claude session sent a message:" (or "… while you were working:") and then the queued
+ * text. Not shown, but it is the one sign of which entry the dequeue before it took — told to the queue as a
+ * removal that may find nothing. (An entry absorbed into a running turn needs none: its own `remove` comes first,
+ * and the attachment that follows repeats it — matching that too would take a twin of a repeated notification.)
+ */
+const DELIVERED = /^[^\n<]*:\n(<(?:agent-message|cross-session-message)[\s\S]*)$/;
+function pushDelivered(out: ReaderUpdate[], at: number, text: string): void {
+  const m = DELIVERED.exec(text);
+  if (m) out.push({ op: 'queue', at, action: 'remove', text: clip(m[1]!, MAX_QUEUE_TEXT), delivered: true });
+}
+
 
 const PASTE_OPEN = /<pasted_content id="[^"]*">/;
 const PASTE_BLOCK = /<pasted_content id="([^"]*)">([\s\S]*?)(?:<\/pasted_content id="\1">|$)/g;

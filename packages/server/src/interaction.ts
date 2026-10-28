@@ -28,6 +28,8 @@ export interface InteractionView {
   turnId?: string;
   /** 턴 크기: 걸린 시간·도구 횟수·수정한 파일. await 결과 아래 한 줄. */
   summary?: TurnSummary;
+  /** The turn ended without an answer: an API error (StopFailure), or Esc / a denied prompt (no Stop). status is 'failed'. */
+  interrupted?: { at: number; reason: string; message?: string };
   createdAt: number;
   completedAt: number | null;
 }
@@ -126,9 +128,11 @@ export class InteractionStore {
     status: 'completed' | 'failed' = 'completed',
     meta?: Record<string, unknown>,
     report: StopReport = {},
+    interrupted?: InteractionView['interrupted'],
   ): Promise<InteractionView | null> {
     const rec = this.pendingBySession.get(session.id);
     if (!rec) return null;
+    if (interrupted) rec.interrupted = interrupted;
     const now = Date.now();
 
     // 이 턴이 기록된 파일. 훅이 알려준 경로가 우선이고, 옛 Claude 훅이면 meta로 찾는다.

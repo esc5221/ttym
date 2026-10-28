@@ -28,7 +28,18 @@ type BlockBody =
     }
   | { kind: 'turn-end'; id: string; at: number; durationMs: number; tools: number; edited: string[] };
 
-export interface QueuedMessage { text: string; system: boolean }
+/**
+ * rank: the order Claude Code takes entries out — 0 what the person typed, 1 a message from another
+ * session (a subagent's hand-back, a cross-session message), 2 the rest the agent queued for itself
+ * (background notifications). at: when it was queued, so a wrapper can tell an old entry from a new one.
+ */
+export interface QueuedMessage { text: string; system: boolean; rank: 0 | 1 | 2; at: number }
+
+const PEER_MESSAGE = /^\s*<(agent-message|cross-session-message)[\s>]/;
+export function queueRank(text: string, system: boolean): 0 | 1 | 2 {
+  if (!system) return 0;
+  return PEER_MESSAGE.test(text) ? 1 : 2;
+}
 
 export interface ReaderState {
   /** Which record `next` belongs to; send both back to the server. */
@@ -143,15 +154,23 @@ export function applyFeed(state: ReaderState, feed: ReaderFeed): ReaderState {
  * One record of the agent's queue. The queue is not first in, first out: what the person typed runs before
  * what the agent queued for itself, so a dequeue takes the oldest of the person's messages when there is one
  * (a log of 4,000 prompts across 60 sessions agrees with this, and with plain FIFO 27 prompts were still shown
- * as waiting after they had been sent). `remove` and `clear` are the other two ways out.
+ * as waiting after they had been sent). Among the agent's own, a message from another session goes before a
+ * background notification: taking the oldest instead took a notification while the hand-back ran, and from then
+ * on each new hand-back pushed the previous one out and stayed behind, shown as waiting after it had been read
+ * (lead session f39cb707, line 7934). `remove` and `clear` are the other two ways out.
  */
 function applyQueueOp(queue: QueuedMessage[], u: Extract<ReaderUpdate, { op: 'queue' }>): QueuedMessage[] {
   switch (u.action) {
-    case 'enqueue': return [...queue, { text: u.text ?? '', system: u.system === true }];
+    case 'enqueue': {
+      const text = u.text ?? '';
+      const system = u.system === true;
+      return [...queue, { text, system, rank: queueRank(text, system), at: u.at }];
+    }
     case 'dequeue': {
       if (queue.length === 0) return queue;
-      const i = queue.findIndex((q) => !q.system);
-      return queue.filter((_, j) => j !== (i >= 0 ? i : 0));
+      let i = 0;
+      for (let j = 1; j < queue.length; j++) if (queue[j]!.rank < queue[i]!.rank) i = j;
+      return queue.filter((_, j) => j !== i);
     }
     case 'remove': {
       const i = queue.findIndex((q) => q.text === (u.text ?? ''));

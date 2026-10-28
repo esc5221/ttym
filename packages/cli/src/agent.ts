@@ -32,6 +32,15 @@ export const AGENTS = {
         matcher: '',
         command: resolve(__dirname, '..', 'scripts', 'ttym-claude-activity-hook.sh'),
       },
+      // The same script for what happens inside a turn (it reads the event from the payload):
+      // tool calls keep a long turn's liveness fresh — it aged out at fifteen minutes mid-work —
+      // and PermissionRequest says a prompt is up, bypassPermissions panes included. A subagent's
+      // end closes its own prompt. Notification is the older versions' only word for a prompt.
+      ...['PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'Notification', 'SubagentStop'].map((event) => ({
+        event,
+        matcher: '',
+        command: resolve(__dirname, '..', 'scripts', 'ttym-claude-activity-hook.sh'),
+      })),
       {
         event: 'Stop',
         matcher: '',

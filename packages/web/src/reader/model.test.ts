@@ -159,6 +159,26 @@ describe('applyFeed', () => {
       expect(pendingMessages(s)).toEqual([]);
     });
 
+    it("takes another session's message before a background notification, and remembers when each was queued", () => {
+      // Lead session f39cb707, line 7934: notifications waiting, a subagent hands back, one dequeue — the hand-back is what ran.
+      const s = applyFeed(emptyState(), feed([
+        enq('<task-notification>\n<task-id>bozeliqdu</task-id>', true),
+        enq('<task-notification>\n<task-id>bozeliqdu</task-id>', true),
+        { op: 'queue', at: 7, action: 'enqueue', text: '<agent-message from="a8bdd">\n[Subagent hand-back] done', system: true },
+        deq,
+      ]));
+      expect(s.queue.map((q) => q.rank)).toEqual([2, 2]);
+      expect(s.queue.every((q) => q.text.startsWith('<task-notification>'))).toBe(true);
+      const cross = applyFeed(emptyState(), feed([enq('<task-notification>', true), { op: 'queue', at: 9, action: 'enqueue', text: '<cross-session-message from="x">hi', system: true }]));
+      expect(cross.queue.map((q) => [q.rank, q.at])).toEqual([[2, 1], [1, 9]]);
+    });
+
+    it('a delivery record that finds its entry already dequeued takes nothing else', () => {
+      const delivered: ReaderUpdate = { op: 'queue', at: 8, action: 'remove', text: '<agent-message from="a8bdd">\nhi', delivered: true };
+      const s = applyFeed(emptyState(), feed([enq('<task-notification>', true), enq('<agent-message from="a8bdd">\nhi', true), deq, delivered]));
+      expect(s.queue.map((q) => q.text)).toEqual(['<task-notification>']);
+    });
+
     it('does not fail on a dequeue with nothing queued', () => {
       expect(applyFeed(emptyState(), feed([deq])).queue).toEqual([]);
     });

@@ -62,6 +62,11 @@ export interface AgentStateEvent {
   sleep?: AgentSleepState | null;
   /** The agent is stopped on a permission prompt or dialog — what for. null = not waiting. */
   waiting?: string | null;
+  /**
+   * The last Claude turn ended without an answer — an API error, Esc, a denied prompt. Cleared by
+   * the next prompt or a normal Stop. reason: error (API error, connection lost) | interrupted (no Stop: Esc, a denied prompt).
+   */
+  interrupted?: { at: number; reason: 'error' | 'interrupted'; message?: string } | null;
 }
 
 export interface ConfigChangeEvent {

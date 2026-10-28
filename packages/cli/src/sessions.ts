@@ -323,6 +323,8 @@ async function awaitResult(port: number, sessionId: number, interaction: any, ra
       integrity: interaction.integrity ?? null,
       // 턴 크기와 더 보는 법 — 기본 답은 마지막 text 하나라, 무엇이 빠졌는지 판단할 근거를 같이 준다.
       summary: interaction.summary ?? null,
+      // failed 중에서 끊긴 턴: API 오류(error) 또는 Stop 없이 끝남(interrupted — Esc, 허락 거절). 그 밖의 failed는 null.
+      interrupted: interaction.interrupted ?? null,
       more: interaction.turnPath ? { outline: `ttym turn ${interaction.id}`, full: `ttym turn ${interaction.id} --full`, path: interaction.turnPath } : null,
     } : null,
     completed: interaction?.status === 'completed',
@@ -410,7 +412,10 @@ function reportAwaitStatus(result: any, timeoutMs: number) {
     if (!result.agent) console.error('  (no agent on that pane to signal the end: drive it with send and read it with ttym screen)');
     process.exit(EXIT.TIMEOUT);
   } else if (result.interaction?.status === 'failed') {
-    console.error('agent ended the turn without answering');
+    const cut = result.interaction.interrupted;
+    if (cut?.reason === 'error') console.error(`agent turn failed: ${cut.message ?? 'API error'}`);
+    else if (cut?.reason === 'interrupted') console.error('agent turn was interrupted (Esc or a denied prompt) — no answer');
+    else console.error('agent ended the turn without answering');
   }
 }
 
