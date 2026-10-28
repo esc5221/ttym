@@ -115,6 +115,12 @@ describe('helpers', () => {
     expect(findAgentProcess([{ pid: 7, ppid: SHELL, rss: 1, command: '/usr/bin/vim notes-about-claude.md' }], SHELL)).toBeNull();
   });
 
+  it('finds an agent the holder started directly (no shell): the pane process itself', () => {
+    expect(findAgentProcess([{ pid: SHELL, ppid: 1, rss: 1, command: 'claude --dangerously-skip-permissions' }], SHELL)).toMatchObject({ pid: SHELL, kind: 'claude' });
+    // `claude -p` as the pane command is still not a conversation.
+    expect(findAgentProcess([{ pid: SHELL, ppid: 1, rss: 1, command: 'claude -p hi' }], SHELL)).toBeNull();
+  });
+
   it('resume gets the flags the agent ran with, minus the ones that name a session', () => {
     expect(resumeArgsFrom('/x/claude --dangerously-skip-permissions --model opus')).toEqual(['--dangerously-skip-permissions', '--model', 'opus']);
     expect(resumeArgsFrom('claude --resume abc --dangerously-skip-permissions')).toEqual(['--dangerously-skip-permissions']);
@@ -190,6 +196,13 @@ describe('sleep', () => {
     expect(h.session.isFrozen).toBe(false);
   });
 
+  it('refuses an agent that is the pane itself — taking it down would end the PTY', async () => {
+    h = harness({ procs: () => [{ pid: SHELL, ppid: 1, rss: 1, command: 'claude --dangerously-skip-permissions' }] });
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'the agent is the pane itself (no shell to resume in)' });
+    expect(h.killed).toEqual([]);
+    expect(h.session.isFrozen).toBe(false);
+  });
+
   it('a turn the person cut short (Esc) does not keep the agent from sleeping once Claude says it is idle', async () => {
     let alive = true;
     // the hooks last reported activity at 1000; Claude's own idle came at 4000
@@ -252,6 +265,9 @@ describe('sleep', () => {
     h.cleanup();
     h = harness({ status: { status: 'busy' } });
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'agent is busy' });
+    h.cleanup();
+    h = harness({ status: { status: 'shell' } });
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: false, error: 'a background shell is still running' });
     h.cleanup();
     let alive = true;
     h = harness({ status: { status: 'idle' }, procs: () => (alive ? [claudeProc()] : []) });
@@ -651,6 +667,16 @@ describe('turnIsStale', () => {
     expect(turnIsStale(open, { status: 'waiting', updatedAt: 99_000 })).toBe(false);
     expect(turnIsStale(open, null)).toBe(false);
     expect(turnIsStale(open, { status: 'idle' })).toBe(false);
+  });
+
+  it('measures from the turn start, not the liveness stamp a tool call just refreshed (Esc right after a tool)', () => {
+    const afterTool = { claudeActive: true, claudeTurnOpen: true, claudeTurnAt: 10_000, agentActiveAt: 40_000 };
+    expect(turnIsStale(afterTool, { status: 'idle', updatedAt: 40_700 })).toBe(true);
+    expect(turnIsStale(afterTool, { status: 'idle', updatedAt: 10_500 })).toBe(false);
+  });
+
+  it("counts Claude's `shell` (idle, a background shell still running) as the turn being over", () => {
+    expect(turnIsStale(open, { status: 'shell', updatedAt: 12_000 })).toBe(true);
   });
 
   it('has nothing to clear when no turn is open', () => {

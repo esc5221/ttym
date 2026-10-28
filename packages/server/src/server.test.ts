@@ -919,6 +919,40 @@ describe('meta ownership over HTTP', () => {
     expect(mixed.status).toBe(400);
   });
 
+  it('the activity hook endpoint: a prompt opens the turn, a permission request is waiting, an API error is an interruption', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const id = await createSession(port);
+    const post = (path: string, body: unknown) => fetch(`http://127.0.0.1:${port}/api/internal/sessions/${id}/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const state = async () => (await (await fetch(`http://127.0.0.1:${port}/api/agent-states`)).json())[id];
+
+    // Boot: SessionStart says active, but no turn is open yet.
+    await post('agent', { claudeSessionId: 'cs-h', claudeActive: true, claudeSource: 'startup' });
+    expect(await state()).toMatchObject({ kind: 'claude-code', active: false, waiting: null, interrupted: null });
+
+    expect((await post('hook', { event: 'UserPromptSubmit' })).status).toBe(200);
+    expect(await state()).toMatchObject({ active: true });
+
+    await post('hook', { event: 'PermissionRequest', tool: 'Bash' });
+    expect(await state()).toMatchObject({ active: true, waiting: 'permission prompt' });
+    await post('hook', { event: 'PostToolUse', tool: 'Bash' });
+    expect(await state()).toMatchObject({ active: true, waiting: null });
+
+    // StopFailure: the stop hook clears the flag, then reports the event with Claude's error text.
+    await post('agent', { claudeActive: false, claudeSessionId: null, claudeLastSessionId: 'cs-h' });
+    await post('stop', { event: 'StopFailure', reply: 'API Error: Connection refused' });
+    expect(await state()).toMatchObject({ active: false, interrupted: { reason: 'error', message: 'API Error: Connection refused' } });
+
+    // The next prompt clears it.
+    await post('hook', { event: 'UserPromptSubmit' });
+    expect(await state()).toMatchObject({ active: true, interrupted: null });
+
+    // Unknown bodies are refused, unknown sessions are not found.
+    expect((await post('hook', { nope: 1 })).status).toBe(400);
+    expect((await fetch(`http://127.0.0.1:${port}/api/internal/sessions/99999/hook`, { method: 'POST', body: '{"event":"Stop"}' })).status).toBe(404);
+  });
+
   it('assembles the runtime view and keeps it read-only by construction', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const id = await createSession(port);
@@ -1094,7 +1128,7 @@ describe('meta ownership over HTTP', () => {
     const res = await fetch(`http://127.0.0.1:${port}/api/agent-states`);
     expect(res.status).toBe(200);
     const states = await res.json();
-    expect(states[String(sid)]).toEqual({ kind: null, active: false, sleep: null, waiting: null });
+    expect(states[String(sid)]).toEqual({ kind: null, active: false, sleep: null, waiting: null, interrupted: null });
     await fetch(`http://127.0.0.1:${port}/api/sessions/${sid}`, { method: 'DELETE' }).catch(() => {});
   });
 
@@ -1140,16 +1174,21 @@ describe('agentIsActive — liveness rule for the tab dot', () => {
   const NOW = 1_800_000_000_000;
 
   it('a fresh activity stamp keeps the flag alive', () => {
-    expect(agentIsActive({ claudeActive: true, agentActiveAt: NOW - 1000 }, NOW)).toBe(true);
+    expect(agentIsActive({ claudeActive: true, claudeTurnOpen: true, agentActiveAt: NOW - 1000 }, NOW)).toBe(true);
+  });
+
+  it('Claude counts only while a prompt turn is open — SessionStart (boot, /compact) says active but opens none', () => {
+    expect(agentIsActive({ claudeActive: true, claudeSource: 'startup', agentActiveAt: NOW - 1000 }, NOW)).toBe(false);
+    expect(agentIsActive({ claudeActive: true, claudeTurnOpen: false, claudeSource: 'compact', agentActiveAt: NOW - 1000 }, NOW)).toBe(false);
   });
 
   it('an aged-out stamp reads as idle even though the flag is still true', () => {
     // Stop curl 유실(서버 재시작 창 등)의 잔재 — 5일짜리 점멸 사고의 재발 방지.
-    expect(agentIsActive({ claudeActive: true, agentActiveAt: NOW - AGENT_ACTIVE_TTL_MS - 1 }, NOW)).toBe(false);
+    expect(agentIsActive({ claudeActive: true, claudeTurnOpen: true, agentActiveAt: NOW - AGENT_ACTIVE_TTL_MS - 1 }, NOW)).toBe(false);
   });
 
   it('a flag with no stamp at all (pre-liveness fossil) reads as idle', () => {
-    expect(agentIsActive({ claudeActive: true }, NOW)).toBe(false);
+    expect(agentIsActive({ claudeActive: true, claudeTurnOpen: true }, NOW)).toBe(false);
   });
 
   it('no flag means idle regardless of stamp', () => {

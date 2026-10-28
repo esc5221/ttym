@@ -17,6 +17,7 @@ import { InteractionStore, turnRange, type StopReport } from './interaction.js';
 import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
 import { ConfigStore } from './config-file.js';
 import { agentKindOf } from './agent-providers.js';
+import { hookPatch, hookWaitingIsStale, hookWaitingOf, interruptedOf, parseHookEvent, screenInterruptReason, screenShowsPrompt, stopPatch, type HookEvent, type Interrupted } from './agent-hooks.js';
 import { getHomeDir, drainSyncStats, type Session } from './session.js';
 import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { ViewerStore } from './viewer/store.js';
@@ -106,8 +107,16 @@ const MIME_TYPES: Record<string, string> = {
  * existed) — reads as idle.
  */
 export const AGENT_ACTIVE_TTL_MS = 15 * 60_000;
+/**
+ * Claude is active while a prompt's turn is open (UserPromptSubmit … Stop). claudeActive alone
+ * is also set by SessionStart — at launch, after /compact or /clear — and no Stop follows those,
+ * so a pane that had only booted or compacted read as working for fifteen minutes. The activity
+ * hook re-stamps agentActiveAt on every tool call, so a long turn does not age out either.
+ * Codex has no prompt hook: its flag is all there is.
+ */
 export function agentIsActive(meta: Record<string, unknown>, now = Date.now()): boolean {
-  if (meta.claudeActive !== true && meta.codexActive !== true) return false;
+  const claude = meta.claudeActive === true && meta.claudeTurnOpen === true;
+  if (!claude && meta.codexActive !== true) return false;
   const stamp = meta.agentActiveAt;
   return typeof stamp === 'number' && now - stamp < AGENT_ACTIVE_TTL_MS;
 }
@@ -303,6 +312,11 @@ export function utf8Pieces(bytes: Buffer, max: number): Buffer[] {
 
 /** Claude panes on a permission prompt or dialog → what for. Filled by the waiting sweep. */
 const agentWaiting = new Map<number, string>();
+
+/** What a pane waits for: Claude's status file (the sweep) first, else a prompt its hooks saw open. */
+function waitingOf(sessionId: number, meta: Record<string, unknown>): string | null {
+  return agentWaiting.get(sessionId) ?? hookWaitingOf(meta)?.for ?? null;
+}
 
 function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, interactions: InteractionStore, config: ConfigStore, req: IncomingMessage, res: ServerResponse, onAgentMeta?: (sessionId: number, meta: Record<string, unknown>) => void, onConfigChange?: (values: Record<string, string>) => void, viewer?: { store: ViewerStore; service: ViewerService }, sleeper?: AgentSleeper, search?: SearchService): boolean {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -633,7 +647,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
           // Claude: a turn is open from UserPromptSubmit (active, no source) until the
           // next Stop. SessionStart also says "active" but names its source — a boot.
           // Codex has no prompt hook; its SessionStart looks the same as a turn, so no flag.
-          if (patch.claudeActive === true && patch.claudeSource === undefined) patch.claudeTurnOpen = true;
+          if (patch.claudeActive === true && patch.claudeSource === undefined) { patch.claudeTurnOpen = true; patch.claudeTurnAt = patch.agentActiveAt; }
         }
         if (patch.claudeActive === false) patch.claudeTurnOpen = false;
         const merged = await manager.setMeta(id, patch);
@@ -650,6 +664,30 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     return true;
   }
 
+  // POST /api/internal/sessions/:id/hook — Claude's activity hook: one event, the server decides what it means (agent-hooks.ts).
+  const hookMatch = path.match(/^\/api\/internal\/sessions\/(\d+)\/hook$/);
+  if (hookMatch && req.method === 'POST') {
+    const id = parseInt(hookMatch[1], 10);
+    readBody().then(async (body) => {
+      let event: HookEvent | null = null;
+      try { event = parseHookEvent(JSON.parse(body)); } catch { /* answered below */ }
+      if (!event) { json(400, { error: 'body must be { event, … }' }); return; }
+      if (!manager.get(id)) { json(404, { error: 'not found' }); return; }
+      try {
+        const meta = await manager.getMeta(id);
+        const patch = hookPatch(event, meta, Date.now());
+        if (!patch) { json(200, { ok: true, changed: false }); return; }
+        const merged = await manager.setMeta(id, patch) as Record<string, unknown>;
+        if (event.event !== 'PostToolUse' && event.event !== 'PreToolUse') log(`AGENT HOOK session=${id} event=${event.event}${event.agentId ? ` agent=${event.agentId}` : ''} keys=${Object.keys(patch).join(',')}`);
+        onAgentMeta?.(id, merged);
+        json(200, { ok: true, changed: true });
+      } catch {
+        json(500, { error: 'meta write failed' });
+      }
+    });
+    return true;
+  }
+
   // POST /api/internal/sessions/:id/stop — agent hook entry point
   const stopMatch = path.match(/^\/api\/internal\/sessions\/(\d+)\/stop$/);
   if (stopMatch && req.method === 'POST') {
@@ -661,10 +699,12 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       // the agent answered. The rest still end the wait — an agent that died
       // is not going to reply, and blocking to timeout would misreport that.
       let outcome: 'completed' | 'failed' = 'completed';
+      let event = 'Stop';
       // 훅이 에이전트의 Stop 입력에서 그대로 옮겨 온 것: 마지막 답, transcript 경로, (Codex) turn id.
       const report: StopReport = {};
       try {
         const parsed = body ? JSON.parse(body) : {};
+        if (typeof parsed.event === 'string') event = parsed.event;
         if (parsed.event === 'StopFailure' || parsed.event === 'SessionEnd') outcome = 'failed';
         if (parsed.outcome === 'failed') outcome = 'failed';
         if (typeof parsed.reply === 'string') report.reply = parsed.reply;
@@ -672,7 +712,16 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         if (typeof parsed.turnId === 'string') report.turnId = parsed.turnId;
       } catch { /* an empty or malformed body is treated as a plain Stop */ }
       void manager.getMeta(id).catch(() => ({})).then(async (meta) => {
-        const settled = await interactions.finish(session, outcome, meta as Record<string, unknown>, report);
+        // How the turn ended, for agent-states: an API error is an interruption, not a rest.
+        if (agentKindOf(meta as Record<string, unknown>) === 'claude-code') {
+          const patch = stopPatch(event, report.reply, meta as Record<string, unknown>, Date.now());
+          if (Object.keys(patch).length) {
+            meta = await manager.setMeta(id, patch).catch(() => meta);
+            onAgentMeta?.(id, meta as Record<string, unknown>);
+          }
+        }
+        const interrupted = event === 'StopFailure' ? interruptedOf(meta as Record<string, unknown>) : null;
+        const settled = await interactions.finish(session, outcome, meta as Record<string, unknown>, report, interrupted ?? undefined);
         log(`HTTP STOP session=${id} outcome=${outcome} interaction=${settled?.id ?? 'none'} source=${settled?.transcriptSource ?? '-'}`);
         json(200, { ok: true, interaction: settled });
       });
@@ -1000,7 +1049,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       const meta = await manager.getMeta(info.id);
       const shell = manager.get(info.id)?.childPid;
       const kind = shell && findAgyIn(procs, shell) ? 'agy' as const : shell && findCodexIn(procs, shell) ? 'codex' as const : agentKindOf(meta);
-      return [info.id, { kind, active: kind === 'agy' ? false : agentIsActive(meta), sleep: sleeper?.stateOf(info.id) ?? null, waiting: agentWaiting.get(info.id) ?? null }] as const;
+      return [info.id, { kind, active: kind === 'agy' ? false : agentIsActive(meta), sleep: sleeper?.stateOf(info.id) ?? null, waiting: waitingOf(info.id, meta), interrupted: interruptedOf(meta) }] as const;
     }))).then((entries) => {
       json(200, Object.fromEntries(entries));
     }).catch(() => json(500, { error: 'assembly failed' }));
@@ -1810,15 +1859,36 @@ export async function createServer(port: number): Promise<TtymServer> {
         for (const pane of claudePanes) {
           const agent = findAgentProcess(procs, pane.shellPid);
           const status = agent?.kind === 'claude' ? await readAgentStatus(agent.pid) : null;
+          let screen: string[] | null = null;
+          const lines = () => (screen ??= screenLines(pane.id));
+          const patch: Record<string, unknown> = {};
           // A turn the person cut short never gets its Stop; Claude's own idle, stamped after the last activity, says it is over.
           if (turnIsStale(pane.meta, status)) {
-            manager.setMeta(pane.id, { claudeActive: false, claudeTurnOpen: false })
-              .then((merged) => { log(`AGENT STALE-TURN cleared session=${pane.id}`); broadcastAgentState(pane.id, merged as Record<string, unknown>); })
+            patch.claudeActive = false;
+            patch.claudeTurnOpen = false;
+            // A prompt's turn that ended without a Stop — Esc, a denied prompt, or a Stop that never reached us — is not a rest.
+            if (pane.meta.claudeTurnOpen === true) patch.claudeInterrupted = { at: Date.now(), reason: screenInterruptReason(lines()) } satisfies Interrupted;
+          }
+          // A prompt the hooks saw open closes without a hook when it is denied or cancelled, and only at
+          // PostToolUse when approved. Claude's status moving on closes it; without a status file, the screen.
+          const hookWaiting = hookWaitingOf(pane.meta);
+          if (hookWaiting && (status ? hookWaitingIsStale(hookWaiting, status) : Date.now() - hookWaiting.at > WAITING_SWEEP_MS && !screenShowsPrompt(lines()))) patch.claudeWaiting = null;
+          if (Object.keys(patch).length > 0) {
+            const interrupted = patch.claudeInterrupted as Interrupted | undefined;
+            manager.setMeta(pane.id, patch)
+              .then((merged) => {
+                log(`AGENT SWEEP session=${pane.id}${patch.claudeTurnOpen === false ? ' stale-turn cleared' : ''}${interrupted ? ` interrupted=${interrupted.reason}` : ''}${patch.claudeWaiting === null ? ' prompt closed' : ''}`);
+                if (interrupted) settleInterrupted(pane.id, pane.meta, merged as Record<string, unknown>, interrupted);
+                broadcastAgentState(pane.id, merged as Record<string, unknown>);
+              })
               .catch(() => {});
           }
-          if (status?.status !== 'waiting') continue;
+          let what: string | null = null;
+          if (status?.status === 'waiting') what = status.waitingFor ?? 'input';
+          // No status file to ask (the agent process was not found): a dialog drawn on screen during a turn.
+          else if (!status && !hookWaiting && pane.meta.claudeTurnOpen === true && screenShowsPrompt(lines())) what = 'permission prompt';
+          if (!what) continue;
           seen.add(pane.id);
-          const what = status.waitingFor ?? 'input';
           if (agentWaiting.get(pane.id) !== what) {
             agentWaiting.set(pane.id, what);
             manager.getMeta(pane.id).then((meta) => broadcastAgentState(pane.id, meta)).catch(() => {});
@@ -1834,6 +1904,28 @@ export async function createServer(port: number): Promise<TtymServer> {
   }, WAITING_SWEEP_MS);
   waitingSweep.unref();
 
+  /** The pane's last lines as text — the fallback reader for what the hooks and status file cannot say. */
+  function screenLines(sessionId: number): string[] {
+    const session = manager.get(sessionId);
+    if (!session || session.isDead) return [];
+    try { return session.screenTail(40).map((row) => row.map((run) => run.t).join('')); } catch { return []; }
+  }
+
+  /**
+   * A turn found interrupted ends the await waiting on it — the answer is not coming. Only an
+   * interaction whose prompt opened that turn: one sent after the last activity is still queued.
+   */
+  function settleInterrupted(sessionId: number, before: Record<string, unknown>, meta: Record<string, unknown>, interrupted: Interrupted) {
+    const session = manager.get(sessionId);
+    const pending = interactions.pending(sessionId);
+    if (!session || !pending) return;
+    const stamp = typeof before.agentActiveAt === 'number' ? before.agentActiveAt : 0;
+    if (pending.createdAt > stamp) return;
+    void interactions.finish(session, 'failed', meta, {}, interrupted)
+      .then((settled) => log(`AGENT INTERRUPTED session=${sessionId} reason=${interrupted.reason} interaction=${settled?.id ?? 'none'}`))
+      .catch(() => {});
+  }
+
   function broadcastAgentState(sessionId: number, meta: Record<string, unknown>) {
     const kind = agentKindOf(meta);
     const event = {
@@ -1841,7 +1933,8 @@ export async function createServer(port: number): Promise<TtymServer> {
       kind,
       active: agentIsActive(meta),
       sleep: sleeper?.stateOf(sessionId) ?? null,
-      waiting: agentWaiting.get(sessionId) ?? null,
+      waiting: waitingOf(sessionId, meta),
+      interrupted: interruptedOf(meta),
     };
     lastAnnouncedActive.set(sessionId, event.active);
     sendPush(CMD.AGENT, event);

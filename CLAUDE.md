@@ -233,6 +233,25 @@ Claude Code 턴 종료 시 발동 (Stop·StopFailure·SessionEnd). Codex는 scri
 2. `POST /api/internal/sessions/:id/stop` — 진행 중인 await를 끝낸다. 훅 입력의 마지막 답·transcript 경로
    (Codex는 turn id도)를 그대로 넘긴다
 
+## 에이전트 상태 (agent-states · CMD.AGENT push)
+
+`{ kind, active, sleep, waiting, interrupted }`. 훅이 먼저, Claude 상태 파일(`~/.claude/sessions/<pid>.json`)이 다음,
+화면은 둘 다 없을 때만. 규칙은 server/src/agent-hooks.ts, 3초 sweep은 server.ts waitingSweep.
+
+- **activity 훅** (scripts/ttym-claude-activity-hook.sh → `POST /api/internal/sessions/:id/hook {event,…}`):
+  UserPromptSubmit·PostToolUse·PostToolUseFailure·PermissionRequest·Notification·SubagentStop. 이벤트 이름은 payload에서 읽는다.
+- `active` = Claude는 **열린 턴**(`claudeTurnOpen`: UserPromptSubmit~Stop) + `agentActiveAt` 15분 안. SessionStart(띄움·/compact·/clear)는
+  claudeActive만 켜고 턴을 열지 않는다 — 그 뒤 Stop이 안 오기 때문. 도구 호출마다 agentActiveAt을 다시 찍어 긴 턴이 안 꺼진다.
+  멈춘 턴 판정(turnIsStale)은 턴 시작 시각 `claudeTurnAt` 기준.
+- `waiting` = 상태 파일 waiting(sweep) 또는 PermissionRequest가 연 `claudeWaiting`(bypass 칸 포함, 하위 에이전트면 agentId).
+  승인·거절·Esc는 훅이 없다 — 상태 파일이 waiting이 아닌 것으로 바뀌면 sweep이 닫는다.
+- `interrupted` = `{ at, reason: 'error'|'interrupted', message? }`. StopFailure(API 오류·연결 끊김) → error,
+  Stop 없이 끝난 턴(Esc·허락 거절, sweep이 찾음) → interrupted. 다음 프롬프트·정상 Stop이 지운다.
+  그 턴의 await는 바로 `failed` + `interaction.interrupted`로 끝난다(시간 끝까지 기다리지 않음).
+- 에이전트 찾기(findAgentProcess)는 pane 프로세스 자신도 본다(`--cmd claude`). 그런 pane은 재우지 않는다(셸이 없다).
+- 상태 파일의 `shell`(2.1.3xx) = 쉼 + 백그라운드 셸 실행 중. 턴은 끝난 것, 재우지는 않는다.
+- 훅 목록이 바뀌면 `ttym agent install`을 다시 돌려야 settings.json에 들어간다.
+
 ## Agent Bus (server/src/agent-*)
 
 SQLite 기반 에이전트 메시징/작업큐. 현재 server.ts에서 **비활성**(null).

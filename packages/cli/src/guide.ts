@@ -80,8 +80,11 @@ members can run in parallel; each finishes on its own.
 - ttym send writes raw bytes and does not wait. For a TUI, Enter is "\\r"
   (send text and "\\r" separately); for a shell, "\\n".
 - --no-from drops the sender line; --bare drops the footer; --json gives
-  { output, screen, reason, interaction: { id, status, summary, more } }.
+  { output, screen, reason, interaction: { id, status, summary, interrupted, more } }.
   output is the answer only; screen is the live screen when there was none.
+  reason "failed" with interaction.interrupted set means the turn was cut off;
+  its reason is "error" (API error, connection lost — message says which) or
+  "interrupted" (Esc or a denied prompt). Hand the work over again.
 `;
 
 const TOPICS: Record<string, string> = { agents: AGENTS };
