@@ -771,6 +771,46 @@ export class Session {
     if (this.viewers.size === 0) {
       this._detachedAt = Date.now();
     }
+    // 쓰기 뷰어가 다 떠났으면 아무도 안 볼 때의 크기로. 좁은 화면의 여러 칸 보기가 칸 10개를
+    // 19x54 로 줄이고 떠난 뒤 그대로 남던 것(bp, 10-28) — 그 크기로 에이전트가 줄을 접어 그린다.
+    // 끊겼다 바로 다시 붙는 뷰어(망 흔들림·새로고침)에 크기가 출렁이지 않게 잠깐 기다린다.
+    if (this.unwatched && !this.hasWriter()) {
+      if (this.unwatchedTimer) clearTimeout(this.unwatchedTimer);
+      this.unwatchedTimer = setTimeout(() => {
+        this.unwatchedTimer = null;
+        if (!this.unwatched || this.hasWriter() || this.closed) return;
+        const { cols, rows } = this.unwatched;
+        this.unwatched = null;
+        if (cols !== this._cols || rows !== this._rows) this.resize(cols, rows);
+      }, this.unwatchedRestoreMs);
+      this.unwatchedTimer.unref?.();
+    }
+  }
+
+  private hasWriter(): boolean {
+    for (const v of this.viewers.values()) if (v.mode === 'readwrite') return true;
+    return false;
+  }
+
+  // ── 아무도 안 볼 때의 크기 ──
+  // 뷰어는 붙어 있는 동안만 PTY 크기를 정한다. 첫 뷰어가 바꾸기 직전 크기를 기억해 두고, 마지막 쓰기
+  // 뷰어가 떠나면 되돌린다. 뷰어가 아닌 쪽의 크기(`ttym resize`, API)는 그 기억을 바꾼다 — 주인의 뜻이다.
+  private unwatched: { cols: number; rows: number } | null = null;
+  private unwatchedTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 마지막 쓰기 뷰어가 떠난 뒤 되돌리기까지. */
+  unwatchedRestoreMs = 3_000;
+
+  /** 뷰어가 보내 온 크기. 되돌릴 크기를 처음 한 번 적어 둔다. */
+  viewerResize(cols: number, rows: number): void {
+    if (this.unwatchedTimer) { clearTimeout(this.unwatchedTimer); this.unwatchedTimer = null; }
+    if (!this.unwatched) this.unwatched = { cols: this._cols, rows: this._rows };
+    this.resize(cols, rows);
+  }
+
+  /** 뷰어가 아닌 쪽이 정한 크기: 지금 바꾸고, 뷰어가 다 떠난 뒤에도 이 크기. */
+  ownerResize(cols: number, rows: number): void {
+    if (this.unwatched) this.unwatched = { cols, rows };
+    this.resize(cols, rows);
   }
 
   // ── 기하 빌림 장부 — 폰의 [맞춤] 토글이 PTY를 빌려 쓰고 돌려놓는다 ──
@@ -780,7 +820,7 @@ export class Session {
   borrowResize(viewerId: string, cols: number, rows: number): void {
     if (!this.borrow) this.borrow = { prevCols: this._cols, prevRows: this._rows, viewerId };
     else this.borrow.viewerId = viewerId;
-    this.resize(cols, rows);
+    this.viewerResize(cols, rows);
   }
 
   /** 반납: 그 viewer가 빌린 상태일 때만 이전 기하로 복원 (브로드캐스트는 resize가 한다). */

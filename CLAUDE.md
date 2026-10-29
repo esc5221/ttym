@@ -279,5 +279,8 @@ SQLite 기반 에이전트 메시징/작업큐. 현재 server.ts에서 **비활�
 
 - PTY 출력 → OutputRing (고정크기 버퍼, seq 기반 delta replay)
 - WebSocket: CMD.DATA(입출력), CMD.SNAPSHOT(전체화면), CMD.ACK(수신확인)
+- PTY 크기: 쓰기 뷰어는 붙어 있는 동안만 정한다. 첫 뷰어가 바꾸기 직전 크기를 기억했다가 마지막 쓰기 뷰어가
+  떠나고 3초 뒤 되돌린다(`Session.viewerResize`). `ttym resize`·API resize는 그 기억을 바꾼다(`ownerResize`).
+  ATTACH 로그에 `size=COLSxROWS`.
 - HTTP: POST `/api/sessions/:id/send`, GET `/api/sessions/:id/screen`
 - Workspace 저장: 인메모리 Map + workspaces.json (atomic write + microtask debounce)

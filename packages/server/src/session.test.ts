@@ -158,6 +158,45 @@ describe('Session (holder-backed)', () => {
     expect(session.viewerCount).toBe(2);
   });
 
+  it('goes back to the unwatched size when the last writing viewer leaves (10 panes left at 19x54)', async () => {
+    mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
+    const session = await Session.create(31, ['/bin/sh', '-lc', 'exec cat'], 120, 40, TEST_RUNTIME_DIR);
+    sessions.push(session);
+    session.unwatchedRestoreMs = 50;
+
+    session.addViewer('narrow', () => {}, 'readwrite');
+    session.viewerResize(19, 54);
+    session.addViewer('peek', () => {}, 'readonly');
+    expect([session.cols, session.rows]).toEqual([19, 54]);
+
+    // a viewer that drops and comes straight back does not bounce the PTY
+    session.removeViewer('narrow');
+    session.addViewer('narrow', () => {}, 'readwrite');
+    session.viewerResize(19, 54);
+    await new Promise((r) => setTimeout(r, 100));
+    expect([session.cols, session.rows]).toEqual([19, 54]);
+
+    // gone for good; a read-only viewer does not hold the size
+    session.removeViewer('narrow');
+    await waitFor(() => (session.cols === 120 ? true : undefined), 2_000);
+    expect([session.cols, session.rows]).toEqual([120, 40]);
+  });
+
+  it('a size set by its owner (ttym resize) is the one it returns to', async () => {
+    mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
+    const session = await Session.create(32, ['/bin/sh', '-lc', 'exec cat'], 120, 40, TEST_RUNTIME_DIR);
+    sessions.push(session);
+    session.unwatchedRestoreMs = 20;
+
+    session.addViewer('v', () => {}, 'readwrite');
+    session.viewerResize(30, 20);
+    session.ownerResize(200, 50);
+    session.viewerResize(30, 20);
+    session.removeViewer('v');
+    await waitFor(() => (session.cols === 200 ? true : undefined), 2_000);
+    expect([session.cols, session.rows]).toEqual([200, 50]);
+  });
+
   it('detects PTY exit with correct code', async () => {
     mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
     const session = await Session.create(
