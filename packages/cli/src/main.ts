@@ -40,6 +40,7 @@ function printHelp() {
   console.log('  new <name> [--cwd <dir>] [--size <cols>x<rows>] [-- cmd]  Create a session in the default workspace');
   console.log('  split <addr> <name> [--cwd <dir>] [--size <cols>x<rows>] [-- cmd]  Split beside a member (addr: ws:name | :name)');
   console.log('  send <addr> -- "data"        Send bytes (addr: ws:name | :name | %id; on another machine: host%id | host/ws:name)');
+  console.log('  send <addr> --submit -- "t"  Type the text, then Enter (an agent: watched, retried once)');
   console.log('  screen <addr>                Read the screen');
   console.log('  resize <addr> <cols> <rows>  Resize a session');
   console.log('  kill <addr>                  Kill a session (holder included)');

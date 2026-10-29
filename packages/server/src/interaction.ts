@@ -28,7 +28,7 @@ export interface InteractionView {
   turnId?: string;
   /** 턴 크기: 걸린 시간·도구 횟수·수정한 파일. await 결과 아래 한 줄. */
   summary?: TurnSummary;
-  /** The turn ended without an answer: an API error (StopFailure), or Esc / a denied prompt (no Stop). status is 'failed'. */
+  /** The turn ended without an answer: an API error (StopFailure), Esc / a denied prompt (no Stop), or never started — the prompt stayed in the composer (reason 'stuck'). status is 'failed'. */
   interrupted?: { at: number; reason: string; message?: string };
   createdAt: number;
   completedAt: number | null;

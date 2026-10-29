@@ -45,6 +45,24 @@ export function sendToSession(base: BaseUrl, sessionId: number, data: string): P
   return request(base, `/api/sessions/${sessionId}/send`, { method: 'POST', body: { data } });
 }
 
+export interface SubmitResult {
+  ok: boolean;
+  /** What pressed Enter: CR to an agent, LF to a shell. Absent: a server older than submit (it typed only). */
+  submit?: 'cr' | 'lf';
+  /** true: the agent's composer moved on · false: the text is still there after one retry · null: not watched (a shell) */
+  submitted?: boolean | null;
+  retried?: boolean;
+  waitedMs?: number;
+}
+
+/**
+ * Type a line and press Enter — the way await does, without waiting for an answer. Into an agent it
+ * waits for the composer, checks the text left it and retries once (server/src/submit.ts).
+ */
+export function submitToSession(base: BaseUrl, sessionId: number, text: string, submit: 'auto' | 'cr' | 'lf' = 'auto'): Promise<SubmitResult> {
+  return request(base, `/api/sessions/${sessionId}/send`, { method: 'POST', body: { data: text, submit } });
+}
+
 export function resizeSession(base: BaseUrl, sessionId: number, cols: number, rows: number): Promise<{ ok: boolean }> {
   return request(base, `/api/sessions/${sessionId}/resize`, { method: 'POST', body: { cols, rows } });
 }

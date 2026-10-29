@@ -77,8 +77,10 @@ members can run in parallel; each finishes on its own.
   such a shell it runs the text as a command and returns that command's output.
   A terminal with no turn-end signal (a bare REPL, vim, a shell without
   integration) only times out; drive it with ttym send and read ttym screen.
-- ttym send writes raw bytes and does not wait. For a TUI, Enter is "\\r"
-  (send text and "\\r" separately); for a shell, "\\n".
+- ttym send writes raw bytes and does not wait. To type a line and press
+  Enter (no answer awaited): ttym send <addr> --submit -- "text" — it waits
+  for the agent's composer and checks the text left it. Single keys stay raw:
+  Enter in a TUI is "\\r", in a shell "\\n".
 - --no-from drops the sender line; --bare drops the footer; --json gives
   { output, screen, reason, interaction: { id, status, summary, interrupted, more } }.
   output is the answer only; screen is the live screen when there was none.
