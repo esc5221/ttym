@@ -6,8 +6,8 @@ import { typeAndSubmit, type SubmitTarget } from './submit.js';
  * A pane with Claude's composer. `onCr` says what a CR does to it: 'send' clears it, 'newline'
  * keeps the text (a paste whose end was never seen) until the end-of-paste mark arrives.
  */
-function pane(opts: { onCr: 'send' | 'newline' | 'never'; bootPolls?: number; drawDelay?: number }) {
-  let composer = '';
+function pane(opts: { onCr: 'send' | 'newline' | 'never'; bootPolls?: number; drawDelay?: number; draft?: string }) {
+  let composer = opts.draft ?? '';
   let pasteOpen = opts.onCr !== 'send';
   let boot = opts.bootPolls ?? 0;
   let pending = '';
@@ -40,6 +40,13 @@ describe('typeAndSubmit', () => {
     const r = await typeAndSubmit(p.target, '안녕', { submit: 'cr', agent: 'claude', sleep: now });
     expect(r).toEqual({ submitted: true, retried: false, waitedMs: 0 });
     expect(p.writes).toEqual(['안녕', '\r']);
+  });
+
+  it('a draft left in the composer goes out with the text: empty afterwards is submitted, not stuck', async () => {
+    const p = pane({ onCr: 'send', draft: '쓰다 만 ' });
+    const r = await typeAndSubmit(p.target, '글', { submit: 'cr', agent: 'claude', sleep: now });
+    expect(r).toEqual({ submitted: true, retried: false, waitedMs: 0 });
+    expect(p.writes).toEqual(['글', '\r']);
   });
 
   it('a CR taken as a pasted newline: ends the paste and presses Enter again (w-alerts, 10-28)', async () => {
