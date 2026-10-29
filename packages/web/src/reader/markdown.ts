@@ -1,4 +1,5 @@
 import { highlightHtml, languageForTag } from '../viewer/highlight.js';
+import { loadMarked } from './marked.js';
 import { markMermaidBlocks } from './mermaid.js';
 import { linkifyTextNodes } from './ref-links.js';
 
@@ -11,11 +12,40 @@ import { linkifyTextNodes } from './ref-links.js';
  * parse every block again on each poll.
  */
 
-const CACHE_MAX = 400;
+/**
+ * Kept by size, not count: one pane's long tool outputs used to push every other pane's blocks out of a
+ * 400-entry cache shared by all of them. Least recently used goes first; a hit moves to the back.
+ */
+const CACHE_MAX_CHARS = 8_000_000;
 const cache = new Map<string, string>();
+let cacheChars = 0;
+
+function cacheGet(text: string): string | undefined {
+  const hit = cache.get(text);
+  if (hit === undefined) return undefined;
+  cache.delete(text);
+  cache.set(text, hit);
+  return hit;
+}
+
+function cachePut(text: string, html: string): void {
+  const prev = cache.get(text);
+  if (prev !== undefined) { cache.delete(text); cacheChars -= text.length + prev.length; }
+  cache.set(text, html);
+  cacheChars += text.length + html.length;
+  for (const [k, v] of cache) {
+    if (cacheChars <= CACHE_MAX_CHARS || k === text) break;
+    cache.delete(k);
+    cacheChars -= k.length + v.length;
+  }
+}
+
+/** Code longer than this stays uncoloured: highlighting a long output held the main thread for seconds. */
+export const HIGHLIGHT_MAX_LINES = 300;
+export const HIGHLIGHT_MAX_CHARS = 20 * 1024;
 
 export function cachedMarkdown(text: string): string | undefined {
-  return cache.get(text);
+  return cacheGet(text);
 }
 
 /**
@@ -46,7 +76,7 @@ function toDoc(text: string, { l, mermaid }: { l: Libs; mermaid: boolean }): Doc
  * does not flash as plain text first, which matters when it takes the place of something that was just on screen.
  */
 export function renderMarkdownNow(text: string): string | undefined {
-  const hit = cache.get(text);
+  const hit = cacheGet(text);
   if (hit !== undefined) return hit;
   if (!libs) return undefined;
   try {
@@ -63,11 +93,11 @@ export function renderMarkdownNow(text: string): string | undefined {
  */
 export async function renderMarkdown(text: string, opts: { live?: boolean } = {}): Promise<string> {
   const live = opts.live === true;
-  const hit = live ? undefined : cache.get(text);
+  const hit = live ? undefined : cacheGet(text);
   if (hit !== undefined) return hit;
 
   if (!libs) {
-    const [{ marked }, { default: purify }] = await Promise.all([import('marked'), import('dompurify')]);
+    const [marked, { default: purify }] = await Promise.all([loadMarked(), import('dompurify')]);
     libs = { marked, purify };
   }
   const doc = toDoc(text, { l: libs, mermaid: !live });
@@ -75,8 +105,10 @@ export async function renderMarkdown(text: string, opts: { live?: boolean } = {}
     const tag = Array.from(code.classList).find((c) => c.startsWith('language-'))?.slice('language-'.length) ?? '';
     const lang = languageForTag(tag);
     if (!lang) continue;
+    const source = code.textContent ?? '';
+    if (source.length > HIGHLIGHT_MAX_CHARS || source.split('\n', HIGHLIGHT_MAX_LINES + 2).length > HIGHLIGHT_MAX_LINES + 1) continue;
     // hljs escapes its own output, and the text it reads has already been sanitised.
-    const colored = await highlightHtml(code.textContent ?? '', lang);
+    const colored = await highlightHtml(source, lang);
     if (colored !== null) code.innerHTML = colored;
   }
 
@@ -84,7 +116,6 @@ export async function renderMarkdown(text: string, opts: { live?: boolean } = {}
 
   const html = doc.body.innerHTML;
   if (live) return html;
-  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value as string);
-  cache.set(text, html);
+  cachePut(text, html);
   return html;
 }

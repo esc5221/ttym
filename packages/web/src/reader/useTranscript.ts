@@ -26,6 +26,11 @@ export interface TranscriptHook {
   /** Fetch the page of history above `state.blocks`; does nothing when there is none or one is already on its way. */
   loadEarlier: () => void;
   loadingEarlier: boolean;
+  /**
+   * Read now instead of at the next poll — for a page that hears of a change by push (an embedder's
+   * own event stream). One already on its way is followed by one more, so nothing said meanwhile is missed.
+   */
+  refresh: () => void;
 }
 
 export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFAULT_POLL_MS): TranscriptHook {
@@ -35,6 +40,7 @@ export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFA
   // The mirror lives in a ref so a slow answer is always applied on top of the newest state, never an older one.
   const latest = useRef<ReaderState>(state);
   const paging = useRef(false);
+  const poke = useRef<() => void>(() => {});
 
   const commit = useCallback((next: ReaderState) => {
     if (next === latest.current) return;
@@ -49,11 +55,14 @@ export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFA
     latest.current = emptyState();
     setState(latest.current);
 
+    let inFlight = false;
+    let again = false;
     const schedule = (ms: number) => {
       if (!cancelled) timer = setTimeout(tick, ms);
     };
     const tick = async () => {
       if (document.hidden) { schedule(pollMs); return; }
+      inFlight = true;
       let wait = pollMs;
       try {
         const have = latest.current;
@@ -66,7 +75,15 @@ export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFA
         setError(String((e as Error).message ?? e));
         wait = RETRY_MS;
       }
+      inFlight = false;
+      if (again) { again = false; wait = 0; }
       schedule(wait);
+    };
+    poke.current = () => {
+      if (cancelled) return;
+      if (inFlight) { again = true; return; }
+      clearTimeout(timer);
+      void tick();
     };
     const onVisible = () => {
       if (!document.hidden) { clearTimeout(timer); void tick(); }
@@ -76,6 +93,7 @@ export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFA
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
+      poke.current = () => {};
       clearTimeout(timer);
       document.removeEventListener('visibilitychange', onVisible);
     };
@@ -92,5 +110,7 @@ export function useTranscript(sessionId: number, enabled: boolean, pollMs = DEFA
       .finally(() => { paging.current = false; setLoadingEarlier(false); });
   }, [sessionId, commit]);
 
-  return { state, error, loadEarlier, loadingEarlier };
+  const refresh = useCallback(() => poke.current(), []);
+
+  return { state, error, loadEarlier, loadingEarlier, refresh };
 }

@@ -256,6 +256,34 @@ Fragment keys: `g` (required), `ws` or `s`, `theme`, `chrome`, `font`, `tab`. Th
 panel removes the fragment from the address bar on load. With no SDK it cannot
 renew its grant, so it stops when the grant ends.
 
+### From source: the conversation and the viewer tabs (React)
+
+An app that draws its own page instead of the panel can import two hooks from
+`packages/web/src` (bp does, through a git submodule). They talk to ttym's
+HTTP API (`API_BASE` in `app-shared.ts`), so they need the main port proxied,
+not a grant connection.
+
+```ts
+import { useTranscript } from 'ttym/packages/web/src/reader/useTranscript';
+import { useViewerState } from 'ttym/packages/web/src/viewer/useViewerState';
+
+// A session's conversation as blocks. Polls once a second; refresh() reads now —
+// call it when your own push says the transcript changed.
+const { state, error, loadEarlier, loadingEarlier, refresh } = useTranscript(sessionId, true);
+onMyPush('transcript', (e) => { if (e.sessionId === sessionId) refresh(); });
+
+// The panes' viewer tabs (`ttym open`). Only `onView` is read from the first argument:
+// pass a stable object that calls the listener with { sessionId, state } on each change.
+const views = useMemo(() => ({ onView: (listener) => subscribeMyViewPushes(listener) }), []);
+const viewer = useViewerState(views, sessionIds, (sid, vid, presentation) => show(sid, vid, presentation));
+```
+
+- `refresh()` during a read in flight queues one more read after it, so a change
+  announced meanwhile is not missed. It does nothing once the hook is disabled.
+- `useViewerState` takes `Pick<TerminalMux, 'onView'>`; a `TerminalMux` still fits.
+- The rest of `packages/web/src` (ReaderView, renderers, markdown) is importable
+  but not a contract — it changes with ttym's own app.
+
 ## Tab API
 
 The panel uses these (main port); call them yourself only if you draw your own terminal.
@@ -293,6 +321,7 @@ After that:
 | `/api/embed/v1/*`, the grant and tab shapes | Fields are only added. A removal or change of meaning goes to `/v2`. Mint and revoke stay on the admin listener. |
 | `sdk.js`: mount options, methods, events | Only added. A breaking change is a new path (`/embed/v2/`). |
 | Fragment keys | Only added. |
+| `useTranscript` (incl. `refresh`) and `useViewerState`'s arguments, from source | Only added. Other `packages/web/src` modules are not a contract. |
 | Capability names | Meanings never change. A new capability is never added to existing registrations or grants. |
 | The panel's WebSocket frames, DOM, and its messages to the SDK | Not a contract. The panel and server ship together. |
 
