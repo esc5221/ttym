@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as api from '@ttym/api';
 import { LayoutView, getHost, type LocalEchoSetting, type TerminalMux } from '@ttym/ui';
-import { MutationBarrier, layoutToSessionIds, memberNameBySession, removePane, resizeSplit, swapPanes } from '@ttym/shared';
+import { MutationBarrier, layoutToSessionIds, memberNameBySession, narrowestPanePx, removePane, resizeSplit, swapPanes } from '@ttym/shared';
 import { actionBtnStyle, API_BASE, useSurface, IS_NATIVE, UI_STYLES, apiAddMember, apiRemoveMember, apiSplitWorkspace, apiUpdateWorkspace, emptyPaneStyle, fetchSessionMeta, fetchWorkspaces, navigate, quotePathForShell, stripBtnStyle, type AgentState, type UiStyle, type Workspace } from '../app-shared.js';
 import { KeyBar } from '../KeyBar.js';
 import { PhoneWorkspace } from './PhoneWorkspace.js';
@@ -19,6 +19,8 @@ import { PaneBody, paneReaderAvailable } from './PaneBody.js';
 import { isPaneReader, setPaneReader } from '../reader/paneReader.js';
 import { isReaderToggleKey } from '../reader/toggle-key.js';
 import { WorkspaceSessionsContext, paneView, type WorkspaceSessions } from './session-context.js';
+import { DesktopRoster } from './DesktopRoster.js';
+import { readRosterMode, wantsRoster, writeRosterMode, type RosterMode } from './roster-state.js';
 
 // ───── 워크스페이스 페이지 (트리 레이아웃) ─────
 
@@ -462,6 +464,37 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
   }, [touch, focusedSid]);
   const reloadViewer = useCallback((sid: number) => setViewerReload((prev) => ({ ...prev, [sid]: (prev[sid] ?? 0) + 1 })), []);
 
+  // ── 목록 모드 (데스크톱) ──
+  // 칸이 너무 좁아지면 배치 대신 카드 목록 + 집중 pane 하나. 이 브라우저의 보기일 뿐이고 서버의 layout은 그대로다.
+  // 판정은 저장된 비율 트리를 지금 창 폭에 투영해 가장 좁은 칸을 재는 것이라, 창을 줄이거나 칸이 늘면 따라 바뀐다.
+  const [rosterMode, setRosterMode] = useState<RosterMode>(() => readRosterMode());
+  const [rosterMenuOpen, setRosterMenuOpen] = useState(false);
+  const [contentEl, setContentEl] = useState<HTMLDivElement | null>(null);
+  const [contentWidth, setContentWidth] = useState(0);
+  useEffect(() => {
+    if (!contentEl) return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      setContentWidth((prev) => (Math.abs(prev - width) < 1 ? prev : width));
+    });
+    observer.observe(contentEl);
+    return () => observer.disconnect();
+  }, [contentEl]);
+  const narrowestPx = ws && contentWidth > 0 ? narrowestPanePx(ws.layout, contentWidth, U.splitterPx) : null;
+  const roster = surface === 'desktop' && wantsRoster(rosterMode, sessionIds.length, narrowestPx);
+  const pickRosterMode = useCallback((mode: RosterMode) => { setRosterMode(mode); writeRosterMode(mode); setRosterMenuOpen(false); }, []);
+  // ⌘⇧L (Ctrl+Shift+L): 지금 보이는 쪽의 반대로. 검색 팔레트가 ⌘K / Ctrl+Shift+K를 쓰는 것과 같은 이유로 Ctrl 단독은 피한다(readline).
+  useEffect(() => {
+    if (surface !== 'desktop') return;
+    const handler = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.altKey || event.code !== 'KeyL') return;
+      event.preventDefault();
+      pickRosterMode(roster ? 'grid' : 'list');
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, [surface, roster, pickRosterMode]);
+
   const sessions = useMemo<WorkspaceSessions>(() => ({
     mux, localEchoEnabled, touch, agentStates, lastAgentIds, deadSessions, markDead, focusedSid, focusSid, bells, ringBell,
     viewer, open, openFull, viewerReload, reloadViewer, selOpen, setSelOpen, offerSelection, search, setSearch,
@@ -567,6 +600,14 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
           </button>
         ))}
       </StripMenu>
+      <StripMenu label={roster ? 'view: list ▾' : 'view ▾'} open={rosterMenuOpen} onToggle={() => setRosterMenuOpen((v) => !v)}>
+        <div style={attachDropdownTitleStyle}>this browser only · ⌘⇧L</div>
+        {(['auto', 'list', 'grid'] as const).map((mode) => (
+          <button key={mode} onClick={() => pickRosterMode(mode)} style={attachDropdownItemStyle}>
+            {rosterMode === mode ? '● ' : '○ '}{mode === 'auto' ? 'auto (narrow cells → list)' : mode}
+          </button>
+        ))}
+      </StripMenu>
       <StripMenu label="+ attach" open={attachOpen} onToggle={toggleAttach}>
         <div style={attachDropdownTitleStyle}>detached sessions</div>
         {attachLoading ? (
@@ -661,8 +702,17 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
           ) : undefined}
         />
       ) : null}
-      <div style={{ flex: 1, minHeight: 0, background: 'var(--bg0)', padding: U.wrapPad }}>
-        {ws ? (
+      <div ref={setContentEl} style={{ flex: 1, minHeight: 0, background: 'var(--bg0)', padding: U.wrapPad }}>
+        {ws && roster ? (
+          <DesktopRoster
+            sessionIds={sessionIds}
+            memberNames={memberNames}
+            sessionCwds={sessionCwds}
+            hostedSids={new Set(zenSid !== null ? [zenSid] : [])}
+            renderFocus={(sid) => renderPane(sid, [])}
+            onSplit={() => void doSplit('right')}
+          />
+        ) : ws ? (
           <LayoutView
             layout={ws.layout}
             renderPane={renderPane}

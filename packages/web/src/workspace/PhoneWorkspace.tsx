@@ -17,6 +17,7 @@ import { setPaneReader, usePaneReader } from '../reader/paneReader.js';
 import { useKeyBarHidden } from '../phone-keybar.js';
 import { setPhoneImmersive, usePhoneImmersive } from '../phone-immersive.js';
 import { paneView, useWorkspaceSessions } from './session-context.js';
+import { PaneCard } from './PaneCard.js';
 
 /**
  * 폰의 workspace 화면. 두 모드로 나뉜다.
@@ -86,7 +87,6 @@ export function PhoneWorkspace(props: PhoneWorkspaceProps) {
 // ───── 카드 목록 ─────
 
 function ListView({ sessionIds, memberNames, sessionCwds, onOpen, onSplit }: PhoneWorkspaceProps & { onOpen: (sid: number) => void }) {
-  const { mux, agentStates, deadSessions, bells, restartAt, detachMember, viewer } = useWorkspaceSessions();
   if (sessionIds.length === 0) {
     return (
       <div style={emptyPaneStyle}>
@@ -102,87 +102,9 @@ function ListView({ sessionIds, memberNames, sessionCwds, onOpen, onSplit }: Pho
       padding: '6px 6px calc(12px + env(safe-area-inset-bottom))',
       display: 'flex', flexDirection: 'column', gap: 6,
     }}>
-      {sessionIds.map((sid) => {
-        const dead = deadSessions.has(sid);
-        const agent = agentStates[sid];
-        const color = agent?.kind ? AGENT_COLORS[agent.kind] : undefined;
-        const cwd = sessionCwds[sid];
-        return (
-          <div
-            key={sid}
-            onClick={() => !dead && onOpen(sid)}
-            style={{
-              borderRadius: 4, overflow: 'hidden',
-              border: dead ? '1px solid var(--err)' : '1px solid var(--line)',
-              background: 'var(--bg1)',
-              // 세션이 적으면 카드가 남는 세로를 나눠 갖고, 많아지면 minHeight에
-              // 물려 스크롤로 넘어간다. 높이를 못박아 두면 3개짜리 workspace에서
-              // 화면 3분의 1이 그냥 빈다(411x891에서 299px을 실측).
-              display: 'flex', flexDirection: 'column',
-              ...(dead ? { flex: '0 0 auto' } : { flex: '1 1 0', minHeight: 132 }),
-            }}
-          >
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', height: 30,
-              borderBottom: '1px solid var(--line)', minWidth: 0,
-            }}>
-              {color ? (
-                <span
-                  className={agent?.active ? 'agent-dot-run' : undefined}
-                  style={{ width: 5, height: 5, borderRadius: '50%', background: color, opacity: agent?.active ? 1 : 0.4, flexShrink: 0 }}
-                />
-              ) : null}
-              <span style={{ color: color ?? 'var(--text)', fontSize: 11, fontFamily: 'var(--mono)', fontWeight: 700, flexShrink: 0 }}>
-                {memberNames[sid] || `%${sid}`}
-              </span>
-              {(viewer.states[sid]?.items.length ?? 0) > 0 ? (
-                // 이 pane에 `ttym open`으로 열린 파일이 있다 — 열면 탭 줄에 선다.
-                <span title="open files" style={{ color: 'var(--text-dim)', fontSize: 10, fontFamily: 'var(--mono)', flexShrink: 0 }}>
-                  ▤ {viewer.states[sid]!.items.length}
-                </span>
-              ) : null}
-              {bells.has(sid) ? (
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--warn)', boxShadow: '0 0 6px var(--warn)', flexShrink: 0 }} />
-              ) : null}
-              {cwd ? (
-                <span style={{
-                  color: 'var(--cwd)', fontSize: 10, fontFamily: 'var(--mono)', minWidth: 0,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>{formatCwd(cwd)}</span>
-              ) : null}
-              {dead ? (
-                <span style={{ marginLeft: 'auto', color: 'var(--err)', fontSize: 10, fontFamily: 'var(--mono)', flexShrink: 0 }}>ended</span>
-              ) : null}
-            </div>
-
-            {dead ? (
-              <div style={{ display: 'flex', gap: 8, padding: 12 }}>
-                <button onClick={(e) => { e.stopPropagation(); void restartAt(sid); }} style={actionBtnStyle}>restart</button>
-                <button onClick={(e) => { e.stopPropagation(); void detachMember(sid); }} style={{ ...actionBtnStyle, background: 'var(--line)', color: 'var(--text-soft)' }}>close</button>
-              </div>
-            ) : (
-              // 카드는 훑어보는 자리다. 입력도, GPU도 여기 쓸 이유가 없다.
-              //
-              // 아래에 붙이는 게 핵심이다. follow는 서버 행 수만큼 자연 높이를
-              // 갖는데(40행이면 폰트10에 520px쯤), 위 정렬로 자르면 한참 전에
-              // 지나간 화면이 박제된다. 카드가 답해야 할 질문은 "지금 뭐 하는
-              // 중인가"라서 아래를 보여준다.
-              // 배경을 xterm과 같은 면으로 맞춘다. follow는 서버 cols만큼만 넓어서
-              // 카드보다 좁게 끝나는데, 카드 면(bg1)이 그대로 드러나면 터미널이
-              // 반쪽만 그려진 것처럼 보인다.
-              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', pointerEvents: 'none', position: 'relative', background: 'var(--bg0)' }}>
-                {/* bottom에 못박아 위로 자라게 한다. Terminal 루트가 height:100%라
-                    flex로는 밀리지 않는다 — 이미 컨테이너를 꽉 채우고 있어서. */}
-                <Terminal
-                  mux={mux} attachId={sid} mode="readonly" fontSize={10}
-                  enableWebgl={false} geometry="follow"
-                  style={{ position: 'absolute', left: 6, bottom: 4, width: 'auto', height: 'auto' }}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {sessionIds.map((sid) => (
+        <PaneCard key={sid} sid={sid} name={memberNames[sid]} cwd={sessionCwds[sid]} variant="phone" onOpen={onOpen} />
+      ))}
       {/* 데스크톱 탭 스트립의 + split 과 같은 물건이다. 폰에선 스트립이 좁아
           목록 끝으로 내려왔을 뿐, 문법까지 바꿀 이유는 없다. */}
       <button onClick={onSplit} style={{ ...stripBtnStyle, alignSelf: 'flex-start', marginTop: 2 }}>+ split</button>

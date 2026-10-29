@@ -9,3 +9,4 @@ export * from './workspace-domain.js';
 export * from './layout-tree.js';
 export * from './layout-presets.js';
 export * from './session-ref.js';
+export * from './layout-metrics.js';
