@@ -246,7 +246,10 @@ Claude Code 턴 종료 시 발동 (Stop·StopFailure·SessionEnd). Codex는 scri
 - `waiting` = 상태 파일 waiting(sweep) 또는 PermissionRequest가 연 `claudeWaiting`(bypass 칸 포함, 하위 에이전트면 agentId).
   승인·거절·Esc는 훅이 없다 — 상태 파일이 waiting이 아닌 것으로 바뀌면 sweep이 닫는다.
 - `interrupted` = `{ at, reason: 'error'|'interrupted', message? }`. StopFailure(API 오류·연결 끊김) → error,
-  Stop 없이 끝난 턴(Esc·허락 거절, sweep이 찾음) → interrupted. 다음 프롬프트·정상 Stop이 지운다.
+  Stop 없이 끝난 턴(허락 거절·우리가 안 넣은 Esc, sweep이 찾음) → interrupted. 다음 프롬프트·정상 Stop이 지운다.
+  그 턴 안에 ttym이 Esc 키(입력 `\x1b` 하나)를 넣었으면 사람이 일부러 멈춘 것 — meta에 남기지 않고(쉼) await만
+  `reason: 'cancelled'`로 끝낸다(`Session.lastEscAt`). sweep은 상태 파일 idle이 2초(STOP_HOOK_GRACE_MS) 지난 뒤 meta를
+  다시 읽고서야 판정한다 — 정상 Stop 직후에 '멈춤'을 덮어쓰던 경쟁(agent-hooks.ts `staleTurnOutcome`).
   그 턴의 await는 바로 `failed` + `interaction.interrupted`로 끝난다(시간 끝까지 기다리지 않음).
 - 에이전트 찾기(findAgentProcess)는 pane 프로세스 자신도 본다(`--cmd claude`). 그런 pane은 재우지 않는다(셸이 없다).
 - 상태 파일의 `shell`(2.1.3xx) = 쉼 + 백그라운드 셸 실행 중. 턴은 끝난 것, 재우지는 않는다.
