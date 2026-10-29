@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { SessionManager } from './session-manager.js';
 import { WorkspaceStore } from './workspace-store.js';
 import headless from '@xterm/headless';
-import { screenTail } from './screen-tail.js';
+import { screenTail, tailCursor } from './screen-tail.js';
 import { readerFeed } from './reader/index.js';
 import { findAgyIn, listProcesses } from './reader/agy.js';
 import { findCodexIn } from './reader/codex.js';
@@ -287,10 +287,10 @@ async function renderText(ansi: string, cols: number, rows: number): Promise<str
 }
 
 /** 자는 pane의 얼린 화면에서 아래 줄을 읽는다. renderText와 같은 이유로 폭을 넉넉히 잡는다. */
-async function renderTail(ansi: string, cols: number, rows: number, max: number): Promise<ScreenRun[][]> {
+async function renderTail(ansi: string, cols: number, rows: number, max: number): Promise<{ rows: ScreenRun[][]; cursor: { x: number; y: number } | null }> {
   const term = new headless.Terminal({ cols, rows, allowProposedApi: true });
   await new Promise<void>((r) => term.write(ansi, () => r()));
-  const out = screenTail(term, max);
+  const out = { rows: screenTail(term, max), cursor: tailCursor(term, max) };
   term.dispose();
   return out;
 }
@@ -877,8 +877,8 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     // ?format=tail&rows=N — 아래 N줄을 색과 함께(ScreenTail). 읽기만 하므로 터미널 크기·입력에 영향이 없다.
     if (url.searchParams.get('format') === 'tail') {
       const max = Math.min(50, Math.max(1, parseInt(url.searchParams.get('rows') ?? '', 10) || 12));
-      const rows = frozen ? renderTail(frozen.snapshot, Math.max(session.cols, 500), session.rows, max) : Promise.resolve(session.screenTail(max));
-      rows.then((r) => json(200, { format: 'tail', cols: session.cols, rows: r, ...sleepInfo })).catch(() => json(500, { error: 'render failed' }));
+      const tail = frozen ? renderTail(frozen.snapshot, Math.max(session.cols, 500), session.rows, max) : Promise.resolve({ rows: session.screenTail(max), cursor: session.tailCursor(max) });
+      tail.then((t) => json(200, { format: 'tail', cols: session.cols, rows: t.rows, cursor: t.cursor, ...sleepInfo })).catch(() => json(500, { error: 'render failed' }));
       return true;
     }
     json(200, { screen: frozen ? frozen.snapshot : session.snapshot(), ...sleepInfo });
