@@ -9,7 +9,7 @@ import headless from '@xterm/headless';
 const { Terminal } = headless;
 import { SerializeAddon } from '@xterm/addon-serialize';
 import type { ScreenRun } from '@ttym/protocol';
-import { screenTail } from './screen-tail.js';
+import { screenTail, tailCursor } from './screen-tail.js';
 import { OutputRing } from './output-ring.js';
 import { SyncBlockFilter } from './sync-block.js';
 import { CommandIndex } from './command-index.js';
@@ -895,6 +895,11 @@ export class Session {
   }
 
   /** 보이는 화면의 아래 `max`줄(내용 있는 마지막 줄 기준), 색과 함께 — 호버 미리보기. */
+  /** The cursor within screenTail(max)'s rows, or null. */
+  tailCursor(max: number): { x: number; y: number } | null {
+    return tailCursor(this.term, max);
+  }
+
   screenTail(max: number): ScreenRun[][] {
     return screenTail(this.term, max);
   }

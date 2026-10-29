@@ -11,8 +11,7 @@ export function screenTail(term: Pick<Terminal, 'rows' | 'cols' | 'buffer'>, max
   const buf = term.buffer.active;
   const lines = [];
   for (let i = 0; i < term.rows; i++) lines.push(buf.getLine(buf.viewportY + i));
-  let last = lines.length - 1;
-  while (last >= 0 && !(lines[last]?.translateToString(true).trim())) last--;
+  const last = lastContentRow(term);
   if (last < 0) return [];
 
   const out: ScreenRun[][] = [];
@@ -42,6 +41,29 @@ export function screenTail(term: Pick<Terminal, 'rows' | 'cols' | 'buffer'>, max
     out.push(runs);
   }
   return out;
+}
+
+/** The last row of the visible screen with something on it; -1 when blank. */
+function lastContentRow(term: Pick<Terminal, 'rows' | 'buffer'>): number {
+  const buf = term.buffer.active;
+  let last = term.rows - 1;
+  while (last >= 0 && !(buf.getLine(buf.viewportY + last)?.translateToString(true).trim())) last--;
+  return last;
+}
+
+/**
+ * Where the cursor is, in the rows screenTail(term, max) returns: y indexes them. null when it is
+ * outside them — above, or on a blank row under the last one drawn. An agent's composer is where its
+ * cursor rests, however much it draws below (Claude's list of background agents).
+ */
+export function tailCursor(term: Pick<Terminal, 'rows' | 'buffer'>, max: number): { x: number; y: number } | null {
+  const buf = term.buffer.active;
+  const last = lastContentRow(term);
+  if (last < 0) return null;
+  const first = Math.max(0, last - max + 1);
+  // cursorY counts from the top of the live screen; a viewport scrolled up shifts it.
+  const y = buf.baseY + buf.cursorY - buf.viewportY;
+  return y >= first && y <= last ? { x: buf.cursorX, y: y - first } : null;
 }
 
 type Style = Omit<ScreenRun, 't'>;

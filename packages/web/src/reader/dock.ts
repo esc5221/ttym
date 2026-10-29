@@ -117,7 +117,16 @@ const claude: DockProfile = {
     const last = rules[rules.length - 1];
     if (last === undefined) return null;
     const below = rows.length - 1 - last;
-    if (below > 4) return null; // that rule is scrollback, not the prompt's
+    // More than the status line under the last rule: scrollback — unless that rule closes a pair whose
+    // first row is the prompt ("❯ "), with a list drawn under it (background agents, "✔ Update installed").
+    // That is what a reader without the cursor (the tail API) has to go by.
+    if (below > 4) {
+      for (let k = rules.length - 1; k > 0; k--) {
+        const lo = rules[k - 1]!, hi = rules[k]!;
+        if (hi - lo >= 2 && hi - lo <= 12 && /^\s*❯(\s|$)/.test(rows[lo + 1] ?? '')) return lo;
+      }
+      return null;
+    }
     const prev = rules[rules.length - 2];
     // The prompt can be several lines tall, but not a screenful.
     if (prev !== undefined && last - prev >= 2 && last - prev <= 12) return prev;

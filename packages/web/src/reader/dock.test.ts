@@ -75,8 +75,20 @@ describe('dockRowCount with the cursor', () => {
     const bottom = [RULE, '❯ ', RULE, '  ⏵⏵ bypass permissions on', '', '  agents', '  · one', '  · two', '  · three', '  · four'];
     const rows = screen(bottom, 30);
     const caretRow = 30 - bottom.length + 1;
-    expect(dockRowCount('claude-code', rows, false)).toBe(FALLBACK_DOCK_ROWS);
     expect(dockRowCount('claude-code', rows, false, caretRow)).toBe(bottom.length);
+  });
+
+  it('without the cursor, a rule pair whose first row is the prompt is the prompt (tail API)', () => {
+    const bottom = [RULE, '❯ ', RULE, '  ⏵⏵ bypass permissions on', '', '  ● main', '  ◯ general-purpose  one', '  ◯ general-purpose  two', '  ✔ Update installed'];
+    expect(dockRowCount('claude-code', screen(bottom, 30), false)).toBe(bottom.length);
+    // a typed prompt, several rows tall
+    const typed = [RULE, '❯ first', '  second', RULE, '  status', '', '  ● main', '  ◯ a', '  ◯ b'];
+    expect(dockRowCount('claude-code', screen(typed, 30), false)).toBe(typed.length);
+  });
+
+  it('without the cursor, rules in the scrollback with no prompt between them stay scrollback', () => {
+    const rows = screen([RULE, 'assistant text', RULE, 'x', 'x', 'x', 'x', 'x'], 30);
+    expect(dockRowCount('claude-code', rows, false)).toBe(FALLBACK_DOCK_ROWS);
   });
 
   it('ignores a cursor that is not between two rules', () => {

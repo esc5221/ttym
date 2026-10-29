@@ -194,6 +194,11 @@ export interface ScreenTail {
   /** 서버가 들고 있는 터미널 폭. 미리보기는 이 폭을 기준으로 글자 크기를 줄인다. */
   cols: number;
   rows: ScreenRun[][];
+  /**
+   * The cursor in `rows` (y indexes them), null when it is outside them. An agent's composer is where
+   * the cursor rests — the way to find it under whatever is drawn below. Absent: an older server.
+   */
+  cursor?: { x: number; y: number } | null;
 }
 export {
   EMBED_API_VERSION, EMBED_SDK_VERSION, EMBED_CAPS, DEFAULT_GRANT_TTL_MS, DEFAULT_MAX_TTL_MS, ORIGIN_RE, EMBED_ID_RE,
