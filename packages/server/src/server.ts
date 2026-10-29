@@ -1028,7 +1028,7 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       if (!session || session.isDead) { json(404, { error: 'not found' }); return; }
       try {
         const { cols, rows } = JSON.parse(body);
-        if (cols > 0 && rows > 0) session.resize(cols, rows);
+        if (cols > 0 && rows > 0) session.ownerResize(cols, rows);
         json(200, { ok: true });
       } catch {
         json(400, { error: 'invalid body' });
@@ -2421,11 +2421,12 @@ export async function createServer(port: number): Promise<TtymServer> {
           // 들어오면서 첫 기하를 여기 싣기 때문에 이 갈래가 필요하다.
           if (mode === 'readwrite' && meta?.cols && meta?.rows) {
             if (meta.borrow) session.borrowResize(viewerId, meta.cols, meta.rows);
-            else session.resize(meta.cols, meta.rows);
+            else session.viewerResize(meta.cols, meta.rows);
           }
 
           const fromSeq = meta?.fromSeq ?? 0;
-          log(`ATTACH session=${sessionId} viewer=${viewerId.slice(0, 8)} mode=${mode} fromSeq=${fromSeq}`);
+          // 크기도 남긴다 — 누가 PTY 를 줄였는지 로그로 보이게.
+          log(`ATTACH session=${sessionId} viewer=${viewerId.slice(0, 8)} mode=${mode} fromSeq=${fromSeq}${mode === 'readwrite' && meta?.cols && meta?.rows ? ` size=${meta.cols}x${meta.rows}${meta.borrow ? ' borrow' : ''}` : ''}`);
           safeSend(ws, encode(sessionId, CMD.ATTACH, jsonPayload({ ok: true, ...session.info() })));
 
           {
@@ -2539,7 +2540,7 @@ export async function createServer(port: number): Promise<TtymServer> {
                 if (flag === 2) session.releaseBorrow(viewerId);
                 else if (cols > 0 && rows > 0) {
                   if (flag === 1) session.borrowResize(viewerId, cols, rows);
-                  else session.resize(cols, rows);
+                  else session.viewerResize(cols, rows);
                 }
               }
             }
