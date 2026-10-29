@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { ViewItem } from '@ttym/api';
 import { fetchText, humanSize, viewBase, viewSrc } from '../content.js';
 import { highlightHtml, languageForTag } from '../highlight.js';
+import { loadMarked } from '../../reader/marked.js';
 
 /**
  * Markdown, rendered here in the app's own type and colours. The parser
@@ -26,8 +27,8 @@ export function MarkdownView({ item }: { item: ViewItem }) {
     let cancelled = false;
     (async () => {
       try {
-        const [{ marked }, { default: DOMPurify }, res] = await Promise.all([
-          import('marked'), import('dompurify'), fetchText(viewSrc(item)),
+        const [marked, { default: DOMPurify }, res] = await Promise.all([
+          loadMarked(), import('dompurify'), fetchText(viewSrc(item)),
         ]);
         if (cancelled) return;
         const raw = marked.parse(res.text, { gfm: true, breaks: true }) as string;

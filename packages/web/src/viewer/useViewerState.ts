@@ -33,8 +33,12 @@ export interface ViewerHook {
 export interface ViewJump { vid: string; line: number; col?: number; nonce: number }
 export type OpenOutcome = { target: string; ok: true; id: string } | { target: string; ok: false; error: string };
 
+/**
+ * `mux`: only its onView is used — a page without a TerminalMux (an embedder with its own event stream)
+ * passes `{ onView }`, and keeps that object stable (it is an effect dependency).
+ */
 export function useViewerState(
-  mux: TerminalMux,
+  mux: Pick<TerminalMux, 'onView'>,
   sessionIds: number[],
   onPresent: (sid: number, vid: string, presentation: ViewPresentation) => void,
 ): ViewerHook {
