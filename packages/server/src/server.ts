@@ -23,7 +23,8 @@ import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { ViewerStore } from './viewer/store.js';
 import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
-import { AgentSleeper, SUBMIT_GAP_MS, findAgentProcess, psProcesses, psProcessesCached, readAgentStatus, turnIsStale, type SleepState } from './agent-sleep.js';
+import { typeAndSubmit } from './submit.js';
+import { AgentSleeper, findAgentProcess, psProcesses, psProcessesCached, readAgentStatus, turnIsStale, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { RemoteStore } from './remote/store.js';
@@ -295,19 +296,19 @@ async function renderTail(ansi: string, cols: number, rows: number, max: number)
   return out;
 }
 
-const PROMPT_PIECE_BYTES = 512;
-const PROMPT_PIECE_GAP_MS = 20;
+export { utf8Pieces } from './submit.js';
 
-/** Split without cutting a UTF-8 sequence: a piece never ends on a continuation byte's lead. */
-export function utf8Pieces(bytes: Buffer, max: number): Buffer[] {
-  const out: Buffer[] = [];
-  for (let i = 0; i < bytes.length;) {
-    let end = Math.min(bytes.length, i + max);
-    while (end < bytes.length && end > i + 1 && (bytes[end]! & 0xc0) === 0x80) end--;
-    out.push(bytes.subarray(i, end));
-    i = end;
-  }
-  return out.length ? out : [bytes];
+/**
+ * The agent whose composer submit.ts watches; null = a shell. A pane just started has no SessionStart
+ * in its meta yet — exactly the pane that most needs watching — so the process tree answers then.
+ */
+async function submitAgentOf(session: Session, meta: Record<string, unknown>): Promise<'claude' | 'codex' | null> {
+  const kind = agentKindOf(meta);
+  if (kind) return kind === 'claude-code' ? 'claude' : 'codex';
+  if (!session.childPid) return null;
+  // Fresh: a list from before the pane started does not have its agent.
+  const procs = await psProcessesCached(500).catch(() => null);
+  return procs ? findAgentProcess(procs, session.childPid)?.kind ?? null : null;
 }
 
 /** Claude panes on a permission prompt or dialog → what for. Filled by the waiting sweep. */
@@ -561,31 +562,22 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
       // Mark before writing: output that arrives between the two would
       // otherwise fall outside the range and be dropped from the transcript.
       const interaction = interactions.start(session, prompt);
-      // A long prompt goes in pieces the PTY takes whole, a beat apart. Written at
-      // once, macOS accepts ~1 KB and the holder writes the rest when it drains; the
-      // TUI then reads two chunks, and Claude Code sometimes kept only the second —
-      // the first ~1024 bytes vanished (PLAYBOOK F-10: 2 in 10 at 2971 bytes; 0 in 30
-      // in 512-byte pieces 20 ms apart). Bracketed paste fixes the split but makes
-      // Claude treat the prompt as pasted material and decline its instructions.
-      const pieces = submit === 'cr' ? utf8Pieces(Buffer.from(prompt), PROMPT_PIECE_BYTES) : [Buffer.from(prompt)];
-      for (let i = 0; i < pieces.length; i++) {
-        if (session.isDead) break;
-        session.write(pieces[i]!);
-        if (i + 1 < pieces.length) await new Promise((r) => setTimeout(r, PROMPT_PIECE_GAP_MS));
-      }
       // Interactive TUIs read Enter as CR; a shell wants LF. Neither is right
       // for both, so the caller says which, defaulting to the agent case.
-      // The CR waits a beat: two back-to-back writes can land in one PTY
-      // read, and a TUI's paste heuristics then swallow the CR as a pasted
-      // newline instead of a submit — the prompt sits in the input box
-      // forever. Longer prompts widen the paste window, which is why this
-      // was a timing lottery. A shell's LF has no such heuristics.
-      if (submit === 'cr') {
-        setTimeout(() => { if (!session.isDead) session.write(Buffer.from([0x0d])); }, SUBMIT_GAP_MS);
-      } else if (submit === 'lf') {
-        session.write(Buffer.from([0x0a]));
+      // How the text goes in and the Enter after it: submit.ts.
+      const meta = await manager.getMeta(id).catch(() => ({}));
+      // Only an Enter that is a CR has a composer to watch; a shell's LF needs no lookup.
+      const agent = submit === 'cr' ? await submitAgentOf(session, meta as Record<string, unknown>) : null;
+      const typed = await typeAndSubmit(session, prompt, {
+        submit: submit === 'lf' ? 'lf' : submit === 'cr' ? 'cr' : 'none',
+        agent: agent,
+        blind: Boolean(sleeper?.stateOf(id)),
+      });
+      // Still in the composer after the retry: no turn will start, and no Stop will come.
+      if (typed.submitted === false) {
+        void interactions.finish(session, 'failed', meta as Record<string, unknown>, {}, { at: Date.now(), reason: 'stuck', message: 'the prompt stayed in the composer' });
       }
-      log(`HTTP INTERACTION session=${id} id=${interaction.id} len=${prompt.length} pieces=${pieces.length}`);
+      log(`HTTP INTERACTION session=${id} id=${interaction.id} len=${prompt.length}${agent ? ` agent=${agent}` : ''}${typed.waitedMs ? ` waited=${typed.waitedMs}ms` : ''}${typed.retried ? ' retried' : ''}${typed.submitted === false ? ' stuck' : ''}`);
 
       const settled = await interactions.wait(interaction.id, timeoutMs);
       if (settled && settled.status !== 'pending') { json(200, { interaction: settled }); return; }
@@ -772,15 +764,24 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     readBody().then((body) => {
       const session = manager.get(id);
       if (!session || session.isDead) { json(404, { error: 'not found' }); return; }
-      try {
-        const { data } = JSON.parse(body);
-        if (typeof data !== 'string') { json(400, { error: 'data must be string' }); return; }
+      let data: unknown, submit: unknown;
+      try { ({ data, submit } = JSON.parse(body)); } catch { json(400, { error: 'invalid body' }); return; }
+      if (typeof data !== 'string') { json(400, { error: 'data must be string' }); return; }
+      if (submit === undefined) {
         session.write(Buffer.from(data));
         log(`HTTP SEND session=${id} len=${data.length}`);
         json(200, { ok: true });
-      } catch {
-        json(400, { error: 'invalid body' });
+        return;
       }
+      // submit: type the text, then Enter — the way await does (submit.ts). auto: CR to an agent, LF to a shell.
+      if (submit !== 'auto' && submit !== 'cr' && submit !== 'lf') { json(400, { error: 'submit must be auto, cr or lf' }); return; }
+      void manager.getMeta(id).catch(() => ({})).then(async (meta) => {
+        const agent = await submitAgentOf(session, meta as Record<string, unknown>);
+        const how = submit === 'auto' ? (agent ? 'cr' : 'lf') : submit;
+        const typed = await typeAndSubmit(session, data as string, { submit: how, agent, blind: Boolean(sleeper?.stateOf(id)) });
+        log(`HTTP SEND session=${id} len=${(data as string).length} submit=${how}${typed.waitedMs ? ` waited=${typed.waitedMs}ms` : ''}${typed.retried ? ' retried' : ''}${typed.submitted === false ? ' stuck' : ''}`);
+        json(200, { ok: true, submit: how, ...typed });
+      });
     });
     return true;
   }

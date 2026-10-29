@@ -56,10 +56,18 @@ ttym workspace detach --current <member>
 # zsh에는 \n
 ttym send :runner -- $'echo hello\n'
 
-# Claude/Codex TUI에는 텍스트 + \r (두 번 나눠 보내기)
-ttym send :claude-sub -- $'프롬프트 내용'
+# Claude/Codex TUI에 글을 넣고 보내기까지: --submit (답은 안 기다린다 — 기다리려면 await)
+ttym send :claude-sub --submit -- '프롬프트 내용'
+ttym send :runner --submit -- 'echo hello'      # 셸이면 LF. --submit=cr|lf 로 정할 수도
+
+# 키 하나만은 그대로
 ttym send :claude-sub -- $'\r'
 ```
+
+`--submit`과 await는 같은 길(server/src/submit.ts)로 넣는다: 에이전트 칸이면 입력칸이 보일 때까지(15초) 기다림 →
+512바이트 조각 → 글이 입력칸에 보이면 CR → 입력칸이 안 비면 붙여넣기 끝 `\e[201~` + CR 한 번 더.
+그래도 남으면 send는 종료 1(`submitted: false`), await는 바로 `failed` + `interrupted.reason: 'stuck'`.
+`send -- $'글\r'`은 긴 글이면 붙여넣기로 읽혀 CR이 줄바꿈이 된다(`[Pasted text #1 +31 lines]`로 남음).
 
 핵심: 인터랙티브 TUI(raw mode)는 Enter = CR(0x0d). 일반 쉘은 LF(0x0a).
 

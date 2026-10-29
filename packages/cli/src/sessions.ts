@@ -104,24 +104,41 @@ export async function cmdSendAddr() {
   const sep = args.indexOf('--');
   const payload = sep !== -1 ? args.slice(sep + 1).join(' ') : '';
   const token = args[0];
-  if (!token || !payload) {
-    console.error('usage: ttym send <ws:name|:name|%id | --match "expr"> -- "data"');
+  // --submit: type the text, then Enter, the way await does — CR to an agent, LF to a shell (--submit=cr|lf to say).
+  // The server watches the agent's composer and retries once if the text stayed there.
+  const flags = sep !== -1 ? args.slice(0, sep) : args;
+  const submitFlag = flags.find((a) => a === '--submit' || a.startsWith('--submit='));
+  const submit = submitFlag ? (submitFlag.split('=')[1] ?? 'auto') : undefined;
+  if (!token || !payload || (submit !== undefined && !['auto', 'cr', 'lf'].includes(submit))) {
+    console.error('usage: ttym send <ws:name|:name|%id | --match "expr"> [--submit[=cr|lf]] -- "data"');
     process.exit(EXIT.USAGE);
   }
+  const body = submit ? { data: payload, submit } : { data: payload };
   const port = getPort();
   await ensureCompatibleServer(port);
   if (token === '--match') {
     const targets = await resolveMatches(port, args[1] ?? '');
     for (const target of targets) {
-      await fetchPost(port, `/api/sessions/${target.sessionId}/send`, { data: payload });
-      console.log(`sent to ${target.label}`);
+      const result = await fetchPost(port, `/api/sessions/${target.sessionId}/send`, body);
+      console.log(`sent to ${target.label}${submitNote(result)}`);
     }
     return;
   }
   const target = await resolveAddress(port, token);
-  const result = await fetchPost(port, `/api/sessions/${target.sessionId}/send`, { data: payload });
+  const result = await fetchPost(port, `/api/sessions/${target.sessionId}/send`, body);
   if (hasFlag('--json')) return printOutput(result, true);
-  console.log(`sent to ${target.label}`);
+  if (result?.submitted === false) {
+    console.error(`sent to ${target.label}, but the text is still in its composer (Enter retried once) — check: ttym screen ${token}`);
+    process.exit(EXIT.FAIL);
+  }
+  console.log(`sent to ${target.label}${submitNote(result)}`);
+}
+
+/** An older server ignores submit and answers without these. */
+function submitNote(result: { submit?: string; submitted?: boolean | null; retried?: boolean } | null): string {
+  if (!result?.submit) return '';
+  if (result.submitted === false) return ' (still in the composer)';
+  return result.retried ? ' and submitted (after ending a paste)' : result.submitted ? ' and submitted' : '';
 }
 
 /** 계약 조항 "비대화형 resize": ttym resize <addr> <cols> <rows> */
