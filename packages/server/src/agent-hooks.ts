@@ -20,6 +20,8 @@
  * So a hook can open a wait but not always close it; the sweep closes it from the status file.
  */
 
+import { turnIsStale, type AgentStatusFile } from './agent-sleep.js';
+
 /** meta.claudeWaiting — a prompt the hooks saw open. agentId: a subagent's (its prompt outlives the main turn). */
 export interface HookWaiting { for: string; tool?: string; agentId?: string; at: number }
 
@@ -31,8 +33,46 @@ export interface Interrupted {
    * interrupted: the turn ended with no Stop — Esc (before any output it leaves no trace on screen but
    * the prompt back in the composer), a denied prompt, or, rarely, a Stop that never reached us.
    */
-  reason: 'error' | 'interrupted';
+  reason: 'error' | 'interrupted' | 'cancelled';
   message?: string;
+}
+
+/**
+ * cancelled: an Esc reached the pane during the turn — a person stopped it. Never written to meta
+ * (the pane rests as they left it, not "stopped"); only the await on that turn is told.
+ *
+ * STOP_HOOK_GRACE_MS: how long Claude's status must have been idle before the sweep calls an open
+ * turn cut short. The sweep reads meta first and the status file after a ps; a Stop landing between
+ * the two left it an open turn and an idle status, and it wrote "interrupted" 94 ms after a normal
+ * Stop (pie lead, 10-29). Measured on 2.1.312: the Stop reaches us 25–45 ms before the status goes
+ * idle. Past the grace the sweep reads meta again; the margin also covers a hook slowed by load.
+ */
+export const STOP_HOOK_GRACE_MS = 2000;
+
+/**
+ * What the waiting sweep concludes about a turn that is still open in meta while Claude's status
+ * says idle. meta must be read after the grace has passed (the Stop may have closed it meanwhile).
+ * patch: the meta to write, null = nothing to do · ended: what to tell the await on that turn.
+ */
+export function staleTurnOutcome(
+  meta: Record<string, unknown>,
+  status: AgentStatusFile | null,
+  escAt: number,
+  now: number,
+  screen: () => string[],
+): { patch: Record<string, unknown>; ended: Interrupted | null } | null {
+  if (!status || typeof status.updatedAt !== 'number' || now - status.updatedAt <= STOP_HOOK_GRACE_MS) return null;
+  if (!turnIsStale(meta, status)) return null;
+  const patch: Record<string, unknown> = { claudeActive: false, claudeTurnOpen: false };
+  // claudeActive alone (a SessionStart, a hook with no turn) is closed quietly — no turn was asked.
+  if (meta.claudeTurnOpen !== true) return { patch, ended: null };
+  const turnAt = typeof meta.claudeTurnAt === 'number' ? meta.claudeTurnAt : 0;
+  if (escAt >= turnAt) return { patch, ended: { at: now, reason: 'cancelled' } };
+  // A prompt's turn that ended without a Stop — a denied prompt, an Esc we did not deliver, or a Stop
+  // that never reached us — is not a rest.
+  const interrupted: Interrupted = { at: now, reason: screenInterruptReason(screen()) };
+  patch.claudeInterrupted = interrupted;
+  return { patch, ended: interrupted };
 }
 
 /** What the activity hook forwards from Claude Code's payload. */

@@ -804,6 +804,8 @@ export class Session {
   /** Wall-clock of the last real input / output — the idle clocks. */
   lastInputAt = 0;
   lastOutputAt = 0;
+  /** Wall-clock of the last lone Esc key — a person stopping the agent's turn on purpose. */
+  lastEscAt = 0;
 
   /** Stop forwarding output to viewers; they keep the screen as it is now. */
   freeze(snapshot?: string): void {
@@ -948,6 +950,8 @@ export class Session {
     if (this.closed || !this.sock) return;
     if (this.inputGate && this.inputGate(data)) return;
     this.lastInputAt = Date.now();
+    // The Esc key alone (arrows and the like are \x1b[…, not this). Twice is still a press.
+    if (data.length > 0 && data.length <= 2 && data.every((b) => b === 0x1b)) this.lastEscAt = this.lastInputAt;
     writeFrame(this.sock, H_CMD_DATA_IN, data);
   }
 

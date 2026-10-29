@@ -17,7 +17,7 @@ import { InteractionStore, turnRange, type StopReport } from './interaction.js';
 import { sweepRuntimeDir, sweepDropsDir } from './run-gc.js';
 import { ConfigStore } from './config-file.js';
 import { agentKindOf } from './agent-providers.js';
-import { hookPatch, hookWaitingIsStale, hookWaitingOf, interruptedOf, parseHookEvent, screenInterruptReason, screenShowsPrompt, stopPatch, type HookEvent, type Interrupted } from './agent-hooks.js';
+import { hookPatch, hookWaitingIsStale, hookWaitingOf, interruptedOf, parseHookEvent, screenShowsPrompt, staleTurnOutcome, STOP_HOOK_GRACE_MS, stopPatch, type HookEvent, type Interrupted } from './agent-hooks.js';
 import { getHomeDir, drainSyncStats, type Session } from './session.js';
 import { readMapPrompt, writeMapPrompt } from './map-prompt.js';
 import { ViewerStore } from './viewer/store.js';
@@ -1862,23 +1862,23 @@ export async function createServer(port: number): Promise<TtymServer> {
           let screen: string[] | null = null;
           const lines = () => (screen ??= screenLines(pane.id));
           const patch: Record<string, unknown> = {};
-          // A turn the person cut short never gets its Stop; Claude's own idle, stamped after the last activity, says it is over.
-          if (turnIsStale(pane.meta, status)) {
-            patch.claudeActive = false;
-            patch.claudeTurnOpen = false;
-            // A prompt's turn that ended without a Stop — Esc, a denied prompt, or a Stop that never reached us — is not a rest.
-            if (pane.meta.claudeTurnOpen === true) patch.claudeInterrupted = { at: Date.now(), reason: screenInterruptReason(lines()) } satisfies Interrupted;
-          }
+          // pane.meta was read before the ps and the status file; a Stop may have landed since. The turn is
+          // judged only once the idle is STOP_HOOK_GRACE_MS old, on the meta as it is then.
+          const graceOver = typeof status?.updatedAt === 'number' && Date.now() - status.updatedAt > STOP_HOOK_GRACE_MS;
+          const meta = graceOver ? await manager.getMeta(pane.id).catch(() => pane.meta) : pane.meta;
+          // A turn cut short never gets its Stop; Claude's own idle, stamped after the last activity, says it is over.
+          const stale = staleTurnOutcome(meta, status, manager.get(pane.id)?.lastEscAt ?? 0, Date.now(), lines);
+          if (stale) Object.assign(patch, stale.patch);
           // A prompt the hooks saw open closes without a hook when it is denied or cancelled, and only at
           // PostToolUse when approved. Claude's status moving on closes it; without a status file, the screen.
-          const hookWaiting = hookWaitingOf(pane.meta);
+          const hookWaiting = hookWaitingOf(meta);
           if (hookWaiting && (status ? hookWaitingIsStale(hookWaiting, status) : Date.now() - hookWaiting.at > WAITING_SWEEP_MS && !screenShowsPrompt(lines()))) patch.claudeWaiting = null;
           if (Object.keys(patch).length > 0) {
-            const interrupted = patch.claudeInterrupted as Interrupted | undefined;
+            const interrupted = stale?.ended ?? null;
             manager.setMeta(pane.id, patch)
               .then((merged) => {
                 log(`AGENT SWEEP session=${pane.id}${patch.claudeTurnOpen === false ? ' stale-turn cleared' : ''}${interrupted ? ` interrupted=${interrupted.reason}` : ''}${patch.claudeWaiting === null ? ' prompt closed' : ''}`);
-                if (interrupted) settleInterrupted(pane.id, pane.meta, merged as Record<string, unknown>, interrupted);
+                if (interrupted) settleInterrupted(pane.id, meta, merged as Record<string, unknown>, interrupted);
                 broadcastAgentState(pane.id, merged as Record<string, unknown>);
               })
               .catch(() => {});
@@ -1886,7 +1886,7 @@ export async function createServer(port: number): Promise<TtymServer> {
           let what: string | null = null;
           if (status?.status === 'waiting') what = status.waitingFor ?? 'input';
           // No status file to ask (the agent process was not found): a dialog drawn on screen during a turn.
-          else if (!status && !hookWaiting && pane.meta.claudeTurnOpen === true && screenShowsPrompt(lines())) what = 'permission prompt';
+          else if (!status && !hookWaiting && meta.claudeTurnOpen === true && screenShowsPrompt(lines())) what = 'permission prompt';
           if (!what) continue;
           seen.add(pane.id);
           if (agentWaiting.get(pane.id) !== what) {

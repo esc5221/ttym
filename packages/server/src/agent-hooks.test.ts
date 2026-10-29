@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hookPatch, hookWaitingIsStale, parseHookEvent, screenInterruptReason, screenShowsPrompt, stopPatch } from './agent-hooks.js';
+import { hookPatch, hookWaitingIsStale, parseHookEvent, screenInterruptReason, screenShowsPrompt, staleTurnOutcome, STOP_HOOK_GRACE_MS, stopPatch } from './agent-hooks.js';
 
 const NOW = 1_800_000_000_000;
 const open = { claudeActive: true, claudeTurnOpen: true, agentActiveAt: NOW - 60_000 };
@@ -87,5 +87,43 @@ describe('parseHookEvent', () => {
     expect(parseHookEvent({ event: 'PermissionRequest', agentId: null, tool: 'Bash', notificationType: null, message: '' })).toEqual({ event: 'PermissionRequest', tool: 'Bash' });
     expect(parseHookEvent({})).toBeNull();
     expect(parseHookEvent(null)).toBeNull();
+  });
+});
+
+describe('staleTurnOutcome', () => {
+  const open = { claudeActive: true, claudeTurnOpen: true, claudeTurnAt: 10_000, agentActiveAt: 10_000 };
+  const idle = { status: 'idle' as const, updatedAt: 20_000 };
+  const screen = () => ['❯ '];
+
+  it('waits out the Stop hook: idle a moment ago is not a cut-short turn yet', () => {
+    expect(staleTurnOutcome(open, idle, 0, 20_000 + STOP_HOOK_GRACE_MS, screen)).toBeNull();
+  });
+
+  it('a Stop that landed during the grace leaves nothing to do (pie lead, 10-29)', () => {
+    const closed = { ...open, claudeActive: false, claudeTurnOpen: false, claudeInterrupted: null };
+    expect(staleTurnOutcome(closed, idle, 0, 30_000, screen)).toBeNull();
+  });
+
+  it('no Stop and no Esc of ours: interrupted, from the screen', () => {
+    const r = staleTurnOutcome(open, idle, 0, 30_000, screen)!;
+    expect(r.patch).toEqual({ claudeActive: false, claudeTurnOpen: false, claudeInterrupted: { at: 30_000, reason: 'interrupted' } });
+    expect(r.ended).toEqual({ at: 30_000, reason: 'interrupted' });
+    const err = staleTurnOutcome(open, idle, 0, 30_000, () => ['  ⎿  API Error: 500'])!;
+    expect(err.ended?.reason).toBe('error');
+  });
+
+  it('an Esc delivered during the turn: someone stopped it — the pane rests, only the await hears', () => {
+    const r = staleTurnOutcome(open, idle, 15_000, 30_000, screen)!;
+    expect(r.patch).toEqual({ claudeActive: false, claudeTurnOpen: false });
+    expect(r.ended).toEqual({ at: 30_000, reason: 'cancelled' });
+  });
+
+  it('an Esc from before the turn does not count', () => {
+    expect(staleTurnOutcome(open, idle, 9_000, 30_000, screen)!.ended?.reason).toBe('interrupted');
+  });
+
+  it('claudeActive without a turn closes quietly', () => {
+    const r = staleTurnOutcome({ claudeActive: true, agentActiveAt: 10_000 }, idle, 0, 30_000, screen)!;
+    expect(r).toEqual({ patch: { claudeActive: false, claudeTurnOpen: false }, ended: null });
   });
 });
