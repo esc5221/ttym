@@ -116,8 +116,9 @@ export async function typeAndSubmit(target: SubmitTarget, text: string, opts: Su
       await sleep(POLL_MS);
       if (target.isDead) return true;
       const now = composer();
-      // Back to what it held before we typed (usually empty), or gone (a dialog opened): the CR took.
-      if (now === null || now === before) return true;
+      // Empty, back to what it held before we typed, or gone (a dialog opened): the CR took. A draft
+      // someone left there goes out with our text, so the composer empties rather than returning to it.
+      if (now === null || now === '' || now === before) return true;
     }
     return false;
   };
