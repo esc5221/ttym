@@ -10,6 +10,8 @@
 #   1. holder sets TTYM_SESSION_ID (+ TTYM_PORT) in the session env
 #   2. Claude Code fires SessionStart, piping { session_id, source, ... }
 #   3. this script records them as server-owned runtime meta
+#   4. whatever this script prints on stdout, Claude Code adds to the session's context: the
+#      reader's answer markup, unless config `reader-markup` is off (the server answers empty)
 
 [ -z "$TTYM_SESSION_ID" ] && exit 0
 
@@ -30,5 +32,8 @@ CLAUDE_SOURCE=$(printf '%s' "$HOOK_PAYLOAD" | jq -r '.source // "startup"' 2>/de
 curl -s -m 5 -X POST "$BASE/api/internal/sessions/$TTYM_SESSION_ID/agent" \
   -H 'content-type: application/json' \
   -d "{\"claudeSessionId\":\"$CLAUDE_SESSION\",\"claudeActive\":true,\"claudeSource\":\"$CLAUDE_SOURCE\"}" >/dev/null
+
+# An older server has no such route (404 body is not the guide), so only a 200 is printed.
+curl -s -m 3 -f "$BASE/api/internal/reader-markup" 2>/dev/null
 
 exit 0

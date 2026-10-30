@@ -2,6 +2,7 @@ import { highlightHtml, languageForTag } from '../viewer/highlight.js';
 import { loadMarked } from './marked.js';
 import { markMermaidBlocks } from './mermaid.js';
 import { linkifyTextNodes } from './ref-links.js';
+import './kit.css';
 
 /**
  * The agent's words, as HTML. Same pipeline as the viewer's markdown tab

@@ -287,6 +287,17 @@ describe('createServer', () => {
     expect(readBack.values.theme).toBe('light');
   });
 
+  it('serves the reader markup guide to the SessionStart hook, empty once config turns it off', async () => {
+    const port = (server!.httpServer.address() as AddressInfo).port;
+    const get = async () => (await fetch(`http://127.0.0.1:${port}/api/internal/reader-markup`)).text();
+    const patch = (body: unknown) => fetch(`http://127.0.0.1:${port}/api/config`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    expect(await get()).toContain(':::summary');
+    await patch({ 'reader-markup': 'off' });
+    expect(await get()).toBe('');
+    await patch({ 'reader-markup': null });
+    expect(await get()).toContain(':::summary');
+  });
+
   it('pushes agent state to WS clients when a hook writes it', async () => {
     const port = (server!.httpServer.address() as AddressInfo).port;
     const ws1 = await openClient(port);

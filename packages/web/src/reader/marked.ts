@@ -9,6 +9,9 @@
  * - Strikethrough only with two tildes. GFM takes one too, so "3~6초 … 5~8초" lost its ranges
  *   to a strike ("36초 … 58초").
  */
+import { kitExtension } from './kit.js';
+import './kit.css';
+
 type Marked = typeof import('marked')['marked'];
 
 let loading: Promise<Marked> | null = null;
@@ -16,6 +19,7 @@ let loading: Promise<Marked> | null = null;
 export function loadMarked(): Promise<Marked> {
   return (loading ??= Promise.all([import('marked'), import('marked-cjk-friendly')]).then(([{ marked }, { default: cjkFriendly }]) => {
     marked.use(cjkFriendly());
+    marked.use(kitExtension);
     marked.use({
       tokenizer: {
         del(src) {
