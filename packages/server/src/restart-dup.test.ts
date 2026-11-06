@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SessionManager } from './session-manager.js';
 
 // 세션이 생기자마자 출력을 쏟으면(생성 handshake 중 출력), 이전 서버는 덤프와 실시간 출력에 같은 바이트를
 // 두 번 적용하고 체크포인트 offset을 어긋나게 저장했다 → 재시작 뒤 같은 출력이 두 번 그려졌다
 // (2026-11-06 리허설: 51개 중 2개). 같은 runtime dir에 서버를 다시 붙여 화면이 그대로인지 본다.
 const DIR = resolve('/tmp', `ttym-restart-dup-${process.pid}`);
-const OLD_HOLDER = '/Users/lullu/study/ttym/dist/ttym-holder'; // prod에 떠 있는 holder와 같은 바이너리(있을 때만)
+// 저장소 dist의 holder — 배포된(지금 떠 있는) 것과 같은 바이너리일 때 의미가 있다. 없으면 건너뛴다.
+const OLD_HOLDER = resolve(dirname(fileURLToPath(import.meta.url)), '../../../dist/ttym-holder');
 const managers: SessionManager[] = [];
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
