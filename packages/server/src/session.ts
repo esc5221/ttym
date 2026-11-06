@@ -25,6 +25,10 @@ export interface TerminalMarker {
 }
 
 export interface SessionInfo {
+  /** headless 터미널을 내린 상태(Session.goCold) */
+  cold?: boolean;
+  /** holder 종류: journal(커서 스트리밍) · legacy */
+  holder?: 'journal' | 'legacy';
   id: number;
   pid: number;
   cmd: string[];
@@ -1225,6 +1229,8 @@ export class Session {
       lastSeq: this.lastSeq,
       createdAt: this.createdAt,
       detachedAt: this._detachedAt,
+      cold: this.cold !== null,
+      holder: this.holderCaps.includes('journal') ? 'journal' : 'legacy',
     };
   }
 
