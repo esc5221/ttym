@@ -24,6 +24,9 @@ export interface SessionSnapshot {
   integrity?: 'healthy' | 'degraded';
   /** Per-row soft-wrap bits, base64. Stored so a resize can reflow later. */
   wrapFlags?: string;
+  /** Cursor on the live screen (0-based). serialize() can leave it one cell short after trailing
+   *  blanks; the restore puts it back here (2026-11-06: 2 of 232 prod screens). */
+  cursor?: { x: number; y: number };
 }
 
 export interface WorkspaceState {
@@ -38,6 +41,15 @@ const PERSIST_IDLE_MS = 2000;   // flush after 2s idle
 const PERSIST_MAX_MS = 30000;   // force flush every 30s
 const PERSIST_CONCURRENCY = 2;   // 한 번에 저장하는 세션 수 (각 저장이 lsof와 3000줄 직렬화를 한다)
 const RECOVER_CONCURRENCY = 24;  // 재시작 때 동시에 다시 붙는 holder 수
+/** 이만큼 입력·출력이 없고 뷰어가 없으면 headless 터미널을 내린다(Session.goCold). TTYM_COLD_AFTER_MS=0이면 끔. */
+const COLD_AFTER_MS = (() => {
+  const raw = process.env.TTYM_COLD_AFTER_MS;
+  if (raw === undefined || raw === '') return 5 * 60_000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 5 * 60_000;
+})();
+const COLD_SWEEP_MS = Math.min(30_000, Math.max(1_000, COLD_AFTER_MS / 4 || 30_000));
+const COLD_PER_SWEEP = 8; // 한 번에 내리는 수 — 각각 전체 직렬화(실측 p95 12ms)를 한다
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
 /** 세션 번호는 4자리를 넘지 않는다. 사람이 "%1297"처럼 부르고 적는 이름이라 짧아야 한다.
@@ -74,6 +86,10 @@ export class SessionManager {
     this.runtimeDir = runtimeDir ?? getRuntimeDir();
     this.reapTimer = setInterval(() => this.reap(), REAP_INTERVAL);
     this.persistTimer = setInterval(() => this.checkPersist(), 1000);
+    if (COLD_AFTER_MS > 0) {
+      this.coldTimer = setInterval(() => this.coolIdle(), COLD_SWEEP_MS);
+      this.coldTimer.unref?.();
+    }
   }
 
   get ready(): boolean { return this._ready; }
@@ -343,6 +359,19 @@ export class SessionManager {
 
   // ───── Periodic Snapshot Persistence ─────
 
+  private coldTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** 쉬는 세션의 터미널을 내린다. 반환: 이번에 내린 수 */
+  coolIdle(now = Date.now(), idleMs = COLD_AFTER_MS): number {
+    let n = 0;
+    for (const session of this.sessions.values()) {
+      if (n >= COLD_PER_SWEEP) break;
+      if (!session.canGoCold(now, idleMs)) continue;
+      try { if (session.goCold()) n++; } catch (e) { console.error(`[mgr] cold session=${session.id} failed:`, e); }
+    }
+    return n;
+  }
+
   /** 저장 중인 세션 — 같은 세션의 저장을 겹쳐 시작하지 않는다(같은 .tmp를 두 번 쓰던 경쟁). */
   private persisting = new Set<number>();
   /** 세션별 마지막 저장 시각. 전역 하나였을 때는 30초가 지나면 모든 dirty 세션을 매초 다시 저장했다. */
@@ -395,6 +424,7 @@ export class SessionManager {
       generation: session.generation,
       appliedThroughOffset: session.appliedOffset,
       wrapFlags: session.wrapFlags(),
+      cursor: session.cursorPos() ?? undefined,
       id,
       cmd: session.info().cmd,
       cols: session.cols,
@@ -550,6 +580,10 @@ export class SessionManager {
       clearInterval(this.persistTimer);
       this.persistTimer = null;
     }
+    if (this.coldTimer) {
+      clearInterval(this.coldTimer);
+      this.coldTimer = null;
+    }
 
     // Persist before shutdown
     await this.persistAll();
@@ -568,6 +602,10 @@ export class SessionManager {
       clearInterval(this.persistTimer);
       this.persistTimer = null;
     }
+    if (this.coldTimer) {
+      clearInterval(this.coldTimer);
+      this.coldTimer = null;
+    }
   }
 
   // ───── Session Meta ─────
@@ -576,13 +614,13 @@ export class SessionManager {
    * Load a session's checkpoint if one is on disk. Returns undefined when there
    * is none or it predates offset tracking — recovery then replays the ring.
    */
-  private async readCheckpoint(id: number): Promise<{ generation: string; offset: number; screen: string } | undefined> {
+  private async readCheckpoint(id: number): Promise<{ generation: string; offset: number; screen: string; cursor?: { x: number; y: number } } | undefined> {
     try {
       const raw = await readFile(resolve(this.runtimeDir, `snapshot-${id}.json`), 'utf8');
       const snap = JSON.parse(raw) as SessionSnapshot;
       if (!snap.screen || typeof snap.appliedThroughOffset !== 'number') return undefined;
       if (snap.integrity === 'degraded') return undefined;
-      return { generation: snap.generation ?? '', offset: snap.appliedThroughOffset, screen: snap.screen };
+      return { generation: snap.generation ?? '', offset: snap.appliedThroughOffset, screen: snap.screen, cursor: snap.cursor };
     } catch {
       return undefined;
     }

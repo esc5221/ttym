@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createConnection, Socket } from 'node:net';
 import { existsSync, openSync } from 'node:fs';
+import { deflateSync, inflateSync } from 'node:zlib';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire as nodeCreateRequire } from 'node:module';
@@ -93,6 +94,11 @@ const SERVER_INSTANCE_ID = `srv-${process.pid}-${Date.now().toString(36)}`;
 
 /** Raised when another server already holds the PTY and takeover was not asked for. */
 /** holder가 handshake에 답하지 않았다. holder는 살아 있을 수 있다 — 세션을 버릴 근거가 아니다. */
+/** CUP to the stored cursor. serialize() can leave the cursor one cell short after trailing blanks. */
+function cursorTo(pos: { x: number; y: number } | null | undefined): string {
+  return pos ? `\x1b[${pos.y + 1};${pos.x + 1}H` : '';
+}
+
 export class HolderHandshakeTimeout extends Error {
   constructor(readonly sessionId: number) { super('holder handshake timeout'); }
 }
@@ -312,8 +318,8 @@ export class Session {
   private closed = false;
 
   // Layer 2: Headless terminal state (server-side mirror)
-  private term: InstanceType<typeof Terminal>;
-  private serializer: SerializeAddon;
+  private term!: InstanceType<typeof Terminal>;
+  private serializer!: SerializeAddon;
 
   // Layer 3: Ring buffer (for viewer delta replay)
   readonly ring: OutputRing;
@@ -390,16 +396,17 @@ export class Session {
    * Seed the terminal from a saved checkpoint before any delta is applied.
    * Returns false when the checkpoint belongs to a different holder incarnation.
    */
-  seedCheckpoint(generation: string, offset: number, screen: string): boolean {
+  seedCheckpoint(generation: string, offset: number, screen: string, cursor?: { x: number; y: number }): boolean {
     if (generation && this._generation && generation !== this._generation) return false;
     this.resetSyncEmissionState('seed checkpoint');
-    this.term.write(screen);
+    this.term.write(screen + cursorTo(cursor));
     this._appliedOffset = offset;
     return true;
   }
 
   /** Per-row soft-wrap flags, so a resize can reflow what was restored. */
   wrapFlags(): string {
+    if (this.cold) return this.cold.wrap;
     const buf = this.term.buffer.active;
     const bits: number[] = [];
     for (let i = 0; i < buf.length; i++) {
@@ -425,10 +432,7 @@ export class Session {
     this._cols = cols;
     this._rows = rows;
 
-    // Layer 2
-    this.term = new Terminal({ cols, rows, scrollback: 3000, allowProposedApi: true });
-    this.serializer = new SerializeAddon();
-    this.term.loadAddon(this.serializer as any);
+    // Layer 2 (created below, after the command index it feeds)
 
     // Layer 3. Sized so a tab hidden through a normal burst of agent output
     // still resyncs by delta replay instead of a snapshot; the sync filter can
@@ -446,8 +450,98 @@ export class Session {
     // 곧 이 청크의 시작 좌표다. true 반환은 headless 소비만 뜻한다 —
     // 클라이언트 전달은 ring 원본 바이트로 이미 이뤄진다.
     this.commands = new CommandIndex(() => this.ring.nextSeq);
+    this.createTerm(cols, rows);
+  }
+
+  private createTerm(cols: number, rows: number): void {
+    this.term = new Terminal({ cols, rows, scrollback: 3000, allowProposedApi: true });
+    this.serializer = new SerializeAddon();
+    this.term.loadAddon(this.serializer as any);
     this.term.parser.registerOscHandler(133, (data) => { this.commands.osc133(data); return true; });
     this.term.parser.registerOscHandler(633, (data) => { this.commands.osc633(data); return true; });
+  }
+
+  // ── Cold: no live terminal for a session nobody is using ─────────────────
+  //
+  // A headless terminal costs ~3MB per session (measured on 100 prod checkpoints) and, when the
+  // machine is under memory pressure, the OS compresses it; any later touch (a sweep, a GC) then
+  // stalls the whole event loop while pages come back. A session with no viewer, no output and no
+  // input for COLD_AFTER_MS keeps only what callers read synchronously — the full and viewer
+  // snapshots (deflated, ~20KB), the plain screen, the styled tail — and drops the terminal.
+  // Output arriving for it is held in order and replayed onto a terminal rebuilt from the snapshot;
+  // with the holder journal (S1) nothing is lost while it is cold. Same path a server restart uses
+  // (checkpoint + bytes after it), now without a restart.
+
+  private cold: {
+    full: Buffer; viewer: Buffer; text: string; tail: ScreenRun[][];
+    cursor: { x: number; y: number } | null; wrap: string;
+    cols: number; rows: number; backlog: Buffer[]; backlogBytes: number;
+    pos: { x: number; y: number } | null;
+  } | null = null;
+  private warming: Promise<void> | null = null;
+  private pendingMarkers: Array<{ real: TerminalMarker | null }> = [];
+  private lastMarkAt = 0;
+
+  get isCold(): boolean { return this.cold !== null; }
+
+  /** Nothing about the session's state forbids dropping its terminal (time aside). */
+  private coldAllowed(): boolean {
+    if (this.cold || this.closed || this.warming) return false;
+    // 뷰어가 있으면 살아 있는 화면이 필요하다. 잠든 pane(frozen)은 뷰어에게도 얼린 화면만 준다 — 내려도 된다.
+    if (this.viewers.size > 0 && !this.frozen) return false;
+    if (this.parsePendingBytes > 0 || this.syncFilter.syncOpen) return false;
+    if (this.term.buffer.active.type === 'alternate') return false; // vim·less: modes and regions a snapshot does not carry
+    return true;
+  }
+
+  /** True when this session may drop its terminal now (see SessionManager.coolIdle). */
+  canGoCold(now: number, idleMs: number): boolean {
+    if (!this.coldAllowed()) return false;
+    if (now - this.lastOutputAt < idleMs || now - this.lastInputAt < idleMs) return false;
+    if (now - this.lastMarkAt < 30 * 60_000) return false;       // an await may still read its screen range
+    return true;
+  }
+
+  /** Drop the terminal, keeping deflated snapshots and the cached screen. Returns false if not allowed. */
+  goCold(): boolean {
+    if (!this.coldAllowed()) return false;
+    const full = this.serializer.serialize();
+    const viewer = this.serializer.serialize({ scrollback: 1000 });
+    this.cold = {
+      full: deflateSync(full), viewer: deflateSync(viewer),
+      text: this.screenText(), tail: screenTail(this.term, this._rows), cursor: tailCursor(this.term, this._rows),
+      wrap: this.wrapFlags(), cols: this._cols, rows: this._rows, backlog: [], backlogBytes: 0,
+      pos: this.cursorPos(),
+    };
+    this.term.dispose();
+    this.term = null as unknown as InstanceType<typeof Terminal>;
+    this.serializer = null as unknown as SerializeAddon;
+    this.debug(`cold: snapshot ${full.length}B → ${this.cold.full.length}B deflated`);
+    return true;
+  }
+
+  /** Rebuild the terminal from the cold snapshot, then replay output that arrived meanwhile. */
+  ensureWarm(): Promise<void> {
+    if (!this.cold) return Promise.resolve();
+    if (this.warming) return this.warming;
+    const c = this.cold;
+    this.warming = new Promise<void>((done) => {
+      this.createTerm(c.cols, c.rows);
+      this.resetSyncEmissionState('warm');
+      this.term.write(inflateSync(c.full).toString() + cursorTo(c.pos), () => {
+        if (this.closed) { this.warming = null; done(); return; }
+        if (this._cols !== c.cols || this._rows !== c.rows) { try { this.term.resize(this._cols, this._rows); } catch {} }
+        for (const m of this.pendingMarkers) m.real = this.term.registerMarker(0) ?? null;
+        this.pendingMarkers = [];
+        this.cold = null;
+        this.warming = null;
+        const backlog = c.backlog;
+        this.debug(`warm: replaying ${c.backlogBytes}B held while cold`);
+        for (const chunk of backlog) this.queueParse(chunk);
+        done();
+      });
+    });
+    return this.warming;
   }
 
   /** Create a new session: spawn holder, connect */
@@ -505,7 +599,7 @@ export class Session {
     manifest: HolderManifest,
     runtimeDir: string,
     takeover = false,
-    checkpoint?: { generation: string; offset: number; screen: string },
+    checkpoint?: { generation: string; offset: number; screen: string; cursor?: { x: number; y: number } },
   ): Promise<Session> {
     const sock = await connectSocket(manifest.socket);
 
@@ -526,7 +620,7 @@ export class Session {
     sock: Socket,
     _recovery = false,
     takeover = false,
-    checkpoint?: { generation: string; offset: number; screen: string },
+    checkpoint?: { generation: string; offset: number; screen: string; cursor?: { x: number; y: number } },
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       this.sock = sock;
@@ -552,7 +646,7 @@ export class Session {
           && checkpoint.offset > 0;
 
         if (usable && this.supportsReplay) {
-          if (this.seedCheckpoint(checkpoint!.generation, checkpoint!.offset, checkpoint!.screen)) {
+          if (this.seedCheckpoint(checkpoint!.generation, checkpoint!.offset, checkpoint!.screen, checkpoint!.cursor)) {
             pendingReplay = true;
             const payload = Buffer.allocUnsafe(8);
             payload.writeBigUInt64LE(BigInt(checkpoint!.offset), 0);
@@ -773,7 +867,15 @@ export class Session {
         // over a screen that wasn't. Only the viewer callbacks are gated,
         // and the gate is read at parse time so a viewer that attached while
         // this chunk sat in xterm's write queue still receives it.
-        this.queueParse(data);
+        if (this.cold) {
+          // 터미널이 내려가 있다: 순서대로 모아 두고 다시 세운 뒤 그린다.
+          this.cold.backlog.push(data);
+          this.cold.backlogBytes += data.length;
+          this.lastOutputAt = Date.now();
+          void this.ensureWarm();
+        } else {
+          this.queueParse(data);
+        }
         this._dirty = true;
         this._rev++;
         this._lastDirtyAt = Date.now();
@@ -809,7 +911,8 @@ export class Session {
         this._integrity = 'degraded';
         this._receivedOffset = to;
         // 대기열에 있는 바이트가 다 그려진 다음에 offset을 건너뛴다.
-        this.term.write('', () => { this._appliedOffset = to; });
+        if (this.cold) { void this.ensureWarm().then(() => this.term.write('', () => { this._appliedOffset = to; })); }
+        else this.term.write('', () => { this._appliedOffset = to; });
         this._dirty = true;
         this._rev++;
         break;
@@ -959,6 +1062,7 @@ export class Session {
   }
 
   snapshot(): string {
+    if (this.cold) return inflateSync(this.cold.full).toString();
     return this.serializer.serialize();
   }
 
@@ -970,6 +1074,7 @@ export class Session {
    * the full serialize; a viewer joining live gets the tmux-attach deal.
    */
   viewerSnapshot(): string {
+    if (this.cold) return inflateSync(this.cold.viewer).toString();
     return this.serializer.serialize({ scrollback: 1000 });
   }
 
@@ -984,6 +1089,17 @@ export class Session {
    * range is gone" apart from "the range is empty".
    */
   markCursor(): TerminalMarker | null {
+    this.lastMarkAt = Date.now();
+    if (this.cold) {
+      // 다시 세운 직후(그 뒤 출력보다 앞)에 진짜 마커를 찍는다. 그때까지 line은 -1(범위 없음).
+      const slot: { real: TerminalMarker | null } = { real: null };
+      this.pendingMarkers.push(slot);
+      void this.ensureWarm();
+      return {
+        get line() { return slot.real ? slot.real.line : -1; },
+        dispose() { slot.real?.dispose(); },
+      };
+    }
     return this.term.registerMarker(0) ?? null;
   }
 
@@ -994,7 +1110,7 @@ export class Session {
    * could return at that point would be someone else's output.
    */
   transcriptSince(marker: TerminalMarker): string | null {
-    if (marker.line < 0) return null;
+    if (this.cold || marker.line < 0) return null;
     const buf = this.term.buffer.active;
     const end = buf.baseY + buf.cursorY;
     const rows: string[] = [];
@@ -1009,15 +1125,31 @@ export class Session {
   /** 보이는 화면의 아래 `max`줄(내용 있는 마지막 줄 기준), 색과 함께 — 호버 미리보기. */
   /** The cursor within screenTail(max)'s rows, or null. */
   tailCursor(max: number): { x: number; y: number } | null {
+    if (this.cold) {
+      const c = this.cold;
+      if (!c.cursor) return null;
+      const shown = Math.min(Math.max(0, max), c.tail.length);
+      const y = c.cursor.y - (c.tail.length - shown);
+      return y >= 0 ? { x: c.cursor.x, y } : null;
+    }
     return tailCursor(this.term, max);
   }
 
   screenTail(max: number): ScreenRun[][] {
+    if (this.cold) return max >= this.cold.tail.length ? this.cold.tail : this.cold.tail.slice(this.cold.tail.length - Math.max(0, max));
     return screenTail(this.term, max);
+  }
+
+  /** Cursor on the live screen, 0-based — stored with snapshots (see cursorTo). */
+  cursorPos(): { x: number; y: number } | null {
+    if (this.cold) return this.cold.pos;
+    const buf = this.term.buffer.active;
+    return { x: buf.cursorX, y: buf.cursorY };
   }
 
   /** The visible screen as plain rows — what `ttym screen` shows, without escape codes. */
   screenText(): string {
+    if (this.cold) return this.cold.text;
     const buf = this.term.buffer.active;
     const rows: string[] = [];
     for (let i = 0; i < this.term.rows; i++) rows.push(buf.getLine(buf.viewportY + i)?.translateToString(true) ?? '');
@@ -1081,7 +1213,9 @@ export class Session {
     payload.writeUInt16LE(cols, 0);
     payload.writeUInt16LE(rows, 2);
     writeFrame(this.sock, H_CMD_RESIZE, payload);
-    try { this.term.resize(cols, rows); } catch {}
+    // 내려간 터미널은 다시 세울 때 이 크기로 맞춘다(ensureWarm). 화면이 다시 흐를 것이므로 깨운다.
+    if (this.cold) void this.ensureWarm();
+    else { try { this.term.resize(cols, rows); } catch {} }
     for (const listener of this.geometryListeners) {
       try { listener(cols, rows); } catch {}
     }
@@ -1105,7 +1239,9 @@ export class Session {
       this.sock.destroy();
       this.sock = null;
     }
-    this.term.dispose();
+    // 내려간 상태면 term이 없다. 다시 세우는 중이면 새로 만든 term이 있다 — 있으면 해제한다.
+    try { this.term?.dispose(); } catch {}
+    this.cold = null;
     this.ring.clear();
   }
 
