@@ -169,10 +169,16 @@ export async function serveFile(req: IncomingMessage, res: ServerResponse, fileP
     if (partial) res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}` });
     else res.writeHead(200, headers);
     if (req.method === 'HEAD' || length === 0) { res.end(); return; }
+    // 브라우저가 중간에 끊으면(새로고침·탭 닫기) pipe가 풀리고 스트림은 멈춘 채 end도 error도 내지 않는다.
+    // 그러면 finally의 close가 영영 안 돌고, GC가 FileHandle을 거둘 때 Node 26은 ERR_INVALID_STATE로
+    // 프로세스를 죽인다(2026-11-05 11:12 prod 재시작의 원인). 응답이 닫히는 것도 끝으로 본다.
     await new Promise<void>((done) => {
       const stream = createReadStream(filePath, { fd: handle!.fd, autoClose: false, start, end });
-      stream.on('error', () => { res.destroy(); done(); });
-      stream.on('end', () => done());
+      let settled = false;
+      const finish = () => { if (settled) return; settled = true; stream.destroy(); done(); };
+      stream.on('error', () => { res.destroy(); finish(); });
+      stream.on('end', finish);
+      res.on('close', finish);
       stream.pipe(res);
     });
   } finally {

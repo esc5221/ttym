@@ -1070,9 +1070,12 @@ export class Session {
       );
     }
 
-    for (const chunk of result.emitted) {
-      this.emitViewerChunk(chunk, broadcast);
-    }
+    // 필터는 escape 경계마다 조각을 낸다(실측: 6.1MB → 72만 조각, 중앙값 4바이트). 조각마다 ring에
+    // Chunk·Buffer 객체가 생겨 4MB ring 하나가 JS 힙 78MB가 됐다(2026-11-06 프로파일). 한 번의 PTY 읽기에서
+    // 나온 것은 한 조각으로 넣는다 — 명령 경계 seq는 term.write 중에 nextSeq로 찍히므로 정밀도는 그대로다.
+    const emitted = result.emitted;
+    if (emitted.length === 1) this.emitViewerChunk(emitted[0]!, broadcast);
+    else if (emitted.length > 1) this.emitViewerChunk(Buffer.concat(emitted), broadcast);
   }
 
   private emitViewerChunk(data: Buffer, broadcast: boolean): void {
