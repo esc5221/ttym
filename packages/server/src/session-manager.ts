@@ -87,7 +87,7 @@ export class SessionManager {
     this.reapTimer = setInterval(() => this.reap(), REAP_INTERVAL);
     this.persistTimer = setInterval(() => this.checkPersist(), 1000);
     if (COLD_AFTER_MS > 0) {
-      this.coldTimer = setInterval(() => this.coolIdle(), COLD_SWEEP_MS);
+      this.coldTimer = setInterval(() => { void this.coolIdle(); }, COLD_SWEEP_MS);
       this.coldTimer.unref?.();
     }
   }
@@ -361,13 +361,21 @@ export class SessionManager {
 
   private coldTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** 쉬는 세션의 터미널을 내린다. 반환: 이번에 내린 수 */
-  coolIdle(now = Date.now(), idleMs = COLD_AFTER_MS): number {
+  private cooling = false;
+
+  /** 쉬는 세션의 터미널을 내린다(하나씩, 각자 왕복 검증). 반환: 이번에 내린 수 */
+  async coolIdle(now = Date.now(), idleMs = COLD_AFTER_MS): Promise<number> {
+    if (this.cooling) return 0;
+    this.cooling = true;
     let n = 0;
-    for (const session of this.sessions.values()) {
-      if (n >= COLD_PER_SWEEP) break;
-      if (!session.canGoCold(now, idleMs)) continue;
-      try { if (session.goCold()) n++; } catch (e) { console.error(`[mgr] cold session=${session.id} failed:`, e); }
+    try {
+      for (const session of [...this.sessions.values()]) {
+        if (n >= COLD_PER_SWEEP) break;
+        if (!session.canGoCold(now, idleMs)) continue;
+        try { if (await session.goCold()) n++; } catch (e) { console.error(`[mgr] cold session=${session.id} failed:`, e); }
+      }
+    } finally {
+      this.cooling = false;
     }
     return n;
   }

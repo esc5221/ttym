@@ -115,6 +115,18 @@ function dropPreResponseOutput(buffered: Array<{ cmd: number; payload: Buffer }>
   return bytes;
 }
 
+/** Every buffer row as text plus its soft-wrap bit — what a cold round trip must reproduce. */
+function rowsOf(term: { buffer: { active: { length: number; getLine(i: number): { translateToString(trim?: boolean): string; isWrapped: boolean } | undefined } } }): string[] {
+  const b = term.buffer.active;
+  const out: string[] = [];
+  for (let i = 0; i < b.length; i++) {
+    const l = b.getLine(i);
+    out.push(l ? (l.isWrapped ? 'W' : '-') + l.translateToString(true) : '');
+  }
+  while (out.length && (out[out.length - 1] === '-' || out[out.length - 1] === '')) out.pop();
+  return out;
+}
+
 /** CUP to the stored cursor. serialize() can leave the cursor one cell short after trailing blanks. */
 function cursorTo(pos: { x: number; y: number } | null | undefined): string {
   return pos ? `\x1b[${pos.y + 1};${pos.x + 1}H` : '';
@@ -527,16 +539,49 @@ export class Session {
     return true;
   }
 
-  /** Drop the terminal, keeping deflated snapshots and the cached screen. Returns false if not allowed. */
-  goCold(): boolean {
-    if (!this.coldAllowed()) return false;
+  /** rev at which a cold attempt failed verification — do not retry until the screen changes. */
+  private coldRejectedRev = -1;
+
+  /**
+   * Drop the terminal, keeping deflated snapshots and the cached screen. Resolves false if not allowed
+   * or if the snapshot does not reproduce the screen.
+   *
+   * The snapshot is replayed into a scratch terminal first and compared row by row (text, soft-wrap,
+   * cursor). @xterm/addon-serialize drops the last cell of some wrapped rows (2026-11-06 rehearsal: a row
+   * of Korean text filled to the last column lost its last '-', the next row's first letter took its place).
+   * Restart recovery has always carried that; going cold must not add it — a session whose snapshot does
+   * not round-trip stays warm.
+   */
+  async goCold(): Promise<boolean> {
+    if (!this.coldAllowed() || this.coldRejectedRev === this._rev) return false;
+    const rev = this._rev;
+    const pos = this.cursorPos();
     const full = this.serializer.serialize();
+    const rows = rowsOf(this.term);
+    const ok = await new Promise<boolean>((done) => {
+      const scratch = new Terminal({ cols: this._cols, rows: this._rows, scrollback: 3000, allowProposedApi: true });
+      scratch.write(full + cursorTo(pos), () => {
+        const back = rowsOf(scratch);
+        const sb = scratch.buffer.active;
+        const same = back.length === rows.length && back.every((r, i) => r === rows[i])
+          && !!pos && sb.cursorX === pos.x && sb.cursorY === pos.y;
+        scratch.dispose();
+        done(same);
+      });
+    });
+    // 확인하는 동안 출력이 왔거나 상태가 바뀌었으면 이번엔 내리지 않는다.
+    if (this._rev !== rev || !this.coldAllowed()) return false;
+    if (!ok) {
+      this.coldRejectedRev = rev;
+      this.debug('cold refused: snapshot does not reproduce the screen');
+      return false;
+    }
     const viewer = this.serializer.serialize({ scrollback: 1000 });
     this.cold = {
       full: deflateSync(full), viewer: deflateSync(viewer),
       text: this.screenText(), tail: screenTail(this.term, this._rows), cursor: tailCursor(this.term, this._rows),
       wrap: this.wrapFlags(), cols: this._cols, rows: this._rows, backlog: [], backlogBytes: 0,
-      pos: this.cursorPos(),
+      pos,
     };
     this.term.dispose();
     this.term = null as unknown as InstanceType<typeof Terminal>;
@@ -544,6 +589,7 @@ export class Session {
     this.debug(`cold: snapshot ${full.length}B → ${this.cold.full.length}B deflated`);
     return true;
   }
+
 
   /** Rebuild the terminal from the cold snapshot, then replay output that arrived meanwhile. */
   ensureWarm(): Promise<void> {

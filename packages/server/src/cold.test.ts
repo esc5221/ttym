@@ -74,7 +74,7 @@ describe('cold sessions', () => {
     await sleep(800);
 
     const before = { text: session.screenText(), tail: session.screenTail(rows), cur: session.tailCursor(rows), snap: session.snapshot() };
-    expect(session.goCold()).toBe(true);
+    expect(await session.goCold()).toBe(true);
     expect(session.isCold).toBe(true);
     // 내린 상태에서도 같은 답
     expect(session.screenText()).toBe(before.text);
@@ -106,7 +106,7 @@ describe('cold sessions', () => {
     const session = await manager.create(['/bin/sh', '-c',
       `stty -onlcr; printf 'first\r\n'; while [ ! -f ${go} ]; do sleep 0.05; done; printf 'second\r\nthird\r\n'; sleep 30`], 80, 24);
     await sleep(600);
-    expect(session.goCold()).toBe(true);
+    expect(await session.goCold()).toBe(true);
     const marker = session.markCursor()!;
     await session.ensureWarm();
     writeFileSync(go, '1');
@@ -127,14 +127,33 @@ describe('cold sessions', () => {
     const s2 = await manager.create(['/bin/sh', '-c', "printf '\\033[?1049halt\\r\\n'; sleep 30"], 80, 24);
     await sleep(500);
     s1.addViewer('v', () => {});
-    expect(s1.goCold()).toBe(false);
-    expect(s2.goCold()).toBe(false);
+    expect(await s1.goCold()).toBe(false);
+    expect(await s2.goCold()).toBe(false);
     expect(s1.canGoCold(Date.now(), 60_000)).toBe(false);
     s1.removeViewer('v');
     expect(s1.canGoCold(Date.now() + 120_000, 60_000)).toBe(true);
-    expect(manager.coolIdle(Date.now() + 120_000, 60_000)).toBe(1); // s1만 (s2는 alternate)
+    expect(await manager.coolIdle(Date.now() + 120_000, 60_000)).toBe(1); // s1만 (s2는 alternate)
     expect(s1.isCold).toBe(true);
     expect(s2.isCold).toBe(false);
+  }, 30_000);
+
+  it('stays warm when the snapshot does not reproduce the screen', async () => {
+    mkdirSync(DIR, { recursive: true });
+    const manager = new SessionManager(resolve(DIR, 'run'));
+    managers.push(manager);
+    await manager.boot();
+    const session = await manager.create(['/bin/sh', '-c', "printf 'abcdef\\r\\n'; sleep 30"], 80, 24);
+    await sleep(500);
+    // 직렬화 애드온이 글자를 잃는 경우를 흉내 낸다
+    const ser = (session as unknown as { serializer: { serialize(o?: unknown): string } }).serializer;
+    const real = ser.serialize.bind(ser);
+    ser.serialize = (o?: unknown) => real(o).replace('abcdef', 'abcXef');
+    expect(await session.goCold()).toBe(false);
+    expect(session.isCold).toBe(false);
+    expect(session.screenText()).toContain('abcdef');
+    // 화면이 그대로면 다시 시도하지 않는다
+    ser.serialize = real;
+    expect(await session.goCold()).toBe(false);
   }, 30_000);
 
   it('resize while cold is applied when it warms', async () => {
@@ -145,7 +164,7 @@ describe('cold sessions', () => {
     await manager.boot();
     const session = await manager.create(['/bin/sh', '-c', "stty -onlcr; i=0; while [ $i -lt 50 ]; do i=$((i+1)); printf 'row %s %s\\r\\n' $i $(printf '%080d' 0); done; sleep 30"], 120, 20);
     await sleep(800);
-    expect(session.goCold()).toBe(true);
+    expect(await session.goCold()).toBe(true);
     session.resize(60, 20);
     await session.ensureWarm();
     expect(session.isCold).toBe(false);
