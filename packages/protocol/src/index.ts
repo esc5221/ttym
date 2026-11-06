@@ -205,3 +205,4 @@ export {
   parseConsumers, checkGrantRequest, capsOn, grantWorkspaces,
 } from './embed.js';
 export type { EmbedCap, SpawnProfile, EmbedConsumer, EmbedConsumers, EmbedAccess, EmbedGrantRequest, EmbedGrantResponse, EmbedTab } from './embed.js';
+export { READER_MARKUP_GUIDE, readerMarkupEnabled } from './reader-markup.js';

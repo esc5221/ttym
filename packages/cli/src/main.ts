@@ -49,6 +49,7 @@ function printHelp() {
   console.log('  await <addr> -- "prompt"     Ask an agent (or run a shell command) and wait');
   console.log('  turn <interaction> [--full]  What an agent did in that turn (the await footer names it)');
   console.log('  guide agents                 How agents in panes talk to each other');
+  console.log('  guide markup                 The answer markup the reader draws (what the SessionStart hook hands Claude)');
   console.log('  commands <addr>              Command history with exit codes (shell integration)');
   console.log('  output <addr> [--cmd N]      One command output, precisely sliced');
   console.log('  open <path|url>... [--to <addr>] [--full|--pane] [--root <dir>]  Open inside the pane (md·csv·html·images·dirs·urls)');

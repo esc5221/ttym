@@ -240,6 +240,7 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
     <>
       <SleepAfterField />
       <ReaderLiveField />
+      <ReaderMarkupField onPatchConfig={onPatchConfig} />
       <ResumeFlagsField
         agent="claude"
         configKey="agent-claude-resume-flags"
@@ -331,6 +332,27 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
         hint="in reader mode, show the message Claude Code is writing as it is drawn in the terminal, instead of when it ends. read from the terminal in this browser; nothing is sent. only for the pane you are looking at."
       >
         <Segmented options={['on', 'off'] as const} value={on ? 'on' : 'off'} onChange={(v) => setReaderLive(v === 'on')} />
+      </Field>
+    );
+  }
+
+  /** Config `reader-markup`: on unless written "off". Read at a Claude session's start, so it reaches sessions started after the change. */
+  function ReaderMarkupField({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'] }) {
+    const [value, setValue] = useState<string | null>(null);
+    useEffect(() => {
+      void fetch(`${API_BASE}/api/config`).then((r) => r.json()).then(({ values }) => setValue(values['reader-markup'] ?? '')).catch(() => setValue(''));
+    }, []);
+    const off = value !== null && /^(off|never|no|0|false)$/i.test(value.trim());
+    return (
+      <Field
+        label="reader markup"
+        hint="tell Claude Code, when a session starts in a pane, to write plans, status and results as blocks the reader draws (cards, steps, bars…). only panes whose Claude starts or resumes after the change are affected. read it with: ttym guide markup"
+      >
+        <Segmented
+          options={['on', 'off'] as const}
+          value={off ? 'off' : 'on'}
+          onChange={(v) => { setValue(v); onPatchConfig({ 'reader-markup': v === 'off' ? 'off' : null }); }}
+        />
       </Field>
     );
   }

@@ -4,6 +4,8 @@
  * 에이전트에게 주는 지침을 스킬 파일이나 프로젝트 CLAUDE.md에 복사해 두면 CLI가 바뀔 때
  * 어긋난다. 여기 두면 지금 실행되는 바이너리와 같은 버전의 글이 나온다(Orca의 `skills get`과 같은 이유).
  */
+import { READER_MARKUP_GUIDE } from '@ttym/protocol';
+
 const AGENTS = `# ttym: talking to other agents
 
 You are in a ttym pane if $TTYM_SESSION_ID is set. Other panes in your workspace
@@ -89,7 +91,7 @@ members can run in parallel; each finishes on its own.
   "interrupted" (Esc or a denied prompt). Hand the work over again.
 `;
 
-const TOPICS: Record<string, string> = { agents: AGENTS };
+const TOPICS: Record<string, string> = { agents: AGENTS, markup: READER_MARKUP_GUIDE };
 
 export function cmdGuide() {
   const topic = process.argv[3];

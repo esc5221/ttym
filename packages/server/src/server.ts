@@ -38,7 +38,7 @@ import { authorizeInbound, canWrite, filterList, filterOutbound, outOfScope } fr
 let mapRefreshInFlight = false;
 import { readFileSync as readFileSyncFs, writeFileSync as writeFileSyncFs, unlinkSync, chmodSync, mkdirSync } from 'node:fs';
 import { CMD, encode, encodeData, encodeSnapshot, decodeClientFrame, toBuffer, jsonPayload, parseJson } from './protocol.js';
-import { API_VERSION, MIN_API_VERSION, PRODUCT_VERSION, EMBED_API_VERSION, EMBED_SDK_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch, type ScreenRun } from '@ttym/protocol';
+import { API_VERSION, MIN_API_VERSION, PRODUCT_VERSION, EMBED_API_VERSION, EMBED_SDK_VERSION, isRuntimeMetaKey, runtimeMetaKeys, isRuntimeOnlyPatch, READER_MARKUP_GUIDE, readerMarkupEnabled, type ScreenRun } from '@ttym/protocol';
 
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
@@ -619,6 +619,15 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
     readTurn(turnRange(existing, existing.completedAt))
       .then((events) => json(200, { interaction: existing, detail: detail === 'full' ? renderFull(events) : renderOutline(events) }))
       .catch((e) => json(500, { error: `transcript unreadable: ${(e as Error).message}` }));
+    return true;
+  }
+
+  // GET /api/internal/reader-markup — what the Claude SessionStart hook prints as context. Empty when
+  // config `reader-markup` is off. Served here, not read from the CLI, so a hook never depends on
+  // which `ttym` is on PATH (same reason the other hooks speak HTTP).
+  if (path === '/api/internal/reader-markup' && req.method === 'GET') {
+    res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(readerMarkupEnabled(config.get()) ? READER_MARKUP_GUIDE : '');
     return true;
   }
 
