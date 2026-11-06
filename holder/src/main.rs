@@ -36,6 +36,33 @@ const CMD_EVICTED: u8 = 0x0F;
 // ask only for what came after it.
 const CMD_DUMP_SINCE: u8 = 0x10;
 const CMD_REPLAY: u8 = 0x11;
+// The stream skipped [from, to): the client fell so far behind that the journal
+// no longer holds those bytes. payload: [u64 from][u64 to]. Servers that do not
+// know it ignore it (unknown frames are dropped), exactly as they would never
+// have received the bytes anyway.
+const CMD_GAP: u8 = 0x12;
+
+/// Capabilities announced in STATE. A server checks these instead of guessing.
+///  journal  — output is kept in an on-disk journal and streamed by cursor:
+///             a slow server never stalls the PTY, and DATA_OUT never duplicates
+///             what DUMP_*/REPLAY already returned.
+///  gap      — CMD_GAP frames may arrive.
+const CAPS: &str = r#"["journal","gap"]"#;
+
+/// Bytes queued for the client before the streamer stops pulling from the
+/// journal. The PTY keeps draining into the journal regardless.
+const OUT_HIGH_WATER: usize = 256 * 1024;
+/// One DATA_OUT frame carries at most this much.
+const STREAM_CHUNK: usize = 64 * 1024;
+/// PTY bytes read per loop turn before input and control frames get a turn.
+const PTY_READ_BUDGET: usize = 256 * 1024;
+/// Input waiting for the PTY beyond this is dropped (the child is not reading).
+const MAX_PENDING_INPUT: usize = 4 * 1024 * 1024;
+/// A full DUMP_REQ reply is capped to the newest this-many bytes, as before the
+/// journal grew past the old 1MB ring.
+const DUMP_REQ_MAX: u64 = 1 << 20;
+/// After promotion, start streaming anyway if the server never asks for a dump.
+const STREAM_START_GRACE: Duration = Duration::from_millis(2000);
 
 /// How long a freshly accepted connection may stay unclaimed before we assume
 /// it is a legacy server and promote it.
@@ -155,11 +182,22 @@ impl AnchorTracker {
     }
 }
 
-// ───── Ring buffer ─────
+// ───── Ring buffer / journal ─────
+//
+// The last `cap` bytes of the PTY stream, addressed by absolute offset. The
+// memory backend is the original 1MB ring (tests, --journal-size 0). The file
+// backend keeps the bytes in a file under the runtime dir: page cache holds the
+// hot tail and the kernel can drop clean pages under pressure without swapping,
+// so a 16MB journal per session costs disk, not RAM.
+
+enum Backend {
+    Mem(Vec<u8>),
+    File(fs::File),
+}
 
 struct Ring {
-    buf: Vec<u8>,
-    start: usize,
+    backend: Backend,
+    cap: usize,
     len: usize,
     /// Total bytes ever pushed. The ring holds the last `len` of them, so the
     /// first byte still available sits at `written - len`.
@@ -168,36 +206,66 @@ struct Ring {
 
 impl Ring {
     fn new(capacity: usize) -> Self {
-        Ring { buf: vec![0u8; capacity], start: 0, len: 0, written: 0 }
+        Ring { backend: Backend::Mem(vec![0u8; capacity]), cap: capacity, len: 0, written: 0 }
+    }
+
+    fn file(path: &std::path::Path, capacity: usize) -> io::Result<Self> {
+        let f = fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(path)?;
+        Ok(Ring { backend: Backend::File(f), cap: capacity, len: 0, written: 0 })
+    }
+
+    fn write_at(&mut self, pos: usize, data: &[u8]) {
+        match &mut self.backend {
+            Backend::Mem(buf) => buf[pos..pos + data.len()].copy_from_slice(data),
+            Backend::File(f) => {
+                use std::os::unix::fs::FileExt;
+                let _ = f.write_all_at(data, pos as u64);
+            }
+        }
+    }
+
+    fn read_at(&self, pos: usize, out: &mut [u8]) {
+        match &self.backend {
+            Backend::Mem(buf) => out.copy_from_slice(&buf[pos..pos + out.len()]),
+            Backend::File(f) => {
+                use std::os::unix::fs::FileExt;
+                let _ = f.read_exact_at(out, pos as u64);
+            }
+        }
     }
 
     fn push(&mut self, data: &[u8]) {
+        let cap = self.cap;
+        let data = if data.len() > cap {
+            self.written += (data.len() - cap) as u64;
+            &data[data.len() - cap..]
+        } else { data };
+        let wp = (self.written % cap as u64) as usize;
+        let first = (cap - wp).min(data.len());
+        self.write_at(wp, &data[..first]);
+        if first < data.len() { self.write_at(0, &data[first..]); }
         self.written += data.len() as u64;
-        let cap = self.buf.len();
-        if data.len() >= cap {
-            let off = data.len() - cap;
-            self.buf.copy_from_slice(&data[off..]);
-            self.start = 0;
-            self.len = cap;
-            return;
-        }
-        let wp = (self.start + self.len) % cap;
-        let first = cap - wp;
-        if data.len() <= first {
-            self.buf[wp..wp + data.len()].copy_from_slice(data);
-        } else {
-            self.buf[wp..wp + first].copy_from_slice(&data[..first]);
-            self.buf[..data.len() - first].copy_from_slice(&data[first..]);
-        }
-        self.len += data.len();
-        if self.len > cap {
-            self.start = (self.start + self.len - cap) % cap;
-            self.len = cap;
-        }
+        self.len = (self.len + data.len()).min(cap);
     }
 
     /// Absolute offset of the oldest byte still in the ring.
     fn base_offset(&self) -> u64 { self.written - self.len as u64 }
+
+    /// Up to `max` bytes starting at absolute `offset` (which must be within
+    /// [base, written]).
+    fn read_range(&self, offset: u64, max: usize) -> Vec<u8> {
+        let base = self.base_offset();
+        let offset = offset.max(base);
+        if offset >= self.written { return Vec::new(); }
+        let n = ((self.written - offset) as usize).min(max);
+        let mut out = vec![0u8; n];
+        let cap = self.cap;
+        let rp = (offset % cap as u64) as usize;
+        let first = (cap - rp).min(n);
+        self.read_at(rp, &mut out[..first]);
+        if first < n { self.read_at(0, &mut out[first..]); }
+        out
+    }
 
     /// Bytes from `offset` onward. Returns `(data, gap)` — gap is true when the
     /// requested point has already been overwritten, in which case the caller
@@ -207,22 +275,11 @@ impl Ring {
         let base = self.base_offset();
         if offset <= base { return (self.dump(), offset < base); }
         if offset >= self.written { return (Vec::new(), false); }
-        let skip = (offset - base) as usize;
-        let all = self.dump();
-        (all[skip..].to_vec(), false)
+        (self.read_range(offset, usize::MAX), false)
     }
 
     fn dump(&self) -> Vec<u8> {
-        if self.len == 0 { return Vec::new(); }
-        let cap = self.buf.len();
-        let mut out = Vec::with_capacity(self.len);
-        if self.start + self.len <= cap {
-            out.extend_from_slice(&self.buf[self.start..self.start + self.len]);
-        } else {
-            out.extend_from_slice(&self.buf[self.start..cap]);
-            out.extend_from_slice(&self.buf[..self.start + self.len - cap]);
-        }
-        out
+        self.read_range(self.base_offset(), usize::MAX)
     }
 }
 
@@ -293,6 +350,95 @@ fn data_out_payload(seq: u32, data: &[u8]) -> Vec<u8> {
     p
 }
 
+// ───── Controller connection ─────
+//
+// Everything sent to the controller goes through `out` and is written
+// nonblocking. PTY output is not pushed here as it is read: the controller has a
+// cursor into the journal and the loop pulls from it while `out` is short. A
+// server that stops reading (event-loop stall, SIGSTOP, memory pressure) leaves
+// the cursor behind; the PTY keeps draining into the journal, and the program in
+// the pane never blocks on its own output. Measured before this change: a server
+// paused for 5s stopped the pane's program at 0 lines (2026-11-06).
+
+struct Client {
+    stream: UnixStream,
+    out: Vec<u8>,
+    out_pos: usize,
+    /// Next stream offset to send as DATA_OUT. None until the controller asked
+    /// for its catch-up (DUMP_*) or the grace period ran out.
+    cursor: Option<u64>,
+    promote_offset: u64,
+    promoted_at: Instant,
+    /// EXIT waits until the output before it has been streamed.
+    pending_exit: Option<[u8; 4]>,
+}
+
+impl Client {
+    fn new(stream: UnixStream, written: u64) -> Self {
+        let _ = stream.set_nonblocking(true);
+        Client { stream, out: Vec::new(), out_pos: 0, cursor: None, promote_offset: written, promoted_at: Instant::now(), pending_exit: None }
+    }
+
+    fn queued(&self) -> usize { self.out.len() - self.out_pos }
+
+    fn send(&mut self, cmd: u8, payload: &[u8]) {
+        let flen = (1 + payload.len()) as u32;
+        self.out.extend_from_slice(&flen.to_le_bytes());
+        self.out.push(cmd);
+        self.out.extend_from_slice(payload);
+    }
+
+    /// Write what the socket takes now. Err means the connection is gone.
+    fn flush(&mut self) -> io::Result<()> {
+        while self.out_pos < self.out.len() {
+            match self.stream.write(&self.out[self.out_pos..]) {
+                Ok(0) => return Err(io::Error::new(ErrorKind::WriteZero, "closed")),
+                Ok(n) => self.out_pos += n,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            }
+        }
+        if self.out_pos == self.out.len() {
+            self.out.clear();
+            self.out_pos = 0;
+        } else if self.out_pos > (1 << 20) {
+            self.out.drain(..self.out_pos);
+            self.out_pos = 0;
+        }
+        Ok(())
+    }
+}
+
+/// Pull journal bytes behind the cursor into the client's queue as DATA_OUT,
+/// up to OUT_HIGH_WATER. If the cursor fell out of the journal, say so with
+/// CMD_GAP and resume at the first lexically safe offset.
+fn stream_to(c: &mut Client, ring: &Ring, tracker: &AnchorTracker, seq: &mut u32, id: u32) {
+    let Some(mut cursor) = c.cursor else { return };
+    let base = ring.base_offset();
+    if cursor < base {
+        let resume = match tracker.first_at_or_after(base) {
+            Some(safe) if safe <= ring.written => safe,
+            _ => ring.written,
+        };
+        let mut p = Vec::with_capacity(16);
+        p.extend_from_slice(&cursor.to_le_bytes());
+        p.extend_from_slice(&resume.to_le_bytes());
+        c.send(CMD_GAP, &p);
+        log(id, &format!("stream gap from={} to={} (controller behind by more than the journal)", cursor, resume));
+        cursor = resume;
+    }
+    while c.queued() < OUT_HIGH_WATER && cursor < ring.written {
+        let data = ring.read_range(cursor, STREAM_CHUNK);
+        if data.is_empty() { break; }
+        cursor += data.len() as u64;
+        let payload = data_out_payload(*seq, &data);
+        c.send(CMD_DATA_OUT, &payload);
+        *seq = seq.wrapping_add(1);
+    }
+    c.cursor = Some(cursor);
+}
+
 // ───── Config ─────
 
 struct Config {
@@ -302,6 +448,8 @@ struct Config {
     rows: u16,
     runtime_dir: PathBuf,
     ring_size: usize,
+    /// On-disk journal size. 0 keeps the in-memory ring of `ring_size`.
+    journal_size: usize,
     cwd: Option<String>,
     /// Socket path handed down by the server — the single source of truth,
     /// unique per holder incarnation so a stale socket from a dead session
@@ -316,6 +464,7 @@ fn parse_args() -> Config {
     let mut rows = 24u16;
     let mut runtime_dir = PathBuf::from("/tmp/ttym");
     let mut ring_size: usize = 1 << 20; // 1MB
+    let mut journal_size: usize = 16 << 20; // 16MB on disk
     let mut cwd: Option<String> = None;
     let mut socket_override: Option<PathBuf> = None;
     let mut cmd = Vec::new();
@@ -328,6 +477,7 @@ fn parse_args() -> Config {
             "--rows" => { i += 1; rows = args[i].parse().expect("--rows"); }
             "--runtime-dir" => { i += 1; runtime_dir = PathBuf::from(&args[i]); }
             "--ring-size" => { i += 1; ring_size = args[i].parse().expect("--ring-size"); }
+            "--journal-size" => { i += 1; journal_size = args[i].parse().expect("--journal-size"); }
             "--cwd" => { i += 1; cwd = Some(args[i].clone()); }
             "--socket" => { i += 1; socket_override = Some(PathBuf::from(&args[i])); }
             "--" => { cmd = args[i + 1..].to_vec(); break; }
@@ -338,7 +488,7 @@ fn parse_args() -> Config {
     if cmd.is_empty() {
         cmd = vec![env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into())];
     }
-    Config { id, cmd, cols, rows, runtime_dir, ring_size, cwd, socket_override }
+    Config { id, cmd, cols, rows, runtime_dir, ring_size, journal_size, cwd, socket_override }
 }
 
 // ───── Helpers ─────
@@ -493,12 +643,30 @@ fn main() {
     log(config.id, &format!("started pid={} child={} sock={}", process::id(), child_pid, socket_path.display()));
 
     // ── State ──
-    let mut ring = Ring::new(config.ring_size);
+    // Journals of earlier holders with this id belong to dead PTYs.
+    if let Ok(entries) = fs::read_dir(&config.runtime_dir) {
+        let prefix = format!("journal-{}-", config.id);
+        for e in entries.flatten() {
+            if e.file_name().to_string_lossy().starts_with(&prefix) { let _ = fs::remove_file(e.path()); }
+        }
+    }
+    let journal_path = config.runtime_dir.join(format!("journal-{}-{}.bin", config.id, generation));
+    let mut ring = if config.journal_size > 0 {
+        match Ring::file(&journal_path, config.journal_size) {
+            Ok(r) => r,
+            Err(e) => {
+                log(config.id, &format!("journal open failed ({}), using memory ring", e));
+                Ring::new(config.ring_size)
+            }
+        }
+    } else {
+        Ring::new(config.ring_size)
+    };
     let mut tracker = AnchorTracker::new();
     let mut seq: u32 = 1;
     let mut cols = config.cols;
     let mut rows = config.rows;
-    let mut client: Option<UnixStream> = None;
+    let mut client: Option<Client> = None;
     let mut reader = FrameReader::new();
     // Accepted but not yet the controller: it has been sent STATE and we are
     // waiting to see whether it claims the lease.
@@ -555,7 +723,10 @@ fn main() {
         // Build pollfds. Slots are fixed; an absent client or pending
         // connection is passed as fd -1, which poll ignores.
         let listener_fd = listener.as_raw_fd();
-        let client_fd = client.as_ref().map(|c| c.as_raw_fd()).unwrap_or(-1);
+        let client_fd = client.as_ref().map(|c| c.stream.as_raw_fd()).unwrap_or(-1);
+        let client_wants_write = client.as_ref().map(|c| {
+            c.queued() > 0 || c.cursor.map(|cur| cur < ring.written).unwrap_or(false)
+        }).unwrap_or(false);
         let pending_fd = pending.as_ref().map(|(c, _)| c.as_raw_fd()).unwrap_or(-1);
         let mut fds = [
             libc::pollfd {
@@ -566,7 +737,13 @@ fn main() {
                 revents: 0,
             },
             libc::pollfd { fd: listener_fd, events: libc::POLLIN, revents: 0 },
-            libc::pollfd { fd: client_fd, events: if client_fd >= 0 { libc::POLLIN } else { 0 }, revents: 0 },
+            libc::pollfd {
+                fd: client_fd,
+                events: if client_fd >= 0 {
+                    libc::POLLIN | if client_wants_write { libc::POLLOUT } else { 0 }
+                } else { 0 },
+                revents: 0,
+            },
             libc::pollfd { fd: pending_fd, events: if pending_fd >= 0 { libc::POLLIN } else { 0 }, revents: 0 },
         ];
         let nfds: libc::nfds_t = 4;
@@ -576,7 +753,7 @@ fn main() {
                 .map(|d| d.as_millis().min(5000) as i32)
                 .unwrap_or(0),
             // A parked connection needs the loop to wake up for its claim deadline.
-            None => if pending.is_some() { 200 } else { 5000 },
+            None => if pending.is_some() || client.as_ref().map(|c| c.cursor.is_none()).unwrap_or(false) { 200 } else { 5000 },
         };
 
         let n = unsafe { libc::poll(fds.as_mut_ptr(), nfds, timeout_ms) };
@@ -587,23 +764,16 @@ fn main() {
 
         // ── Master fd: drain all available data ──
         if fds[0].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 && pty_alive {
-            loop {
+            let mut budget = PTY_READ_BUDGET;
+            while budget > 0 {
                 let rn = unsafe { libc::read(master_fd, read_buf.as_mut_ptr() as *mut _, read_buf.len()) };
                 if rn > 0 {
                     let data = &read_buf[..rn as usize];
+                    budget = budget.saturating_sub(data.len());
                     let start = ring.written;
                     ring.push(data);
                     tracker.feed(data, start);
                     tracker.prune_below(ring.base_offset());
-                    if let Some(ref mut c) = client {
-                        let payload = data_out_payload(seq, data);
-                        if let Err(err) = write_frame(c, CMD_DATA_OUT, &payload) {
-                            log(config.id, &format!("client write err kind={:?}, dropping", err.kind()));
-                            client = None;
-                            reader = FrameReader::new();
-                        }
-                    }
-                    seq += 1;
                 } else if rn == 0 {
                     pty_exit(&mut pty_alive, &mut exit_code, &mut linger_deadline, child_pid, config.id, &mut client);
                     break;
@@ -643,12 +813,12 @@ fn main() {
                         r#"{{"id":{},"pid":{},"childPid":{},"cmd":"#,
                         r#"{},"cols":{},"rows":{},"createdAt":{},"nextSeq":{},"alive":{},"#,
                         r#""lease":true,"held":{},"generation":"{}","#,
-                        r#""baseOffset":{},"nextOffset":{}}}"#
+                        r#""baseOffset":{},"nextOffset":{},"caps":{}}}"#
                     ),
                     config.id, process::id(), child_pid.as_raw(),
                     format_cmd_json(&config.cmd), cols, rows,
                     created_at, seq, pty_alive, client.is_some(),
-                    generation, ring.base_offset(), ring.written,
+                    generation, ring.base_offset(), ring.written, CAPS,
                 );
                 let mut new_stream = stream;
                 let _ = write_frame(&mut new_stream, CMD_STATE, state.as_bytes());
@@ -706,7 +876,8 @@ fn main() {
                             // can report that instead of guessing the PTY died.
                             if let Some(mut old) = client.take() {
                                 log(config.id, "controller evicted by takeover");
-                                let _ = write_frame(&mut old, CMD_EVICTED, b"");
+                                old.send(CMD_EVICTED, b"");
+                                let _ = old.flush();
                             }
                             resolve = Some(true);
                         }
@@ -736,7 +907,7 @@ fn main() {
                 }
                 (_, Some(true)) => {
                     if let Some((stream, _)) = pending.take() {
-                        client = Some(stream);
+                        client = Some(Client::new(stream, ring.written));
                         // Carry over anything already buffered from this
                         // connection so a legacy server's first frame is not lost.
                         reader = std::mem::replace(&mut pending_reader, FrameReader::new());
@@ -752,7 +923,7 @@ fn main() {
             let mut disconnected = false;
             if let Some(ref mut c) = client {
                 let mut tmp = [0u8; 65536];
-                match c.read(&mut tmp) {
+                match c.stream.read(&mut tmp) {
                     Ok(0) => { disconnected = true; }
                     Ok(n) => {
                         reader.feed(&tmp[..n]);
@@ -776,6 +947,10 @@ fn main() {
             match cmd {
                 CMD_DATA_IN => {
                     if pty_alive {
+                        if pending_input.len() + payload.len() > MAX_PENDING_INPUT {
+                            log(config.id, &format!("pty not reading input: dropping {} bytes", payload.len()));
+                            continue;
+                        }
                         pending_input.extend_from_slice(&payload);
                         if let Err(err) = flush_pending_input(master_fd, &mut pending_input) {
                             log(config.id, &format!("pty input write err kind={:?}", err.kind()));
@@ -799,8 +974,9 @@ fn main() {
                     // arbitrary-cut head as a gap replay — trim to the first
                     // safe offset. A never-overflowed ring starts at byte 0,
                     // which is ground by definition.
-                    let data = if ring.base_offset() > 0 {
-                        match tracker.first_at_or_after(ring.base_offset()) {
+                    let from = ring.base_offset().max(ring.written.saturating_sub(DUMP_REQ_MAX));
+                    let data = if from > 0 {
+                        match tracker.first_at_or_after(from) {
                             Some(safe) if safe < ring.written => ring.since(safe).0,
                             _ => Vec::new(),
                         }
@@ -808,7 +984,9 @@ fn main() {
                         ring.dump()
                     };
                     if let Some(ref mut c) = client {
-                        let _ = write_frame(c, CMD_DUMP_RESP, &data);
+                        c.send(CMD_DUMP_RESP, &data);
+                        // The dump covers everything up to now; live output continues from here.
+                        c.cursor = Some(ring.written);
                     }
                 }
                 CMD_DUMP_SINCE => {
@@ -848,7 +1026,8 @@ fn main() {
                     resp.push(if gap { 1 } else { 0 });
                     resp.extend_from_slice(&data);
                     if let Some(ref mut c) = client {
-                        let _ = write_frame(c, CMD_REPLAY, &resp);
+                        c.send(CMD_REPLAY, &resp);
+                        c.cursor = Some(ring.written);
                     }
                     log(config.id, &format!(
                         "replay since={} base={} end={} gap={} bytes={}",
@@ -863,11 +1042,33 @@ fn main() {
                 }
                 CMD_PING => {
                     if let Some(ref mut c) = client {
-                        let _ = write_frame(c, CMD_PONG, &[]);
+                        c.send(CMD_PONG, &[]);
                     }
                 }
                 _ => {}
             }
+        }
+
+        // ── Controller: stream journal behind the cursor, then write what the socket takes ──
+        let mut drop_client = false;
+        if let Some(ref mut c) = client {
+            if c.cursor.is_none() && c.promoted_at.elapsed() >= STREAM_START_GRACE {
+                // A server that never asks for a catch-up still gets everything since promotion.
+                c.cursor = Some(c.promote_offset);
+            }
+            stream_to(c, &ring, &tracker, &mut seq, config.id);
+            if c.pending_exit.is_some() && c.cursor.map(|cur| cur >= ring.written).unwrap_or(false) {
+                let code = c.pending_exit.take().unwrap();
+                c.send(CMD_EXIT, &code);
+            }
+            if let Err(err) = c.flush() {
+                log(config.id, &format!("client write err kind={:?}, dropping", err.kind()));
+                drop_client = true;
+            }
+        }
+        if drop_client {
+            client = None;
+            reader = FrameReader::new();
         }
 
         // Periodic child check
@@ -878,7 +1079,8 @@ fn main() {
                     exit_code = Some(code);
                     log(config.id, &format!("child exited (waitpid) code={code}"));
                     if let Some(ref mut c) = client {
-                        let _ = write_frame(c, CMD_EXIT, &code.to_le_bytes());
+                        if c.cursor.is_none() { c.cursor = Some(c.promote_offset); }
+                        c.pending_exit = Some(code.to_le_bytes());
                     }
                     linger_deadline = Some(Instant::now() + Duration::from_secs(30));
                 }
@@ -888,7 +1090,8 @@ fn main() {
                     exit_code = Some(code);
                     log(config.id, &format!("child signaled sig={sig}"));
                     if let Some(ref mut c) = client {
-                        let _ = write_frame(c, CMD_EXIT, &code.to_le_bytes());
+                        if c.cursor.is_none() { c.cursor = Some(c.promote_offset); }
+                        c.pending_exit = Some(code.to_le_bytes());
                     }
                     linger_deadline = Some(Instant::now() + Duration::from_secs(30));
                 }
@@ -898,6 +1101,7 @@ fn main() {
     }
 
     // Cleanup
+    let _ = fs::remove_file(&journal_path);
     let _ = fs::remove_file(&socket_path);
     let _ = fs::remove_file(&manifest_path);
     let _ = fs::remove_file(&socket_path);
@@ -910,7 +1114,7 @@ fn pty_exit(
     linger: &mut Option<Instant>,
     child: nix::unistd::Pid,
     id: u32,
-    client: &mut Option<UnixStream>,
+    client: &mut Option<Client>,
 ) {
     if !*pty_alive { return; }
     *pty_alive = false;
@@ -921,8 +1125,11 @@ fn pty_exit(
     };
     log(id, &format!("PTY exited code={:?}", exit_code));
     if let Some(ref mut c) = client {
+        // EXIT goes after the output still behind the cursor; the main loop's
+        // streamer flushes the rest before the frame is reached.
+        if c.cursor.is_none() { c.cursor = Some(c.promote_offset); }
         let code = exit_code.unwrap_or(-1).to_le_bytes();
-        let _ = write_frame(c, CMD_EXIT, &code);
+        c.pending_exit = Some(code);
     }
     *linger = Some(Instant::now() + Duration::from_secs(30));
 }
@@ -1031,6 +1238,33 @@ mod tests {
         t.feed(&osc, start);
         t.prune_below(ring.base_offset());
         assert_eq!(t.first_at_or_after(ring.base_offset()), None);
+    }
+
+    #[test]
+    fn file_journal_matches_memory_ring_across_wraps() {
+        let dir = std::env::temp_dir().join(format!("ttym-holder-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut mem = Ring::new(1000);
+        let mut file = Ring::file(&dir.join("j.bin"), 1000).unwrap();
+        let mut all = Vec::new();
+        for i in 0..400u32 {
+            let chunk: Vec<u8> = (0..(i % 37 + 1)).map(|k| (i * 7 + k) as u8).collect();
+            mem.push(&chunk);
+            file.push(&chunk);
+            all.extend_from_slice(&chunk);
+            assert_eq!(mem.written, file.written);
+            assert_eq!(mem.base_offset(), file.base_offset());
+            assert_eq!(mem.dump(), file.dump());
+            let base = file.base_offset() as usize;
+            assert_eq!(file.dump(), all[base..].to_vec());
+        }
+        // a push larger than the capacity keeps only its tail
+        let big: Vec<u8> = (0..2500u32).map(|k| k as u8).collect();
+        file.push(&big);
+        all.extend_from_slice(&big);
+        assert_eq!(file.dump(), all[all.len() - 1000..].to_vec());
+        assert_eq!(file.read_range(file.written - 10, 4), all[all.len() - 10..all.len() - 6].to_vec());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

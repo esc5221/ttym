@@ -84,6 +84,8 @@ const H_CMD_ACQUIRED = 0x0d;
 const H_CMD_DENIED = 0x0e;
 const H_CMD_EVICTED = 0x0f;
 const H_CMD_DUMP_SINCE = 0x10;
+/** holder journal이 컨트롤러 뒤처짐을 다 담지 못해 [from, to)를 건너뛰었다. payload [u64 from][u64 to] */
+const H_CMD_GAP = 0x12;
 const H_CMD_REPLAY = 0x11;
 
 /** Identifies this server process to holders, so an eviction is attributable. */
@@ -336,6 +338,8 @@ export class Session {
   private parsePendingBytes = 0;
   private parsePaused = false;
   private droppedParseBytes = 0;
+  /** holder가 STATE로 알린 기능. 'journal' = 커서 스트리밍(느린 서버가 PTY를 멈추지 않음). */
+  holderCaps: string[] = [];
   private _recoveryGap = false;
   /**
    * Screen quality. 'degraded' after a gap recovery: the tail the holder
@@ -584,6 +588,7 @@ export class Session {
               this._receivedOffset = this._appliedOffset;
               // nextOffset only appears on holders that track stream position.
               this.supportsReplay = typeof state.nextOffset === 'number';
+              this.holderCaps = Array.isArray(state.caps) ? state.caps : [];
               try { this.term.resize(this._cols, this._rows); } catch {}
 
               // Claim the controller role before touching the PTY. Holders
@@ -794,6 +799,19 @@ export class Session {
         this._exitCode = -2;
         for (const cb of this.exitCbs) cb(-2);
         this.exitCbs = [];
+        break;
+      }
+      case H_CMD_GAP: {
+        if (payload.length < 16) break;
+        const from = Number(payload.readBigUInt64LE(0));
+        const to = Number(payload.readBigUInt64LE(8));
+        this.debug(`stream gap from=${from} to=${to}: screen degraded`);
+        this._integrity = 'degraded';
+        this._receivedOffset = to;
+        // 대기열에 있는 바이트가 다 그려진 다음에 offset을 건너뛴다.
+        this.term.write('', () => { this._appliedOffset = to; });
+        this._dirty = true;
+        this._rev++;
         break;
       }
       case H_CMD_PONG:
@@ -1215,6 +1233,8 @@ interface HolderState {
   alive: boolean;
   /** Present only on holders that implement the controller lease. */
   lease?: boolean;
+  /** Holder capabilities (journal, gap). Absent on older holders. */
+  caps?: string[];
   /** Whether another server currently holds it. */
   held?: boolean;
   /** Identifies this holder incarnation; a checkpoint is only valid against it. */
