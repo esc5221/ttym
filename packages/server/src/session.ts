@@ -94,6 +94,23 @@ const SERVER_INSTANCE_ID = `srv-${process.pid}-${Date.now().toString(36)}`;
 
 /** Raised when another server already holds the PTY and takeover was not asked for. */
 /** holder가 handshake에 답하지 않았다. holder는 살아 있을 수 있다 — 세션을 버릴 근거가 아니다. */
+/** 0부터 다시 그리는 최대 스트림 크기 — 이보다 크면 체크포인트 + 이후 바이트. */
+const FULL_REBUILD_MAX = 2 * 1024 * 1024;
+/** 체크포인트 없이 새 holder에 붙을 때 다시 그리는 꼬리 크기(이전 DUMP_REQ와 같은 1MB). */
+const DUMP_TAIL_BYTES = 1024 * 1024;
+
+/** handshake 중 응답(REPLAY·DUMP_RESP) 전에 쌓인 DATA_OUT을 빼고, 그 바이트 수를 돌려준다. */
+function dropPreResponseOutput(buffered: Array<{ cmd: number; payload: Buffer }>): number {
+  let bytes = 0;
+  for (let i = buffered.length - 1; i >= 0; i--) {
+    if (buffered[i]!.cmd === H_CMD_DATA_OUT) {
+      bytes += Math.max(0, buffered[i]!.payload.length - 4);
+      buffered.splice(i, 1);
+    }
+  }
+  return bytes;
+}
+
 /** CUP to the stored cursor. serialize() can leave the cursor one cell short after trailing blanks. */
 function cursorTo(pos: { x: number; y: number } | null | undefined): string {
   return pos ? `\x1b[${pos.y + 1};${pos.x + 1}H` : '';
@@ -346,6 +363,8 @@ export class Session {
   private droppedParseBytes = 0;
   /** holder가 STATE로 알린 기능. 'journal' = 커서 스트리밍(느린 서버가 PTY를 멈추지 않음). */
   holderCaps: string[] = [];
+  /** holder가 아직 들고 있는 가장 오래된 offset (STATE). 0이면 스트림 전체를 들고 있다. */
+  private _holderBase = -1;
   private _recoveryGap = false;
   /**
    * Screen quality. 'degraded' after a gap recovery: the tail the holder
@@ -644,6 +663,23 @@ export class Session {
         const usable = checkpoint
           && (!checkpoint.generation || !this._generation || checkpoint.generation === this._generation)
           && checkpoint.offset > 0;
+        const journal = this.holderCaps.includes('journal');
+        // holder가 스트림을 처음부터 다 들고 있으면(base 0) 체크포인트를 믿을 이유가 없다 — 0부터 다시 그린다.
+        // 이전 서버는 생성 handshake 중 출력을 두 번 적용하고 offset을 어긋나게 저장했다(2026-11-06 리허설:
+        // 51개 중 2개가 재시작 뒤 같은 출력을 두 번 그림). 처음부터 그리면 그 체크포인트를 피한다.
+        const fromZero = this.supportsReplay && this._holderBase === 0 && this._appliedOffset <= FULL_REBUILD_MAX;
+
+        if (fromZero || (!usable && journal && this.supportsReplay)) {
+          // 새 holder는 REPLAY에 base·end를 붙여 준다 — 덤프와 달리 offset이 정확하다.
+          pendingReplay = true;
+          const want = fromZero ? 0 : Math.max(0, this._appliedOffset - DUMP_TAIL_BYTES);
+          const payload = Buffer.alloc(9);
+          payload.writeBigUInt64LE(BigInt(want), 0);
+          payload[8] = fromZero ? 0 : 1; // 1 = 근사 위치: holder가 그 뒤 첫 안전한(lexical ground) 지점에서 시작
+          this.debug(`replay ${fromZero ? 'from 0 (whole stream held)' : `tail from ${want}`}`);
+          writeFrame(sock, H_CMD_DUMP_SINCE, payload);
+          return;
+        }
 
         if (usable && this.supportsReplay) {
           if (this.seedCheckpoint(checkpoint!.generation, checkpoint!.offset, checkpoint!.screen, checkpoint!.cursor)) {
@@ -682,6 +718,7 @@ export class Session {
               this._receivedOffset = this._appliedOffset;
               // nextOffset only appears on holders that track stream position.
               this.supportsReplay = typeof state.nextOffset === 'number';
+              this._holderBase = typeof state.baseOffset === 'number' ? state.baseOffset : -1;
               this.holderCaps = Array.isArray(state.caps) ? state.caps : [];
               try { this.term.resize(this._cols, this._rows); } catch {}
 
@@ -738,6 +775,10 @@ export class Session {
               // 화면이 이 구간을 다 그린 뒤에 offset을 end로 올린다 (체크포인트가 앞서 나가지 않게).
               if (data.length === 0) this._appliedOffset = end;
               this.debug(`got REPLAY base=${base} end=${end} gap=${gap} bytes=${data.length}`);
+              // 응답보다 먼저 온 실시간 출력은 응답에 이미 들어 있다(holder가 요청을 처리한 시점까지 담는다).
+              // 이전엔 이것을 다시 적용해 같은 바이트를 두 번 그렸다.
+              const dropped = dropPreResponseOutput(buffered);
+              if (dropped) this.debug(`dropped ${dropped}B of output already inside REPLAY`);
               const finalize = () => {
                 for (const f of buffered) this.handleHolderFrame(f.cmd, f.payload);
                 buffered.length = 0;
@@ -759,6 +800,11 @@ export class Session {
             if (frame.cmd === H_CMD_DUMP_RESP) {
               pendingDump = false;
               this.debug(`got DUMP_RESP bytes=${frame.payload.length} buffered=${buffered.length}`);
+              const dropped = dropPreResponseOutput(buffered);
+              if (dropped) this.debug(`dropped ${dropped}B of output already inside DUMP_RESP`);
+              // 덤프는 offset을 알려 주지 않는다: 버린 바이트만큼은 STATE 이후 진행분이다.
+              this._appliedOffset += dropped;
+              this._receivedOffset = this._appliedOffset;
               const finalize = () => {
                 // Replay any DATA_OUT buffered during handshake
                 for (const f of buffered) {

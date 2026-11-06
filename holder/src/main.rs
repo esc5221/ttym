@@ -996,9 +996,18 @@ fn main() {
                     // gap=1 means the requested point fell out of the ring, so
                     // what follows is not a continuation of the server's state
                     // and it has to say so rather than paint a broken screen.
-                    let want = if payload.len() >= 8 {
+                    let mut want = if payload.len() >= 8 {
                         u64::from_le_bytes(payload[..8].try_into().unwrap())
                     } else { 0 };
+                    // payload[8] == 1: the server has no exact position (no checkpoint) and asks
+                    // for a tail. Start at the first lexically safe offset at or after `want`,
+                    // not mid-escape. Servers that send 8 bytes get the exact semantics.
+                    if payload.len() >= 9 && payload[8] == 1 && want > ring.base_offset() {
+                        want = match tracker.first_at_or_after(want) {
+                            Some(safe) if safe <= ring.written => safe,
+                            _ => ring.written,
+                        };
+                    }
                     let (mut data, gap) = ring.since(want);
                     let mut base = ring.base_offset();
                     if gap {
