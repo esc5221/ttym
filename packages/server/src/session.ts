@@ -521,7 +521,9 @@ export class Session {
   canGoCold(now: number, idleMs: number): boolean {
     if (!this.coldAllowed()) return false;
     if (now - this.lastOutputAt < idleMs || now - this.lastInputAt < idleMs) return false;
-    if (now - this.lastMarkAt < 30 * 60_000) return false;       // an await may still read its screen range
+    // 최근 await가 화면 구간을 읽을 수 있다(10분). 잠든 pane은 에이전트가 없어 그 구간을 읽을 일이 없다 —
+    // 깨우는 await는 새 마커를 찍는다.
+    if (!this.frozen && now - this.lastMarkAt < 10 * 60_000) return false;
     return true;
   }
 

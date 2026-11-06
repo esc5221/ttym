@@ -49,7 +49,7 @@ const COLD_AFTER_MS = (() => {
   return Number.isFinite(n) && n >= 0 ? n : 5 * 60_000;
 })();
 const COLD_SWEEP_MS = Math.min(30_000, Math.max(1_000, COLD_AFTER_MS / 4 || 30_000));
-const COLD_PER_SWEEP = 8; // 한 번에 내리는 수 — 각각 전체 직렬화(실측 p95 12ms)를 한다
+const COLD_PER_SWEEP = 4; // 한 번에 내리는 수 — 각각 전체 직렬화(실측 p95 12ms)를 한다. 8개일 때 루프 최대 185ms(리허설)
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
 /** 세션 번호는 4자리를 넘지 않는다. 사람이 "%1297"처럼 부르고 적는 이름이라 짧아야 한다.
