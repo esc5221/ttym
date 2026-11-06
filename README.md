@@ -203,8 +203,9 @@ prefix key (`C-b`) starts commands, and detaching leaves everything running.
 
 ```
 tmux                          ttym
-tmux new -s work              ttym work
+tmux new -s work              ttym attach work   (asks [Y/n]; --new skips the ask)
 tmux attach -t work           ttym work          (or ttym attach work)
+tmux ls                       ttym ls
 C-b d   detach                C-b d
 C-b s   choose a session      C-b s              session picker
 C-b n/p next/previous window  C-b n/p            next/previous member of the workspace
@@ -225,7 +226,8 @@ What differs:
   In tmux, the server holds the sessions.
 
 ```bash
-ttym <workspace>                         # shorthand for attach — the everyday entry
+ttym <workspace>                         # shorthand for attach to an existing workspace — never creates
+ttym ls [workspace] [--json]             # workspaces, members, %id, attached/detached/gone
 ttym attach <session-id>
 ttym attach <workspace>                  # sole member, or the first (C-b n/p to cycle)
 ttym attach <workspace>/<member>         # creation asks [Y/n]; --new skips the ask (scripts)

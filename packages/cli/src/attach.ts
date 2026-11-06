@@ -114,6 +114,8 @@ export async function cmdAttach() {
   let uiMode = 'attached';
   let prefixTimer = null;
   let picker = null;
+  // 전환 중인 대상이 ATTACH를 거절하면(끝난 세션) 여기로 돌아간다 — 창을 닫지 않는다.
+  let switchFrom = null;
 
   function writeStdout(data) {
     try { process.stdout.write(data); } catch {}
@@ -222,13 +224,21 @@ export async function cmdAttach() {
       return;
     }
     sendDetachCurrent();
+    switchFrom = currentTarget;
     currentTarget = nextTarget;
     lastSeq = 0;
     sendAttach();
   }
 
   async function collectEntries() {
-    const workspaces = await listWorkspaces(port);
+    const [workspaces, sessions] = await Promise.all([
+      listWorkspaces(port),
+      fetchJson(port, '/api/sessions').catch(() => null),
+    ]);
+    // 세션 목록을 못 받았으면 gone 판정을 하지 않는다(전부 살아 있다고 본다).
+    const alive = Array.isArray(sessions)
+      ? new Set(sessions.filter((x) => x.status !== 'dead').map((x) => x.id))
+      : null;
     const entries = [];
     for (const ws of workspaces) {
       for (const m of ws.members || []) {
@@ -237,6 +247,7 @@ export async function cmdAttach() {
           label: memberAddress(ws, m),
           workspace: ws,
           member: m,
+          gone: alive ? !alive.has(m.sessionId) : false,
         });
       }
     }
@@ -270,7 +281,7 @@ export async function cmdAttach() {
     const cols = process.stdout.columns || 80;
     const rows = process.stdout.rows || 24;
     writeStdout('\x1b[?25l\x1b[H\x1b[2J');
-    const header = `[ttym] session picker  (j/k move, Enter select, Esc cancel, q quit)`;
+    const header = `[ttym] session picker  (j/k ↑↓ move, Enter select, Esc/q cancel)`;
     writeStdout(`\x1b[1m${header.slice(0, cols)}\x1b[0m\r\n\r\n`);
     if (!picker.entries || picker.entries.length === 0) {
       writeStdout('  (loading...)\r\n');
@@ -289,15 +300,18 @@ export async function cmdAttach() {
       const selected = i === picker.cursor;
       const marker = selected ? '▶' : ' ';
       const current = e.sessionId === currentTarget.sessionId ? ' *' : '  ';
-      let line = `${marker} ${e.label} %${e.sessionId}${current}`;
+      let line = `${marker} ${e.label} %${e.sessionId}${current}${e.gone ? '  (gone)' : ''}`;
       if (line.length > cols) line = line.slice(0, cols - 1) + '…';
       if (selected) writeStdout(`\x1b[7m${line.padEnd(cols)}\x1b[0m\r\n`);
+      else if (e.gone) writeStdout(`\x1b[2m${line}\x1b[0m\r\n`);
       else writeStdout(`${line}\r\n`);
     }
+    if (picker.note) writeStdout(`\r\n\x1b[2m${picker.note.slice(0, cols)}\x1b[0m`);
   }
 
   function movePicker(delta) {
     if (!picker || picker.entries.length === 0) return;
+    picker.note = null;
     const n = picker.entries.length;
     picker.cursor = ((picker.cursor + delta) % n + n) % n;
     renderPicker();
@@ -305,6 +319,12 @@ export async function cmdAttach() {
 
   function exitPicker(selected) {
     const chosen = selected ? picker.entries[picker.cursor] : null;
+    if (chosen?.gone) {
+      // 끝난 세션으로는 못 간다 — picker에 남아서 알린다.
+      picker.note = `${chosen.label} %${chosen.sessionId}: session has ended (ttym workspace remove to drop it)`;
+      renderPicker();
+      return;
+    }
     picker = null;
     uiMode = 'attached';
     if (chosen) {
@@ -322,7 +342,8 @@ export async function cmdAttach() {
 
   async function cycleMember(delta) {
     exitPrefix();
-    const entries = await collectEntries();
+    const all = await collectEntries();
+    const entries = all.filter((e) => !e.gone || e.sessionId === currentTarget.sessionId);
     if (entries.length < 2) return;
     let idx = entries.findIndex((e) => e.sessionId === currentTarget.sessionId);
     if (idx < 0) idx = 0;
@@ -378,24 +399,47 @@ export async function cmdAttach() {
     // unknown → drop
   }
 
+  /** ESC로 시작하는 시퀀스의 길이와 종류. 화살표는 CSI(ESC [ A)와 SS3(ESC O A) 둘 다 —
+   *  셸·Claude가 켜 둔 애플리케이션 커서 모드(DECCKM)에서는 터미널이 SS3을 보낸다.
+   *  ESC 단독만 취소다. 모르는 시퀀스는 삼킨다(예전엔 취소로 읽혀 picker가 닫혔다). */
+  function readEscape(data, i) {
+    if (i + 1 >= data.length) return { len: 1, key: 'esc' };
+    const next = data[i + 1];
+    if (next === 0x4f && i + 2 < data.length) { // SS3
+      const f = data[i + 2];
+      return { len: 3, key: f === 0x41 ? 'up' : f === 0x42 ? 'down' : null };
+    }
+    if (next === 0x5b) { // CSI: 파라미터 0x30-0x3f, 중간 0x20-0x2f, 종결 0x40-0x7e
+      let j = i + 2;
+      while (j < data.length && data[j] >= 0x20 && data[j] <= 0x3f) j += 1;
+      if (j >= data.length) return { len: data.length - i, key: null };
+      const f = data[j];
+      return { len: j - i + 1, key: f === 0x41 ? 'up' : f === 0x42 ? 'down' : null };
+    }
+    return { len: 2, key: null }; // Alt+키
+  }
+
   function handlePickerKey(data) {
     let i = 0;
     while (i < data.length) {
-      // CSI sequence: ESC [ X
-      if (data[i] === 0x1b && data[i + 1] === 0x5b && i + 2 < data.length) {
-        const ready = picker && picker.entries && picker.entries.length > 0;
-        if (ready) {
-          if (data[i + 2] === 0x41) movePicker(-1);
-          else if (data[i + 2] === 0x42) movePicker(+1);
-        }
-        i += 3;
+      const ready = picker && picker.entries && picker.entries.length > 0;
+      const b = data[i];
+      if (b === 0x1b) {
+        const { len, key } = readEscape(data, i);
+        if (key === 'esc') { exitPicker(false); return; }
+        if (ready && key === 'up') movePicker(-1);
+        else if (ready && key === 'down') movePicker(+1);
+        i += len;
         continue;
       }
-      const b = data[i];
-      if (b === 0x1b || b === 0x71 || b === 0x03) { exitPicker(false); return; }
-      const ready = picker && picker.entries && picker.entries.length > 0;
+      if (b === 0x71 || b === 0x03) { exitPicker(false); return; }
       if (!ready) { i += 1; continue; }
-      if (b === 0x0d || b === 0x0a) { exitPicker(true); return; }
+      if (b === 0x0d || b === 0x0a) {
+        exitPicker(true);
+        if (closed || uiMode !== 'picker') return;
+        i += 1;
+        continue;
+      }
       if (b === 0x6a || b === 0x0e) movePicker(+1);
       else if (b === 0x6b || b === 0x10) movePicker(-1);
       else if (b === 0x67) { picker.cursor = 0; renderPicker(); }
@@ -445,11 +489,22 @@ export async function cmdAttach() {
       if (frame.cmd === CMD.ATTACH) {
         const meta = parseFrameJson(frame.payload);
         if (!meta?.ok) {
+          if (switchFrom) {
+            // 전환 대상이 거절됨 — 원래 세션으로 돌아가고 창은 그대로 둔다.
+            const failed = currentTarget;
+            currentTarget = switchFrom;
+            switchFrom = null;
+            lastSeq = 0;
+            sendAttach();
+            showStatus(`${failed.label}: ${meta?.error || 'attach failed'} — back to ${currentTarget.label}`);
+            return;
+          }
           showStatus(meta?.error || 'attach failed');
           detached = true;
           cleanup(1);
           return;
         }
+        switchFrom = null;
         lastInfo = meta;
         lastSeq = typeof meta.lastSeq === 'number' ? meta.lastSeq : lastSeq;
         if (uiMode === 'attached') {

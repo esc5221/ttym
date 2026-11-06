@@ -385,3 +385,58 @@ export async function cmdWorkspace() {
   console.log('  stream list|add <name>|rename <from> <to>|rm <name>|order <name...> [--json]');
   process.exit(EXIT.USAGE);
 }
+
+/**
+ * `ttym ls [workspace] [--json]` — tmux ls 자리. workspace마다 멤버 한 줄씩:
+ * 이름 · %id · 상태 · 명령. 상태는 /api/sessions 기준이라 세션이 끝난 멤버는 `gone`.
+ * 어느 workspace에도 없는 세션은 끝에 `(no workspace)`로 모은다.
+ */
+export async function cmdLs() {
+  const args = process.argv.slice(3);
+  const asJson = hasFlag('--json') || args.includes('--json');
+  const filter = args.find((a) => !a.startsWith('-')) ?? null;
+  const port = getPort();
+  await ensureCompatibleServer(port);
+  const [workspaces, sessionsRaw] = await Promise.all([
+    listWorkspaces(port),
+    fetchJson(port, '/api/sessions').catch(() => []),
+  ]);
+  const sessions = Array.isArray(sessionsRaw) ? sessionsRaw : [];
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const here = parseInt(process.env.TTYM_SESSION_ID || '', 10);
+
+  const shown = filter ? workspaces.filter((w) => w.name === filter || w.id === filter) : workspaces;
+  if (filter && shown.length === 0) {
+    console.error(`workspace not found: ${filter}`);
+    process.exit(EXIT.NOT_FOUND);
+  }
+
+  const stateOf = (s) => !s || s.status === 'dead' ? 'gone' : s.status === 'attached' ? `attached${s.viewerCount > 1 ? `×${s.viewerCount}` : ''}` : 'detached';
+  const rows = shown.map((w) => ({
+    workspace: w.name,
+    id: w.id,
+    members: (w.members || []).map((m) => {
+      const s = byId.get(m.sessionId);
+      return { name: m.name, sessionId: m.sessionId, state: stateOf(s), cmd: s?.cmd ?? null, current: m.sessionId === here };
+    }),
+  }));
+  const inWorkspace = new Set(workspaces.flatMap((w) => (w.members || []).map((m) => m.sessionId)));
+  const loose = filter ? [] : sessions.filter((s) => !inWorkspace.has(s.id))
+    .map((s) => ({ name: null, sessionId: s.id, state: stateOf(s), cmd: s.cmd ?? null, current: s.id === here }));
+
+  if (asJson) return printOutput({ workspaces: rows, unassigned: loose }, true);
+
+  const all = [...rows.flatMap((r) => r.members), ...loose];
+  const nameW = Math.max(4, ...all.map((m) => (m.name ?? '').length));
+  const idW = Math.max(3, ...all.map((m) => String(m.sessionId).length + 1));
+  const stW = Math.max(6, ...all.map((m) => m.state.length));
+  const line = (m) => `${m.current ? '*' : ' '} ${(m.name ?? '').padEnd(nameW)}  ${`%${m.sessionId}`.padEnd(idW)}  ${m.state.padEnd(stW)}  ${m.cmd ? m.cmd.join(' ') : ''}`.trimEnd();
+  for (const r of rows) {
+    console.log(`${r.workspace}  (${r.members.length})`);
+    for (const m of r.members) console.log(line(m));
+  }
+  if (loose.length) {
+    console.log(`(no workspace)  (${loose.length})`);
+    for (const m of loose) console.log(line(m));
+  }
+}

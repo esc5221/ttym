@@ -2,9 +2,10 @@
 // C4b: 디스패치만 남는다 — 각 도메인은 제 파일에 산다.
 import process from 'node:process';
 import { EXIT, getPort } from './common.js';
-import { cmdStart, cmdStop, cmdRestart, cmdStatus, cmdLog } from './lifecycle.js';
+import { cmdStart, cmdStop, cmdRestart, cmdStatus, cmdLog, ensureServerRunning } from './lifecycle.js';
 import { cmdAttach } from './attach.js';
-import { cmdMeta, cmdCurrent, cmdWorkspace } from './workspace.js';
+import { cmdMeta, cmdCurrent, cmdWorkspace, cmdLs } from './workspace.js';
+import { listWorkspaces } from './addresses.js';
 import { cmdAgent } from './agent.js';
 import { cmdMap } from './map.js';
 import { cmdSearch } from './search.js';
@@ -33,9 +34,10 @@ if (remote) {
 const cmd = process.argv[2];
 
 function printHelp() {
-  console.log(`usage: ttym [workspace]        enter (create on confirm) — tmux-style`);
+  console.log(`usage: ttym [workspace]        enter an existing workspace — tmux-style (ttym attach <name> creates)`);
   console.log('');
   console.log('commands:');
+  console.log('  ls [workspace] [--json]      Workspaces and their members: %id, attached/detached/gone, command');
   console.log('  attach <ws[/member]>         Attach (prefix: C-b, C-b ? for keys). Creation asks; --new skips the ask');
   console.log('  new <name> [--cwd <dir>] [--size <cols>x<rows>] [-- cmd]  Create a session in the default workspace');
   console.log('  split <addr> <name> [--cwd <dir>] [--size <cols>x<rows>] [-- cmd]  Split beside a member (addr: ws:name | :name)');
@@ -70,6 +72,37 @@ function printHelp() {
 }
 
 
+const VERBS = ['attach', 'ls', 'new', 'split', 'send', 'screen', 'resize', 'kill', 'await', 'turn', 'guide',
+  'commands', 'output', 'open', 'view', 'start', 'stop', 'restart', 'status', 'current', 'workspace', 'meta',
+  'agent', 'map', 'search', 'service', 'remote', 'embed', 'upgrade', 'version', 'log', 'help'];
+
+function editDistance(a, b) {
+  const d = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    let prev = d[0];
+    d[0] = i;
+    for (let j = 1; j <= b.length; j += 1) {
+      const tmp = d[j];
+      d[j] = Math.min(d[j] + 1, d[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = tmp;
+    }
+  }
+  return d[b.length];
+}
+
+/** 없는 동사·이름: 가까운 동사와 workspace 이름을 보여주고 usage(2). 만들자고는 하지 않는다. */
+function unknownCommand(token, workspaceNames) {
+  const limit = token.length <= 3 ? 1 : 2;
+  const near = (list) => list.filter((n) => editDistance(token, n) <= limit || (token.length >= 3 && n.startsWith(token)));
+  const verbs = near(VERBS);
+  const spaces = near(workspaceNames).slice(0, 5);
+  console.error(`ttym: unknown command or workspace: ${token}`);
+  if (verbs.length) console.error(`  command:   ${verbs.map((v) => `ttym ${v}`).join(' · ')}`);
+  if (spaces.length) console.error(`  workspace: ${spaces.map((v) => `ttym ${v}`).join(' · ')}`);
+  console.error('  ttym help · ttym ls');
+  process.exit(EXIT.USAGE);
+}
+
 /** fetch 실패를 계약 코드로 번역한다 — 생 스택트레이스는 계약 위반이다. */
 function isConnectFailure(err) {
   if (!err) return false;
@@ -81,6 +114,7 @@ function isConnectFailure(err) {
 try {
 switch (cmd) {
   case 'attach':  await cmdAttach(); break;
+  case 'ls':      await cmdLs(); break;
   case 'new':     await cmdNew(); break;
   case 'split':   await cmdSplit(); break;
   case 'send':    await cmdSendAddr(); break;
@@ -120,13 +154,20 @@ switch (cmd) {
       await cmdAttach();
       break;
     }
-    // 이름 토큰: TTY에서만 attach로 해석 (동사 오타는 생성 확인 게이트가 막는다).
-    // 비TTY 스크립트에는 여전히 usage(2) — 계약 그대로.
+    // 이름 토큰: TTY에서, 그 이름의 workspace(또는 ws/member의 ws)가 있을 때만 attach.
+    // 없으면 만들자고 묻지 않는다 — 동사 오타(`ttym ls`)가 workspace 생성 질문이 되던 것.
+    // 만드는 길은 `ttym attach <name>`(확인) · `--new`. 비TTY 스크립트는 그대로 usage(2).
     if (interactive && !cmd.startsWith('-')) {
-      process.argv.splice(2, 1, 'attach', cmd);
-      await cmdAttach();
-      break;
+      await ensureServerRunning(getPort());
+      const names = (await listWorkspaces(getPort())).map((w) => w.name);
+      if (names.includes(cmd.split('/')[0])) {
+        process.argv.splice(2, 1, 'attach', cmd);
+        await cmdAttach();
+        break;
+      }
+      unknownCommand(cmd, names);
     }
+    if (!cmd.startsWith('-')) unknownCommand(cmd, []);
     printHelp();
     process.exit(EXIT.USAGE);
   }
