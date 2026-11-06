@@ -62,6 +62,8 @@ const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 const REPLAY_MAX_BYTES = 64 * 1024;
 /** Replay chunks merge into frames of about this size. */
 const REPLAY_FRAME_BYTES = 16 * 1024;
+/** ACK를 안 보내는 연결의 송신 기록 상한 (recordSent) */
+const MAX_UNACKED_ENTRIES = 4096;
 const WS_LOW_WATER = 1 << 18;
 
 const DEBUG = true;
@@ -2080,9 +2082,7 @@ export async function createServer(port: number): Promise<TtymServer> {
       batcher.pending = [];
       batcher.pendingBytes = 0;
       safeSend(ws, encodeData(sessionId, seq, payload));
-      batcher.sentEntries.push({ seq, bytes: payload.length });
-      batcher.unackedBytes += payload.length;
-      batcher.lastSentSeq = seq;
+      recordSent(batcher, seq, payload.length);
 
       // backpressure: 이 viewer(ws)만 대상, PTY는 멈추지 않음
       if (batcher.acking) {
@@ -2115,6 +2115,49 @@ export async function createServer(port: number): Promise<TtymServer> {
           }
         }, 25);
       }
+    }
+
+    /**
+     * 보낸 프레임 기록. ACK를 보내는 클라이언트만 이 장부로 흐름을 조절한다 — ACK를 한 번도 안 보내는
+     * 연결은 장부가 끝없이 길어졌다(2026-11-06 Codex 검토). 그런 연결은 상한에서 비운다(bufferedAmount가 대신 조절).
+     */
+    function recordSent(batcher: SessionBatcher, seq: number, bytes: number) {
+      if (!batcher.acking && batcher.sentEntries.length >= MAX_UNACKED_ENTRIES) {
+        batcher.sentEntries = [];
+        batcher.unackedBytes = 0;
+      }
+      batcher.sentEntries.push({ seq, bytes });
+      batcher.unackedBytes += bytes;
+      batcher.lastSentSeq = seq;
+    }
+
+    /**
+     * 링의 [fromSeq 이후] 구간을 REPLAY_FRAME_BYTES 단위 프레임으로 묶어 보낸다. 합이 REPLAY_MAX_BYTES를
+     * 넘으면 false — 호출자가 스냅샷으로 대신한다.
+     */
+    function sendDelta(sessionId: number, session: Session, batcher: SessionBatcher, fromSeq: number): boolean {
+      const chunks = session.ring.since(fromSeq);
+      let total = 0;
+      for (const chunk of chunks) total += chunk.data.length;
+      if (total > REPLAY_MAX_BYTES) return false;
+      let group: Buffer[] = [];
+      let groupBytes = 0;
+      let groupSeq = fromSeq;
+      const flushGroup = () => {
+        if (groupBytes === 0) return;
+        safeSend(ws, encodeData(sessionId, groupSeq, Buffer.concat(group, groupBytes)));
+        recordSent(batcher, groupSeq, groupBytes);
+        group = [];
+        groupBytes = 0;
+      };
+      for (const chunk of chunks) {
+        group.push(chunk.data);
+        groupBytes += chunk.data.length;
+        groupSeq = chunk.seq;
+        if (groupBytes >= REPLAY_FRAME_BYTES) flushGroup();
+      }
+      flushGroup();
+      return true;
     }
 
     /** A snapshot supersedes everything in flight — reset ack accounting. */
@@ -2166,31 +2209,7 @@ export async function createServer(port: number): Promise<TtymServer> {
       }
       if (!session.shouldForceSnapshotReplay() && session.integrity === 'healthy' && fromSeq > 0
           && fromSeq <= session.lastSeq && session.ring.canReplaySince(fromSeq)) {
-        const chunks = session.ring.since(fromSeq);
-        let total = 0;
-        for (const chunk of chunks) total += chunk.data.length;
-        if (total <= REPLAY_MAX_BYTES) {
-          let group: Buffer[] = [];
-          let groupBytes = 0;
-          let groupSeq = fromSeq;
-          const flushGroup = () => {
-            if (groupBytes === 0) return;
-            safeSend(ws, encodeData(sessionId, groupSeq, Buffer.concat(group, groupBytes)));
-            batcher.sentEntries.push({ seq: groupSeq, bytes: groupBytes });
-            batcher.unackedBytes += groupBytes;
-            batcher.lastSentSeq = groupSeq;
-            group = [];
-            groupBytes = 0;
-          };
-          for (const chunk of chunks) {
-            group.push(chunk.data);
-            groupBytes += chunk.data.length;
-            groupSeq = chunk.seq;
-            if (groupBytes >= REPLAY_FRAME_BYTES) flushGroup();
-          }
-          flushGroup();
-          return;
-        }
+        if (sendDelta(sessionId, session, batcher, fromSeq)) return;
       }
       safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
       noteSnapshotSent(batcher, session.lastSeq);
@@ -2218,13 +2237,10 @@ export async function createServer(port: number): Promise<TtymServer> {
         session.resumeViewer(viewerId);
         // Catch up on what was dropped while paused: delta if the ring still
         // has it, one atomic snapshot otherwise.
-        if (!session.shouldForceSnapshotReplay() && session.ring.canReplaySince(batcher.lastSentSeq)) {
-          for (const chunk of session.ring.since(batcher.lastSentSeq)) {
-            safeSend(ws, encodeData(sessionId, chunk.seq, chunk.data));
-            batcher.sentEntries.push({ seq: chunk.seq, bytes: chunk.data.length });
-            batcher.unackedBytes += chunk.data.length;
-            batcher.lastSentSeq = chunk.seq;
-          }
+        // 재접속과 같은 규칙: 작으면 묶어서, 크면(이전엔 링 전체 4MB를 조각마다) 스냅샷 한 장.
+        if (!session.shouldForceSnapshotReplay() && session.ring.canReplaySince(batcher.lastSentSeq)
+            && sendDelta(sessionId, session, batcher, batcher.lastSentSeq)) {
+          // sent
         } else {
           safeSend(ws, encodeSnapshot(sessionId, session.lastSeq, Buffer.from(session.viewerSnapshot())));
           noteSnapshotSent(batcher, session.lastSeq);

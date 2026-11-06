@@ -94,4 +94,27 @@ describe('pickSessionId', () => {
   it('treats a stray start (0, negative) as 1', () => {
     expect(pickSessionId(0, MAX_SESSION_ID, none)).toBe(1);
   });
+
+  it('keeps a live holder whose handshake fails: manifest stays, no fresh shell under its id', async () => {
+    // holder가 살아 있는데(여기선 sleep 프로세스) 소켓이 답하지 않는 경우.
+    mkdirSync(TEST_RUNTIME_DIR, { recursive: true });
+    const { spawn } = await import('node:child_process');
+    const fake = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+    try {
+      const id = 4242;
+      const manifest = { id, pid: fake.pid, childPid: fake.pid, cmd: ['/bin/sh'], cols: 80, rows: 24,
+        socket: resolve(TEST_RUNTIME_DIR, 'no-such.sock'), createdAt: Date.now() };
+      writeFileSync(resolve(TEST_RUNTIME_DIR, `session-${id}.json`), JSON.stringify(manifest));
+      writeFileSync(resolve(TEST_RUNTIME_DIR, `snapshot-${id}.json`), JSON.stringify({
+        version: 1, id, cmd: ['/bin/sh'], cols: 80, rows: 24, createdAt: Date.now(), savedAt: Date.now(), screen: 'old', meta: {},
+      }));
+      const manager = createManager();
+      await manager.boot();
+      const { existsSync } = await import('node:fs');
+      expect(existsSync(resolve(TEST_RUNTIME_DIR, `session-${id}.json`))).toBe(true);
+      expect(manager.has(id)).toBe(false); // 새 셸로 부활시키지 않았다
+    } finally {
+      fake.kill();
+    }
+  });
 });

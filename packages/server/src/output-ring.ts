@@ -16,7 +16,10 @@ export class OutputRing {
   private _nextSeq: number;
   private _baseSeq: number;
 
-  constructor(private readonly maxBytes: number = 128 * 1024, baseSeq = 1) {
+  /** 바이트만 세면 1바이트 조각이 쌓일 때 객체 수가 끝없이 늘어난다(2026-11-06: 4MB에 48.9만 개). 항목 수도 막는다. */
+  static readonly MAX_ENTRIES = 16384;
+
+  constructor(private readonly maxBytes: number = 128 * 1024, baseSeq = 1, private readonly maxEntries = OutputRing.MAX_ENTRIES) {
     this._nextSeq = baseSeq;
     this._baseSeq = baseSeq;
   }
@@ -47,7 +50,7 @@ export class OutputRing {
     this.used += data.length;
 
     // oldest 폐기 (메모리 상한 유지)
-    while (this.used > this.maxBytes && this.head < this.buf.length) this.dropOldest();
+    while ((this.used > this.maxBytes || this.buf.length - this.head > this.maxEntries) && this.head < this.buf.length) this.dropOldest();
 
     return seq;
   }

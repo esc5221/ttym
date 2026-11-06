@@ -65,4 +65,11 @@ describe('OutputRing — boot-scoped base', () => {
     expect(seq).toBe(5000);
     expect(ring.since(4999).length).toBe(1);
   });
+
+  it('caps the number of entries, not only bytes', () => {
+    const ring = new OutputRing(1 << 20, 1, 100);
+    for (let i = 0; i < 1000; i++) ring.push(Buffer.from('x'));
+    expect(ring.since(0)).toHaveLength(100);
+    expect(ring.baseSeq).toBe(901);
+  });
 });

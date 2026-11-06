@@ -36,6 +36,8 @@ export interface WorkspaceState {
 const REAP_INTERVAL = 30 * 1000;
 const PERSIST_IDLE_MS = 2000;   // flush after 2s idle
 const PERSIST_MAX_MS = 30000;   // force flush every 30s
+const PERSIST_CONCURRENCY = 2;   // 한 번에 저장하는 세션 수 (각 저장이 lsof와 3000줄 직렬화를 한다)
+const RECOVER_CONCURRENCY = 24;  // 재시작 때 동시에 다시 붙는 holder 수
 const DEFAULT_SHELL = process.env.SHELL || '/bin/bash';
 
 /** 세션 번호는 4자리를 넘지 않는다. 사람이 "%1297"처럼 부르고 적는 이름이라 짧아야 한다.
@@ -63,6 +65,7 @@ export class SessionManager {
   private reapTimer: NodeJS.Timeout | null = null;
   private persistTimer: NodeJS.Timeout | null = null;
   private lastPersistAt = 0;
+  private persistSeq = 0;
   readonly runtimeDir: string;
   private _ready = false;
   private _busUrl: string | null = null;
@@ -120,8 +123,21 @@ export class SessionManager {
     // for 10s (session.ts), and recovering in sequence made every later session
     // queue behind it — worst case scaled with session count. Now the whole
     // pass costs one timeout, not one per stuck holder.
-    await Promise.all(manifests.map((filename) => this.recoverOne(filename)));
+    // 동시에 RECOVER_CONCURRENCY개까지 — 187개를 한꺼번에 파싱하면 메모리가 튀고 handshake가 밀린다.
+    let next = 0;
+    const worker = async () => {
+      while (next < manifests.length) await this.recoverOne(manifests[next++]!);
+    };
+    await Promise.all(Array.from({ length: Math.min(RECOVER_CONCURRENCY, manifests.length) }, worker));
   }
+
+  /**
+   * holder는 살아 있는데 handshake를 못 마친 세션. manifest를 지우지 않고 다시 시도한다.
+   * 예전에는 manifest를 지웠고, 이어진 restoreWorkspace가 같은 id로 새 셸을 띄워 원래 holder(와 그 안의
+   * claude)를 화면 밖 고아로 만들었다(2026-11-05 prod %1594~1603).
+   */
+  private recovering = new Set<number>();
+  private static readonly RETRY_MS = [5_000, 15_000, 45_000, 120_000];
 
   /**
    * lease 거절로 건너뛴 세션 id들 — 다른 살아있는 서버의 소유물.
@@ -130,7 +146,7 @@ export class SessionManager {
    */
   private heldByOthers = new Set<number>();
 
-  private async recoverOne(filename: string): Promise<void> {
+  private async recoverOne(filename: string, attempt = 0): Promise<void> {
     const manifestPath = resolve(this.runtimeDir, filename);
     try {
       const raw = await readFile(manifestPath, 'utf8');
@@ -152,6 +168,7 @@ export class SessionManager {
       const checkpoint = await this.readCheckpoint(manifest.id);
       const session = await Session.recover(manifest, this.runtimeDir, false, checkpoint);
       this.sessions.set(session.id, session);
+      this.recovering.delete(session.id);
       this.nextId = Math.max(this.nextId, session.id + 1);
 
       // Load persisted meta
@@ -174,6 +191,25 @@ export class SessionManager {
         const idMatch = filename.match(/session-(\d+)\.json$/);
         if (idMatch) this.heldByOthers.add(parseInt(idMatch[1], 10));
         console.log(`[mgr] ${filename} held by another server, leaving it alone`);
+        return;
+      }
+      const idMatch = filename.match(/session-(\d+)\.json$/);
+      const sid = idMatch ? parseInt(idMatch[1]!, 10) : NaN;
+      let alive = false;
+      try {
+        const m: HolderManifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+        process.kill(m.pid, 0);
+        alive = true;
+      } catch {}
+      if (alive && Number.isFinite(sid)) {
+        this.recovering.add(sid);
+        const delay = SessionManager.RETRY_MS[attempt];
+        if (delay !== undefined) {
+          console.error(`[mgr] recover ${filename} failed (attempt ${attempt + 1}): ${(e as Error)?.message ?? e} — holder alive, retry in ${delay}ms`);
+          setTimeout(() => { void this.recoverOne(filename, attempt + 1); }, delay).unref?.();
+        } else {
+          console.error(`[mgr] recover ${filename} gave up after ${attempt + 1} attempts — holder alive, manifest kept`);
+        }
         return;
       }
       console.error(`[mgr] failed to recover ${filename}:`, e);
@@ -244,6 +280,11 @@ export class SessionManager {
       if (this.sessions.has(snap.id)) {
         continue;
       }
+      // 아직 다시 붙는 중인 holder — 새 셸로 부활시키면 원래 holder가 고아가 된다.
+      if (this.recovering.has(snap.id)) {
+        console.log(`[mgr] session=${snap.id} holder alive, recovery retrying — not resurrecting`);
+        continue;
+      }
       // 소유권이 다른 서버에 있는 id — 부재가 아니라 점유다. 부활은 강탈이 된다.
       if (this.heldByOthers.has(snap.id)) {
         console.log(`[mgr] session=${snap.id} held by another server — not resurrecting`);
@@ -302,17 +343,27 @@ export class SessionManager {
 
   // ───── Periodic Snapshot Persistence ─────
 
+  /** 저장 중인 세션 — 같은 세션의 저장을 겹쳐 시작하지 않는다(같은 .tmp를 두 번 쓰던 경쟁). */
+  private persisting = new Set<number>();
+  /** 세션별 마지막 저장 시각. 전역 하나였을 때는 30초가 지나면 모든 dirty 세션을 매초 다시 저장했다. */
+  private persistedAt = new Map<number, number>();
+
   private checkPersist(): void {
     const now = Date.now();
     for (const session of this.sessions.values()) {
-      if (session.isDead || !session.dirty) continue;
+      if (this.persisting.size >= PERSIST_CONCURRENCY) return;
+      if (session.isDead || !session.dirty || this.persisting.has(session.id)) continue;
 
       const idleMs = now - session.lastDirtyAt;
-      const sincePersist = now - this.lastPersistAt;
+      const sincePersist = now - (this.persistedAt.get(session.id) ?? 0);
 
       // Flush after 2s idle or 30s max
       if (idleMs >= PERSIST_IDLE_MS || sincePersist >= PERSIST_MAX_MS) {
-        this.persistSession(session.id).catch(() => {});
+        this.persisting.add(session.id);
+        this.persistSession(session.id).catch(() => {}).finally(() => {
+          this.persisting.delete(session.id);
+          this.persistedAt.set(session.id, Date.now());
+        });
       }
     }
   }
@@ -334,6 +385,8 @@ export class SessionManager {
       await this.setMeta(id, { cwd: liveCwd }).catch(() => {});
     }
 
+    // 화면·offset·크기는 같은 틱에서 함께 읽는다(아래 객체 리터럴). rev는 그 순간의 것.
+    const rev = session.rev;
     const snap: SessionSnapshot = {
       version: 1,
       // Where this screen sits in the holder's byte stream, and which holder
@@ -358,11 +411,11 @@ export class SessionManager {
 
     // Atomic write: temp → rename
     const snapPath = resolve(this.runtimeDir, `snapshot-${id}.json`);
-    const tmpPath = snapPath + '.tmp';
+    const tmpPath = `${snapPath}.${process.pid}.${++this.persistSeq}.tmp`;
     await writeFile(tmpPath, JSON.stringify(snap));
     await rename(tmpPath, snapPath);
 
-    session.markClean();
+    session.markCleanIf(rev);
     this.lastPersistAt = Date.now();
   }
 

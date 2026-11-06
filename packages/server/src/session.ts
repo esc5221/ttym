@@ -53,6 +53,9 @@ export interface Viewer {
 // 1MB면 zsh은 1만 3천 줄이지만 Claude는 1,150줄밖에 안 된다. 4MB로 잡으면
 // Claude 기준 약 4,600줄이고, 세션 41개에서 164MB다.
 const DEFAULT_RING_BYTES = 4 * 1024 * 1024;
+/** xterm 쓰기 대기열이 이만큼 쌓이면 holder 소켓을 멈추고, LOW 아래로 내려오면 다시 읽는다. */
+const PARSE_HIGH_WATER = 8 * 1024 * 1024;
+const PARSE_LOW_WATER = 2 * 1024 * 1024;
 
 function randomSeqBase(): number {
   return 1_000_000 + Math.floor(Math.random() * 99_000_000);
@@ -87,6 +90,13 @@ const H_CMD_REPLAY = 0x11;
 const SERVER_INSTANCE_ID = `srv-${process.pid}-${Date.now().toString(36)}`;
 
 /** Raised when another server already holds the PTY and takeover was not asked for. */
+/** holder가 handshake에 답하지 않았다. holder는 살아 있을 수 있다 — 세션을 버릴 근거가 아니다. */
+export class HolderHandshakeTimeout extends Error {
+  constructor(readonly sessionId: number) { super('holder handshake timeout'); }
+}
+
+const RECOVER_HANDSHAKE_MS = 30_000;
+
 export class ControllerHeldError extends Error {
   constructor(readonly sessionId: number) {
     super(`session ${sessionId}: controller already held by another server`);
@@ -314,11 +324,18 @@ export class Session {
   private _cols: number;
   private _rows: number;
   private _dirty = false;
+  /** 화면이 바뀔 때마다 오른다. 체크포인트는 찍은 rev와 같을 때만 clean으로 내린다. */
+  private _rev = 0;
   private _lastDirtyAt = 0;
   private _diedAt = 0;
   private _evicted = false;
   private _generation = '';
   private _appliedOffset = 0;
+  /** holder에서 받은 바이트 위치(파싱 전). appliedOffset과의 차이가 xterm 대기열이다. */
+  private _receivedOffset = 0;
+  private parsePendingBytes = 0;
+  private parsePaused = false;
+  private droppedParseBytes = 0;
   private _recoveryGap = false;
   /**
    * Screen quality. 'degraded' after a gap recovery: the tail the holder
@@ -350,6 +367,7 @@ export class Session {
   }
 
   get dirty(): boolean { return this._dirty; }
+  get rev(): number { return this._rev; }
   get lastDirtyAt(): number { return this._lastDirtyAt; }
   get diedAt(): number { return this._diedAt; }
   /** True when this server lost the lease rather than the PTY exiting. */
@@ -388,6 +406,8 @@ export class Session {
     return Buffer.from(bits.map((b) => b ?? 0)).toString('base64');
   }
   markClean(): void { this._dirty = false; }
+  /** 저장하는 동안 새 출력이 들어왔으면 dirty를 남긴다. */
+  markCleanIf(rev: number): void { if (this._rev === rev) this._dirty = false; }
 
   private constructor(
     id: number, cmd: string[], cols: number, rows: number,
@@ -541,10 +561,12 @@ export class Session {
         writeFrame(sock, H_CMD_DUMP_REQ);
       };
 
+      // 재시작 때는 수백 개가 한꺼번에 체크포인트를 파싱한다 — 메모리 압박에서 10초를 넘긴 적이 있다(11-05 prod, 7개).
       const timer = setTimeout(() => {
         this.debug(`handshake timeout recovery=${_recovery} gotState=${gotState} pendingDump=${pendingDump} buffered=${buffered.length}`);
-        reject(new Error('holder handshake timeout'));
-      }, 10000);
+        try { sock.destroy(); } catch {}
+        reject(new HolderHandshakeTimeout(this.id));
+      }, _recovery ? RECOVER_HANDSHAKE_MS : 10000);
 
       sock.on('data', (data: Buffer) => {
         this.reader.feed(data);
@@ -559,6 +581,7 @@ export class Session {
               this._rows = state.rows ?? this._rows;
               this._generation = state.generation ?? '';
               this._appliedOffset = state.nextOffset ?? 0;
+              this._receivedOffset = this._appliedOffset;
               // nextOffset only appears on holders that track stream position.
               this.supportsReplay = typeof state.nextOffset === 'number';
               try { this.term.resize(this._cols, this._rows); } catch {}
@@ -612,7 +635,9 @@ export class Session {
               const data = Buffer.from(frame.payload.subarray(17));
               this._recoveryGap = gap;
               if (gap) this._integrity = 'degraded';
-              this._appliedOffset = end;
+              this._receivedOffset = end;
+              // 화면이 이 구간을 다 그린 뒤에 offset을 end로 올린다 (체크포인트가 앞서 나가지 않게).
+              if (data.length === 0) this._appliedOffset = end;
               this.debug(`got REPLAY base=${base} end=${end} gap=${gap} bytes=${data.length}`);
               const finalize = () => {
                 for (const f of buffered) this.handleHolderFrame(f.cmd, f.payload);
@@ -621,7 +646,7 @@ export class Session {
                 resolve();
               };
               if (data.length > 0) {
-                this.term.write(data, () => { this.processTerminalOutput(data, false); finalize(); });
+                this.term.write(data, () => { this._appliedOffset = end; this.processTerminalOutput(data, false); finalize(); });
               } else {
                 finalize();
               }
@@ -684,16 +709,46 @@ export class Session {
     });
   }
 
+  /**
+   * xterm 쓰기 대기열. appliedOffset은 "화면에 실제로 반영된 곳"이라 파싱이 끝난 콜백에서만 올린다 —
+   * 받은 즉시 올리면 체크포인트가 아직 안 그린 화면에 앞선 offset을 붙였다.
+   * 대기열이 PARSE_HIGH_WATER를 넘으면 holder 소켓을 멈춘다(xterm은 50MB 근처에서 예외를 던진다).
+   */
+  private queueParse(data: Buffer): void {
+    this.parsePendingBytes += data.length;
+    if (!this.parsePaused && this.parsePendingBytes > PARSE_HIGH_WATER && this.sock) {
+      this.parsePaused = true;
+      this.sock.pause();
+      this.debug(`parse backlog ${this.parsePendingBytes}B — pausing holder socket`);
+    }
+    const done = () => {
+      this.parsePendingBytes -= data.length;
+      this._appliedOffset += data.length;
+      this.processTerminalOutput(data, this.viewers.size > 0);
+      if (this.parsePaused && this.parsePendingBytes < PARSE_LOW_WATER) {
+        this.parsePaused = false;
+        this.sock?.resume();
+      }
+    };
+    try {
+      this.term.write(data, done);
+    } catch (err) {
+      // 화면은 이 바이트를 놓쳤다. 스트림(ring·viewer)은 그대로 흐르게 하고, 화면은 degraded로 알린다.
+      this._integrity = 'degraded';
+      this.droppedParseBytes += data.length;
+      this.debug(`term.write failed (${(err as Error).message}); screen degraded, dropped=${this.droppedParseBytes}`);
+      done();
+    }
+  }
+
   private handleHolderFrame(cmd: number, payload: Buffer) {
     switch (cmd) {
       case H_CMD_DATA_OUT: {
         if (this.closed) return;
         if (payload.length < 4) return;
-        const data = payload.subarray(4);
-        // Track the stream position so a checkpoint can say how far the screen
-        // has been advanced. The holder counts the same bytes, so starting from
-        // the offset it reported in STATE keeps the two in step.
-        this._appliedOffset += data.length;
+        // 복사한다: payload는 프레임 리더의 큰 수신 버퍼 일부라, xterm 대기열에 남는 동안 그 버퍼 전체를 붙잡는다.
+        const data = Buffer.from(payload.subarray(4));
+        this._receivedOffset += data.length;
 
         // A degraded screen heals only when the stream itself repaints from
         // scratch. RIS (ESC c) is that moment. The scan is naive — an ESC c
@@ -713,10 +768,9 @@ export class Session {
         // over a screen that wasn't. Only the viewer callbacks are gated,
         // and the gate is read at parse time so a viewer that attached while
         // this chunk sat in xterm's write queue still receives it.
-        this.term.write(data, () => {
-          this.processTerminalOutput(data, this.viewers.size > 0);
-        });
+        this.queueParse(data);
         this._dirty = true;
+        this._rev++;
         this._lastDirtyAt = Date.now();
         break;
       }
