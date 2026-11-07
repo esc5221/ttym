@@ -134,6 +134,10 @@ Claude가 평범한 입력칸(❯)을 그릴 때만 웹 textarea가 그 자리�
   `claude -p` stream-json `initialize`(명령·인자 힌트·에이전트) + 숨은 holder(220×100)에 띄운 Claude의 `/` 메뉴를 끝까지 읽은 것
   (터미널 전용 /resume·/plan…, API에 없음). 폴더당 첫 조회 ~10s, 한 번에 한 폴더, mtime 키 + 1시간 캐시. `@`는 `/composer/files`(rg --files).
 - 이미지 붙여넣기는 `/api/upload` → 경로. 폰 키바는 이 칸 입력칸에 포커스가 있으면 그 입력칸으로 간다.
+- 초안·전송 대기는 컴포넌트 밖 칸별 저장소(reader/composerStore.ts, sessionStorage) — Claude가 다시 그릴 때 입력칸이
+  다시 만들어져도 남는다. 입력칸을 못 찾은 상태 0.5s까지·깨진 화면(입력칸에 가로줄 조각)인 동안은 직전 입력칸을 유지.
+- 높이는 접힌 줄까지(scrollHeight), 안쪽 스크롤 없음. 화면 45%를 넘으면 페이지 안으로. Shift/Option+Enter = 줄바꿈.
+- ⌘/Ctrl+←→↑↓(칸 이동·명령 점프, WorkspacePage)는 ⇧·⌥가 붙거나 글이 든 입력칸이면 양보한다.
 
 ## 뷰어 (`ttym open`)
 

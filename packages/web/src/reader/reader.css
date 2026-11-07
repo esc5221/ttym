@@ -128,9 +128,10 @@
 .rd-wc-box:focus-within { border-color: var(--accent); }
 .rd-wc.busy .rd-wc-box { border-style: dashed; }
 .rd-wc-pm { color: var(--accent); flex-shrink: 0; line-height: inherit; }
+/* as tall as its text (WebComposer sets the height); nothing scrolls inside it */
 .rd-wc-input {
   flex: 1; min-width: 0; resize: none; border: 0; outline: 0; padding: 0; margin: 0; background: transparent;
-  color: inherit; font: inherit; line-height: inherit; max-height: 40vh; overflow-y: auto;
+  color: inherit; font: inherit; line-height: inherit; overflow: hidden; display: block;
 }
 .rd-wc-input::placeholder { color: var(--text-dim); opacity: 1; }
 .rd-wc-input[readonly] { cursor: default; }

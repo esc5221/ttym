@@ -28,6 +28,11 @@ export type DockView =
       placeholder?: string;
       /** Grey text the agent draws after what was typed (an inline completion, "cap +8" after "/re"). */
       ghost?: string;
+      /**
+       * The prompt rows hold pieces of rules: the screen is a mess the agent has not repainted yet (it drew for a
+       * different width than this view shows — dev, 2026-11-08: "❯ ────…" over a rule, "⏺─PONG-1"). Its text can't be trusted.
+       */
+      garbled?: boolean;
     }
   | {
       kind: 'dialog';
@@ -79,6 +84,15 @@ const isRule = (row: string): boolean => {
 };
 
 const isBoxTop = (row: string): boolean => /^\s*[╭┌]/.test(row);
+
+/**
+ * The rest of a rule wider than this terminal: the agent draws its rules as wide as the PTY, and when this view is
+ * narrower (Zen fits the terminal to the reading column while another viewer sets the PTY's size) a 140-cell rule
+ * fills a 98-cell row and its last 42 cells go onto the next row — not always marked as a wrap (dev, 2026-11-08).
+ * Read as a rule of its own, it made the prompt "two lines", one of them dashes.
+ */
+export const isRuleRemainder = (prev: string | undefined, row: string, cols: number): boolean =>
+  prev !== undefined && isRule(row) && isRule(prev) && prev.replace(/\s+$/, '').length >= cols;
 
 /**
  * Claude Code draws its prompt between two horizontal rules, with a status line

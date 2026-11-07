@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { getHost } from '@ttym/ui';
 import type { ReaderPatch } from '@ttym/api';
 import '../viewer/viewer.css';
@@ -16,6 +16,9 @@ import type { DockLayout } from './useDockLayout.js';
  * whenever the agent shows its plain prompt — its dialogs, menus and pickers stay the terminal's own rows.
  */
 export type DockMode = 'native' | 'web';
+
+/** How long the field stays while the agent's prompt is missing from the screen (a repaint), before giving way to the terminal. */
+const HOLD_MS = 500;
 
 /**
  * The conversation, laid over the top of the real terminal.
@@ -90,9 +93,34 @@ export function ReaderView({ sid, state, error, working, live = null, layout, do
     return () => ro.disconnect();
   }, []);
   // The web input stands in for the agent's prompt only; a dialog or a menu is the terminal's own rows.
-  const promptView = dockMode === 'web' && layout?.view?.kind === 'prompt' ? layout.view : null;
-  const flowView = flow ? promptView : null;
-  const pinnedView = flow ? null : promptView;
+  // The prompt also goes missing for a moment while the agent repaints (a turn starting or ending, a resize): the
+  // field stays through that (HOLD_MS), so it is not torn down and rebuilt under the person's typing. A dialog the
+  // dock recognised takes its place at once.
+  // A prompt read off a garbled screen (the agent drew for another width and has not repainted) is not believed:
+  // the last good one stands for as long as the mess lasts.
+  const garbled = layout?.view?.kind === 'prompt' && layout.view.garbled === true;
+  const seenPrompt = layout?.view?.kind === 'prompt' && !garbled ? layout.view : null;
+  const lastPrompt = useRef<{ view: NonNullable<typeof seenPrompt>; at: number } | null>(null);
+  if (dockMode === 'web' && seenPrompt) lastPrompt.current = { view: seenPrompt, at: Date.now() };
+  const holding = dockMode === 'web' && !seenPrompt && layout?.view?.kind !== 'dialog'
+    && lastPrompt.current !== null && (garbled || Date.now() - lastPrompt.current.at < HOLD_MS);
+  const [, recheck] = useState(0);
+  useEffect(() => {
+    if (!holding) return;
+    const t = setTimeout(() => recheck((n) => n + 1), HOLD_MS + 20);
+    return () => clearTimeout(t);
+  }, [holding]);
+  const promptView = dockMode !== 'web' ? null : seenPrompt ?? (holding ? lastPrompt.current!.view : null);
+  // A draft taller than about half the page goes into the page, where the page's one scroll carries it with the
+  // conversation; nothing scrolls inside the field. Back to the bottom edge once it is well under that again.
+  const [tall, setTall] = useState(false);
+  const onComposerHeight = useCallback((px: number) => {
+    const stageH = root.current?.parentElement?.clientHeight ?? window.innerHeight;
+    setTall((t) => (t ? px > stageH * 0.35 : px > stageH * 0.45));
+  }, []);
+  const inFlow = flow || tall;
+  const flowView = inFlow ? promptView : null;
+  const pinnedView = inFlow ? null : promptView;
   const composer = useRef<ComposerHandle>(null);
   const busy = working || layout?.busy === true;
   const flowDockEl = useRef<HTMLDivElement>(null);
@@ -207,7 +235,7 @@ export function ReaderView({ sid, state, error, working, live = null, layout, do
           {live ? <LiveMessage text={live.text} done={live.done} /> : null}
           {queued.map((text, i) => <div key={`q${i}`} className="rd-user rd-queued"><div className="rd-bubble">{text}</div></div>)}
           {working && !live ? <Working since={turnStartedAt(state)} /> : null}
-          {flowView ? <div className="rd-flow-dock" ref={flowDockEl}><WebComposer ref={composer} sid={sid} view={flowView} busy={busy} known={known} /></div> : null}
+          {flowView ? <div className="rd-flow-dock" ref={flowDockEl}><WebComposer ref={composer} sid={sid} view={flowView} busy={busy} known={known} onHeight={onComposerHeight} /></div> : null}
         </div>
       </div>
       {behind ? <button className="rd-jump" onClick={() => { toLatest(); if (promptView) composer.current?.focus(); else getHost(sid)?.focusTerminal(); }}>↓ latest</button> : null}
@@ -217,7 +245,7 @@ export function ReaderView({ sid, state, error, working, live = null, layout, do
     </div>
     {view && layout ? (
       <div className="rd-dock" ref={dockEl} style={{ bottom: layout.insetPx, minHeight: layout.bottomPx - layout.insetPx, ...cssVars }}>
-        <WebComposer ref={composer} sid={sid} view={view} busy={busy} known={known} />
+        <WebComposer ref={composer} sid={sid} view={view} busy={busy} known={known} onHeight={onComposerHeight} />
       </div>
     ) : null}
     </>

@@ -421,10 +421,21 @@ export function WorkspacePage({ mux, workspaceId, pane, zen, open, localEchoEnab
   }, [focusedSid]);
 
   // ── 키바인딩: ⌘\ 우분할 · ⌘⇧\ 하분할 · ⌘←→ 포커스 순환 ──
+  // ⌘←→↑↓는 글을 고치는 키이기도 하다(줄 앞·끝, 글 처음·끝, ⇧와 함께면 그만큼 선택). 글이 든 입력칸(reader 웹 입력칸,
+  // 검색칸…)에서는 그쪽에 양보하고, ⇧·⌥이 붙으면 어디서든 칸 이동으로 쓰지 않는다. 터미널과 빈 입력칸에서는 그대로.
 
   useEffect(() => {
+    const editingText = (e: KeyboardEvent): boolean => {
+      const el = e.target as HTMLElement | null;
+      if (!el) return false;
+      if (el instanceof HTMLTextAreaElement) return !el.classList.contains('xterm-helper-textarea') && el.value !== '';
+      if (el instanceof HTMLInputElement) return el.value !== '';
+      return el.isContentEditable;
+    };
     const handler = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
+      const arrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.code === 'ArrowLeft' || e.code === 'ArrowRight';
+      if (meta && arrow && (e.shiftKey || e.altKey || editingText(e))) return;
       // ⌘F: 포커스 pane 검색. 브라우저 찾기는 이 페이지에선 캔버스라 무용 —
       // 가로채도 잃는 것이 없다. pane이 없으면 브라우저 기본 동작 유지.
       if (meta && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && focusedSid !== null && !e.shiftKey && !e.altKey) {

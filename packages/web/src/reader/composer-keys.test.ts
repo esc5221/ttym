@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyCompletion, keyToBytes, menuToken, type KeyLike } from './composer-keys.js';
+import { applyCompletion, isTextEditingKey, keyToBytes, menuToken, type KeyLike } from './composer-keys.js';
 
 const k = (key: string, code: string, mods: Partial<KeyLike> = {}): KeyLike => ({ key, code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
 
@@ -41,5 +41,14 @@ describe('applyCompletion', () => {
   it('replaces the token and the rest of its word', () => {
     const t = menuToken('look at @src/al and', 15)!;
     expect(applyCompletion('look at @src/alpha and', t, '@src/alpha.ts ')).toEqual({ text: 'look at @src/alpha.ts and', caret: 22 });
+  });
+});
+
+describe('isTextEditingKey', () => {
+  it('keeps Shift+Enter in the field as a new line, sends plain Enter and chords onward', () => {
+    expect(isTextEditingKey(k('Enter', 'Enter', { shiftKey: true }))).toBe(true);
+    expect(isTextEditingKey(k('Enter', 'Enter'))).toBe(false);
+    expect(isTextEditingKey(k('Tab', 'Tab', { shiftKey: true }))).toBe(false);
+    expect(isTextEditingKey(k('a', 'KeyA'))).toBe(true);
   });
 });

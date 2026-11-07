@@ -64,6 +64,8 @@ export function keyToBytes(e: KeyLike): string | null {
  */
 export function isTextEditingKey(e: KeyLike): boolean {
   if (e.metaKey) return true;
+  // Shift+Enter is a new line in the field, as in the agent's prompt (Option+Enter is handled by the field itself).
+  if (e.key === 'Enter' && e.shiftKey && !e.ctrlKey && !e.altKey) return true;
   if (!e.ctrlKey && !e.altKey) {
     if (e.key === 'Tab' || e.key === 'Escape' || e.key === 'Enter' || /^F\d+$/.test(e.key)) return false;
     return true; // characters, Backspace/Delete, arrows, Home/End, Shift+selection

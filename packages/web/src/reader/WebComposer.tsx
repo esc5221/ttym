@@ -1,9 +1,10 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import * as api from '@ttym/api';
 import { getHost } from '@ttym/ui';
 import { API_BASE, uploadDroppedFiles, quotePathForShell } from '../app-shared.js';
 import type { DockView } from './dock.js';
 import { keyToBytes, isTextEditingKey, menuToken, applyCompletion, type MenuToken } from './composer-keys.js';
+import { composerExtra, updateComposer, useComposerState } from './composerStore.js';
 
 /**
  * The reader's input box: a real text field in the page, in front of the agent's own prompt.
@@ -37,37 +38,38 @@ export const WebComposer = forwardRef<ComposerHandle, {
   busy: boolean;
   /** Messages known word for word (this conversation's prompts and queue), to restore one the agent shows wrapped. */
   known?: readonly string[];
-}>(function WebComposer({ sid, view, busy, known = [] }, ref) {
+  /** The field's height in px whenever it changes, so the page can take a tall draft into its own scroll. */
+  onHeight?: (px: number) => void;
+}>(function WebComposer({ sid, view, busy, known = [], onHeight }, ref) {
   const area = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(ref, () => ({ focus: () => area.current?.focus({ preventScroll: true }) }), []);
+  const extra = composerExtra(sid);
 
   // The agent wraps a long line itself, so its rows are not the text's lines: joined with newlines they would add
   // breaks the message never had. One row is exact. More rows are matched, spaces aside, against messages known
   // word for word; with no match the text stays the agent's and keys go to it (pass-through).
-  const sentByUs = useRef<string[]>([]);
   const shown = view.lines.join('\n');
   const exact = useMemo(() => {
     if (view.lines.length <= 1) return shown;
     const squash = (t: string) => t.replace(/\s+/g, '');
     const want = squash(shown);
-    for (const k of [...sentByUs.current].reverse().concat([...known].reverse())) if (squash(k) === want) return k;
+    for (const k of [...extra.sent].reverse().concat([...known].reverse())) if (squash(k) === want) return k;
     return null;
   }, [shown, known]);
   const mirror = exact ?? shown;
   const mirrorHasChip = CHIP.test(mirror) || exact === null;
   const mirrorRef = useRef({ text: mirror, lines: view.lines.length });
   mirrorRef.current = { text: mirror, lines: view.lines.length };
-  /** What we emptied from the agent's prompt when taking it over; the screen can still show it for a moment. */
-  const takenOver = useRef('');
-  const [draft, setDraft] = useState<string | null>(null);
-  /**
-   * Messages on their way (the server types, presses Enter and checks; ~1 s). The field is ours and empty
-   * meanwhile: mirroring would show the text being typed, and an edit would take it over and erase it.
-   */
-  const [pending, setPending] = useState(0);
+  // Draft and messages on their way live outside the component (composerStore): the field is remounted when the
+  // agent repaints or a dialog comes and goes, and must not lose either. While a message is on its way (~1 s) the
+  // field is ours and empty: mirroring would show the text being typed, and an edit would take it over and erase it.
+  const { draft, pending } = useComposerState(sid);
+  const setDraft = useCallback((d: string | null | ((cur: string | null) => string | null)) => {
+    updateComposer(sid, (s) => ({ draft: typeof d === 'function' ? d(s.draft) : d }));
+  }, [sid]);
+  const setPending = useCallback((f: (n: number) => number) => updateComposer(sid, (s) => ({ pending: f(s.pending) })), [sid]);
   const owned = draft !== null || pending > 0;
   const value = draft ?? (pending > 0 ? '' : mirror);
-  const chain = useRef<Promise<void>>(Promise.resolve());
   const [note, setNote] = useState<string | null>(null);
   const lastEsc = useRef(0);
 
@@ -88,10 +90,38 @@ export const WebComposer = forwardRef<ComposerHandle, {
     const text = draft;
     setDraft(null);
     if (text) {
-      sentByUs.current = [...sentByUs.current.slice(-19), text];
+      extra.sent = [...extra.sent.slice(-19), text];
       await api.submitToSession(API_BASE, sid, text, 'none').catch(() => {});
     }
-  }, [draft, sid]);
+  }, [draft, sid, setDraft]);
+
+  // Back after a remount: the caret where it was, and the keyboard if the field had it. Whether it had it is kept
+  // as focus comes and goes — by the time an unmount's cleanup runs the element is already out of the page, and a
+  // removed element sends no blur, so the last word stands.
+  useEffect(() => {
+    const el = area.current;
+    if (el && extra.focused) {
+      el.focus({ preventScroll: true });
+      const at = Math.min(extra.caret ?? el.value.length, el.value.length);
+      el.setSelectionRange(at, at);
+    }
+  }, []);
+
+  // As tall as its text, wrapped lines included; nothing scrolls inside it. A draft taller than the page allows
+  // goes into the page (ReaderView), whose own scroll then carries it.
+  useLayoutEffect(() => {
+    const el = area.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.height = 'auto';
+      el.style.height = `${el.scrollHeight}px`;
+      onHeight?.(el.getBoundingClientRect().height);
+    };
+    fit();
+    const ro = new ResizeObserver(() => fit());
+    ro.observe(el.parentElement ?? el);
+    return () => ro.disconnect();
+  }, [value, onHeight]);
 
   // Keep the caret where the agent's is while mirroring, so a taken-over edit lands where the person expects.
   useEffect(() => {
@@ -167,17 +197,17 @@ export const WebComposer = forwardRef<ComposerHandle, {
     setDraft(null);
     setNote(null);
     setPending((n) => n + 1);
-    chain.current = chain.current.then(async () => {
+    extra.chain = extra.chain.then(async () => {
       try {
         // Text can reach the agent's prompt after we took over (a ↑ answered late, someone typing in the terminal):
         // the server would send it along with ours, glued on. Empty it first and say so.
-        const stray = mirrorRef.current.text === takenOver.current ? { text: '', lines: 0 } : mirrorRef.current;
+        const stray = mirrorRef.current.text === extra.takenOver ? { text: '', lines: 0 } : mirrorRef.current;
         if (stray.text) {
           clearAgentPrompt(stray.lines);
           await new Promise((r) => setTimeout(r, 120));
         }
-        takenOver.current = '';
-        sentByUs.current = [...sentByUs.current.slice(-19), text];
+        extra.takenOver = '';
+        extra.sent = [...extra.sent.slice(-19), text];
         const r = await api.submitToSession(API_BASE, sid, text, 'cr');
         if (stray.text) setNote(`Cleared what was in the agent's prompt before sending: “${stray.text.slice(0, 60)}${stray.text.length > 60 ? '…' : ''}”`);
         // Still in the agent's prompt: it shows here again (mirror) rather than as a second copy; Enter tries again.
@@ -194,9 +224,10 @@ export const WebComposer = forwardRef<ComposerHandle, {
   const onChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const next = e.target.value;
     setCaret(e.target.selectionStart ?? next.length);
+    extra.caret = e.target.selectionStart;
     if (!owned) {
       // Taking over what the agent's prompt held.
-      if (mirror) { clearAgentPrompt(view.lines.length); takenOver.current = mirror; }
+      if (mirror) { clearAgentPrompt(view.lines.length); extra.takenOver = mirror; }
       setDraft(next);
       return;
     }
@@ -228,6 +259,13 @@ export const WebComposer = forwardRef<ComposerHandle, {
       e.preventDefault();
       if (owned) void submit(value);
       else send('\r'); // whatever the agent's prompt holds (or a suggestion it shows) is the agent's to send
+      return;
+    }
+
+    // Option+Enter: a new line too (the agent's own binding for it); a text field does not insert one by itself.
+    if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+      e.preventDefault();
+      document.execCommand('insertText', false, '\n');
       return;
     }
 
@@ -282,7 +320,7 @@ export const WebComposer = forwardRef<ComposerHandle, {
     uploadDroppedFiles(images).then((paths) => {
       const ins = paths.map(quotePathForShell).join(' ') + ' ';
       const base = owned ? value : '';
-      if (!owned && mirror) { clearAgentPrompt(view.lines.length); takenOver.current = mirror; }
+      if (!owned && mirror) { clearAgentPrompt(view.lines.length); extra.takenOver = mirror; }
       const text = (owned ? base.slice(0, at) : mirror) + ins + (owned ? base.slice(at) : '');
       setDraft(text);
       setNote(null);
@@ -290,7 +328,6 @@ export const WebComposer = forwardRef<ComposerHandle, {
   };
 
   const placeholder = !owned && !mirror ? (view.placeholder ?? (busy ? 'Queue a message…' : 'Message')) : undefined;
-  const rows = Math.min(12, Math.max(1, value.split('\n').length));
 
   return (
     <div className={`rd-wc${busy ? ' busy' : ''}${owned ? ' owned' : ''}`} data-sid={sid}>
@@ -312,14 +349,16 @@ export const WebComposer = forwardRef<ComposerHandle, {
           ref={area}
           className="rd-wc-input"
           value={value}
-          rows={rows}
+          rows={1}
           placeholder={placeholder}
           spellCheck={false}
           readOnly={!owned && mirrorHasChip}
           onCompositionEnd={(ev) => { if (!owned && mirrorHasChip && ev.data) send(ev.data); }}
           onChange={onChange}
           onKeyDown={onKeyDown}
-          onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+          onSelect={(e) => { setCaret(e.currentTarget.selectionStart ?? 0); extra.caret = e.currentTarget.selectionStart; }}
+          onFocus={() => { extra.focused = true; }}
+          onBlur={() => { extra.focused = false; }}
           onPaste={onPaste}
           aria-label="Message to the agent"
         />

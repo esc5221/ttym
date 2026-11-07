@@ -1,7 +1,7 @@
 import { useEffect, useState, type RefObject } from 'react';
 import { getHost } from '@ttym/ui';
 import type { ReaderAgent } from '@ttym/api';
-import { contentRows, dockBusy, dockRowCount, dockView, type DockView } from './dock.js';
+import { contentRows, dockBusy, dockRowCount, dockView, isRuleRemainder, type DockView } from './dock.js';
 
 /**
  * Where the page ends and the real terminal shows through.
@@ -80,15 +80,29 @@ export function useDockLayout(
         } else all.push(text);
       }
       const drawn = contentRows(all);
-      const n = dockRowCount(agent, drawn, waiting, buf.cursorY);
+      // The rest of a rule wider than this view is not a rule of its own (isRuleRemainder); it is left out of what
+      // the agent's rows are read from, like a marked wrap.
+      const skip: boolean[] = [];
+      let prevRow: string | undefined;
+      for (let i = 0; i < drawn.length; i++) {
+        skip.push(continued[i] || isRuleRemainder(prevRow, drawn[i]!, term.cols));
+        if (!skip[i]) prevRow = drawn[i];
+      }
+      const kept: number[] = [];
+      drawn.forEach((_, i) => { if (!skip[i] || continued[i]) kept.push(i); });
+      const keptRows = kept.map((i) => drawn[i]!);
+      const keptCaret = kept.indexOf(buf.cursorY);
+      const nKept = dockRowCount(agent, keptRows, waiting, keptCaret >= 0 ? keptCaret : undefined);
+      const dockTop = kept[keptRows.length - nKept] ?? drawn.length - nKept;
+      const n = drawn.length - dockTop;
       // `r` was read under the transform applied last time; with it removed, the screen's bottom edge is here.
       const bottomUnshifted = r.bottom - shift;
-      const dockTop = drawn.length - n;
-      // The styled copy reads the rows without the continuation ones, which hold only the rest of a wrapped line.
+      // The prompt is read from the rows without the continuation ones (they hold only the rest of a wrapped line)
+      // and without leftover rules.
       const dockRows: string[] = [];
       let caretY = buf.cursorY - dockTop;
       for (let i = dockTop; i < drawn.length; i++) {
-        if (continued[i]) { if (i < buf.cursorY) caretY--; continue; }
+        if (skip[i]) { if (i < buf.cursorY) caretY--; continue; }
         dockRows.push(drawn[i]);
       }
       let view = dockView(agent, dockRows, { x: buf.cursorX, y: caretY }, waiting);
@@ -98,7 +112,7 @@ export function useDockLayout(
       if (view?.kind === 'prompt') {
         const split: { typed: string; ghost: string }[] = [];
         for (let i = dockTop; i < drawn.length; i++) {
-          if (continued[i]) continue;
+          if (skip[i]) continue;
           const line = buf.getLine(buf.viewportY + i);
           let typed = '';
           let ghost = '';
@@ -117,7 +131,9 @@ export function useDockLayout(
         const typedLines = rowsOfPrompt.map((r) => r.typed.replace(/^ /, ''));
         while (typedLines.length > 1 && typedLines[typedLines.length - 1] === '') typedLines.pop();
         const ghost = rowsOfPrompt.map((r) => r.ghost).filter(Boolean).join(' ');
-        if (typedLines.every((l) => !l.trim())) view = { ...view, lines: [''], placeholder: ghost || undefined, caret: { line: 0, col: 0 } };
+        const garbled = typedLines.some((l) => /[─━═]{8,}/.test(l));
+        if (garbled) view = { ...view, garbled: true };
+        else if (typedLines.every((l) => !l.trim())) view = { ...view, lines: [''], placeholder: ghost || undefined, caret: { line: 0, col: 0 } };
         else view = { ...view, lines: typedLines, ghost: ghost || undefined };
       }
       const nextShift = Math.round((term.rows - drawn.length) * cellH);

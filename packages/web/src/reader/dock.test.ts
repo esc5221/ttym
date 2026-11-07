@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FALLBACK_DOCK_ROWS, contentRows, dockBusy, dockRowCount, dockView } from './dock.js';
+import { FALLBACK_DOCK_ROWS, contentRows, dockBusy, dockRowCount, dockView, isRuleRemainder } from './dock.js';
 
 const RULE = '─'.repeat(100);
 /** A 20-row screen: some output, then the given bottom rows. */
@@ -267,5 +267,28 @@ describe('codex', () => {
       expect(view.options[0]).toMatchObject({ label: 'Yes, proceed (y)', selected: true });
       expect(view.detail.some((d) => d.startsWith('$ sleep 8'))).toBe(true);
     }
+  });
+});
+
+describe('a rule wider than the view', () => {
+  // A 98-cell browser terminal on a 140-cell PTY (dev, 2026-11-08): each rule fills a row and its last 42 cells
+  // land on the next row, unmarked as a wrap.
+  const full = '─'.repeat(98), rest = '─'.repeat(42);
+  const screenRows = ['✻', full, rest, '❯ ', full, rest, '  ⏵⏵ bypass permissions on (shift+tab to cycle) · esc to interrupt'];
+
+  it('tells the rest of a full-width rule from a rule of its own', () => {
+    expect(isRuleRemainder(full, rest, 98)).toBe(true);
+    expect(isRuleRemainder('❯ ', full, 98)).toBe(false);
+    expect(isRuleRemainder(rest, full, 98)).toBe(false);
+    expect(isRuleRemainder(full, '❯ hello', 98)).toBe(false);
+  });
+
+  it('with the remainders taken out, the prompt is one empty row again — not a row of dashes', () => {
+    const fresh = screenRows.filter((r, i) => !isRuleRemainder(screenRows[i - 1], r, 98));
+    const n = dockRowCount('claude-code', fresh, false, fresh.indexOf('❯ '));
+    expect(dockView('claude-code', fresh.slice(-n), null, false)).toMatchObject({ kind: 'prompt', lines: [''] });
+    // As it was read before: the leftover counted as a rule, and its dashes became a line of the prompt.
+    const n0 = dockRowCount('claude-code', screenRows, false, screenRows.indexOf('❯ '));
+    expect((dockView('claude-code', screenRows.slice(-n0), null, false) as { lines: string[] }).lines.length).toBeGreaterThan(1);
   });
 });
