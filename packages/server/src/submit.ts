@@ -88,7 +88,7 @@ export async function typeAndSubmit(target: SubmitTarget, text: string, opts: Su
     }
   }
 
-  const pieces = opts.submit === 'cr' ? utf8Pieces(Buffer.from(text), PROMPT_PIECE_BYTES) : [Buffer.from(text)];
+  const pieces = opts.submit !== 'lf' ? utf8Pieces(Buffer.from(text), PROMPT_PIECE_BYTES) : [Buffer.from(text)];
   for (let i = 0; i < pieces.length; i++) {
     if (target.isDead) break;
     target.write(pieces[i]!);
@@ -111,6 +111,11 @@ export async function typeAndSubmit(target: SubmitTarget, text: string, opts: Su
   if (!watch || before === null) return { submitted: null, retried: false, waitedMs };
 
   const settleMs = opts.settleMs ?? SUBMIT_SETTLE_MS;
+  // What shows while our text is still in the composer: its first words, or the chip a long paste collapses to.
+  const head = text.split('\n').find((l) => l.trim())?.trim().slice(0, 12) ?? '';
+  // Spaces and line breaks aside: the prompt wraps a long text onto rows wherever the screen ends.
+  const squash = (t: string) => t.replace(/\s+/g, '');
+  const stillOurs = (shown: string) => /\[Pasted text #/.test(shown) || !head || squash(shown).includes(squash(head));
   const movedOn = async () => {
     for (let t = 0; t < settleMs; t += POLL_MS) {
       await sleep(POLL_MS);
@@ -118,7 +123,9 @@ export async function typeAndSubmit(target: SubmitTarget, text: string, opts: Su
       const now = composer();
       // Empty, back to what it held before we typed, or gone (a dialog opened): the CR took. A draft
       // someone left there goes out with our text, so the composer empties rather than returning to it.
-      if (now === null || now === '' || now === before) return true;
+      // Something else in it is the agent's doing once the message was taken (Claude Code restores a
+      // stashed draft there): a second Enter would send that.
+      if (now === null || now === '' || now === before || !stillOurs(now)) return true;
     }
     return false;
   };

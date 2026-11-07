@@ -6,7 +6,7 @@ import { typeAndSubmit, type SubmitTarget } from './submit.js';
  * A pane with Claude's composer. `onCr` says what a CR does to it: 'send' clears it, 'newline'
  * keeps the text (a paste whose end was never seen) until the end-of-paste mark arrives.
  */
-function pane(opts: { onCr: 'send' | 'newline' | 'never'; bootPolls?: number; drawDelay?: number; draft?: string }) {
+function pane(opts: { onCr: 'send' | 'newline' | 'never'; bootPolls?: number; drawDelay?: number; draft?: string; afterSend?: string; width?: number }) {
   let composer = opts.draft ?? '';
   let pasteOpen = opts.onCr !== 'send';
   let boot = opts.bootPolls ?? 0;
@@ -20,14 +20,19 @@ function pane(opts: { onCr: 'send' | 'newline' | 'never'; bootPolls?: number; dr
       const s = data.toString();
       writes.push(s);
       if (s === '\x1b[201~') { if (opts.onCr !== 'never') pasteOpen = false; return; }
-      if (s === '\r') { if (!pasteOpen) composer = ''; else composer += '\n'; return; }
+      // afterSend: what the agent puts back in its prompt once a message is taken (Claude Code restores a stashed draft).
+      if (s === '\r') { if (!pasteOpen) composer = opts.afterSend ?? ''; else composer += '\n'; return; }
       pending += s;
       draw = opts.drawDelay ?? 0;
     },
     screenTail() {
       if (boot > 0) { boot--; return [[{ t: 'Welcome to Claude Code' }]]; }
       if (pending && draw-- <= 0) { composer += pending; pending = ''; }
-      return [rule, [{ t: `❯ ${composer}` }], rule];
+      // A composer wider than the screen wraps onto more rows, as Claude draws it; composerText reads the first.
+      const w = opts.width ?? Infinity;
+      const rows: ScreenRun[][] = [[{ t: `❯ ${composer.slice(0, w)}` }]];
+      for (let i = w; i < composer.length; i += w) rows.push([{ t: `  ${composer.slice(i, i + w)}` }]);
+      return [rule, ...rows, rule];
     },
   };
   return { target, writes, composer: () => composer };
@@ -56,6 +61,23 @@ describe('typeAndSubmit', () => {
     expect(r.retried).toBe(true);
     expect(p.writes).toEqual(['첫 지시', '\r', '\x1b[201~', '\r']);
     expect(p.composer()).toBe('');
+  });
+
+  it('the agent fills its prompt with something else once the message is taken (a stashed draft): submitted, no second Enter', async () => {
+    // Claude Code 2.1.319, dev 2026-11-07: Ctrl+S stashed a draft, the next message went, the draft came back —
+    // and the retry's Enter sent the draft as a message of its own.
+    const p = pane({ onCr: 'send', afterSend: 'draft kept for later' });
+    const r = await typeAndSubmit(p.target, 'Reply with exactly: PONG-4', { submit: 'cr', agent: 'claude', sleep: now });
+    expect(r).toEqual({ submitted: true, retried: false, waitedMs: 0 });
+    expect(p.writes).toEqual(['Reply with exactly: PONG-4', '\r']);
+    expect(p.composer()).toBe('draft kept for later');
+  });
+
+  it('a long draft left before our text, still there after Enter: stuck, though our words are off its first row', async () => {
+    const draft = 'a long draft someone left in the prompt, long enough to fill the first row ';
+    const p = pane({ onCr: 'never', draft, width: 40 });
+    const r = await typeAndSubmit(p.target, 'Reply with exactly: X', { submit: 'cr', agent: 'claude', sleep: now });
+    expect(r).toMatchObject({ submitted: false, retried: true });
   });
 
   it('still there after the retry: false, so the caller can say so', async () => {

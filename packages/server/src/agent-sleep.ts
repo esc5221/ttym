@@ -153,9 +153,15 @@ export function composerText(rows: ScreenRun[][], kind: AgentKind): string | nul
   if (kind === 'claude') {
     const rules = rows.map((r, i) => (/^─{8,}$/.test(text(r).trim()) ? i : -1)).filter((i) => i >= 0);
     if (rules.length >= 2) {
-      const first = rows[rules[rules.length - 2]! + 1];
-      if (first && text(first).trimStart().startsWith('!')) return typedAfter(first, '!');
-      if (first && text(first).trimStart().startsWith('❯')) return typedAfter(first, '❯');
+      const top = rules[rules.length - 2]!;
+      const first = rows[top + 1];
+      const mark = first && text(first).trimStart().startsWith('!') ? '!' : first && text(first).trimStart().startsWith('❯') ? '❯' : null;
+      if (first && mark) {
+        // Everything up to the bottom rule is the prompt: a long text is drawn on several rows, and reading only the
+        // first made a draft left there look the same before and after our text was typed after it.
+        const more = rows.slice(top + 2, rules[rules.length - 1]).map((r) => r.filter((x) => !x.d).map((x) => x.t).join('').replace(/\u00a0/g, ' ').trim());
+        return [typedAfter(first, mark), ...more].join('\n').trim();
+      }
     }
   }
   const mark = kind === 'claude' ? '❯' : '›';
