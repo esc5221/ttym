@@ -8,11 +8,14 @@ import { currentTheme, hydrateMermaid } from './mermaid.js';
 import { splitMarkdown, type LiveText } from './live.js';
 import { attachSummaries, formatDuration, groupRuns, pendingMessages, turnStartedAt, type Block, type ReaderState } from './model.js';
 import { Linkified, refLinkHandlers } from './ref-links.js';
-import { StyledDock } from './StyledDock.js';
+import { WebComposer, type ComposerHandle } from './WebComposer.js';
 import type { DockLayout } from './useDockLayout.js';
 
-/** How the input area at the bottom is drawn: the terminal's own rows, or a styled copy of them. */
-export type DockMode = 'native' | 'styled';
+/**
+ * How the input area at the bottom works: the terminal's own rows, or a text field in the page (WebComposer)
+ * whenever the agent shows its plain prompt — its dialogs, menus and pickers stay the terminal's own rows.
+ */
+export type DockMode = 'native' | 'web';
 
 /**
  * The conversation, laid over the top of the real terminal.
@@ -21,7 +24,7 @@ export type DockMode = 'native' | 'styled';
  * and the permission dialog) is the terminal itself showing through, so typing
  * and answering a prompt need nothing from this file.
  */
-export function ReaderView({ sid, state, error, working, live = null, layout, dockMode, columnMax, flow = false, onLoadEarlier, loadingEarlier = false, fontSize, topInset, paneProps }: {
+export function ReaderView({ sid, state, error, working, live = null, layout, dockMode, columnMax, flow = false, onLoadEarlier, loadingEarlier = false, fontSize, topInset, paneProps, focused = true }: {
   sid: number;
   state: ReaderState;
   error: string | null;
@@ -33,7 +36,7 @@ export function ReaderView({ sid, state, error, working, live = null, layout, do
   dockMode: DockMode;
   /** Widest the reading column may be, in px; a pane can be far wider than a line is comfortable to read. */
   columnMax?: number;
-  /** With the styled dock: draw it as the last thing on the page, scrolling with the conversation, instead of pinned to the bottom. */
+  /** With the web input: draw it as the last thing on the page, scrolling with the conversation, instead of pinned to the bottom. */
   flow?: boolean;
   /** Fetch the page of history above what is shown (see `state.earlier`). */
   onLoadEarlier?: () => void;
@@ -44,6 +47,8 @@ export function ReaderView({ sid, state, error, working, live = null, layout, do
   topInset?: number;
   /** What the pane does with the pointer apart from reading (dropped files, selecting a path); the page carries it so it works over the text too. */
   paneProps?: React.HTMLAttributes<HTMLDivElement>;
+  /** This pane is the one the workspace has in focus; only that one moves the keyboard between its field and terminal. */
+  focused?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const stuck = useRef(true);
@@ -84,10 +89,17 @@ export function ReaderView({ sid, state, error, working, live = null, layout, do
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  // A styled dock that flows with the page ends it, and changes height as someone types or a dialog appears.
-  const styledView = dockMode === 'styled' ? layout?.view ?? null : null;
-  const flowView = flow ? styledView : null;
-  const pinnedView = flow ? null : styledView;
+  // The web input stands in for the agent's prompt only; a dialog or a menu is the terminal's own rows.
+  const promptView = dockMode === 'web' && layout?.view?.kind === 'prompt' ? layout.view : null;
+  const flowView = flow ? promptView : null;
+  const pinnedView = flow ? null : promptView;
+  const composer = useRef<ComposerHandle>(null);
+  const busy = working || layout?.busy === true;
+  const flowDockEl = useRef<HTMLDivElement>(null);
+  const known = useMemo(
+    () => [...state.blocks.flatMap((b) => (b.kind === 'user' ? [b.text] : [])).slice(-50), ...state.queue.map((q) => q.text)],
+    [state.blocks, state.queue],
+  );
   const flowSignature = flowView ? JSON.stringify(flowView) : '';
   const firstId = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -116,15 +128,30 @@ export function ReaderView({ sid, state, error, working, live = null, layout, do
     const sub = getHost(sid)?.term.onData(() => { if (!stuck.current) toLatest(); });
     return () => sub?.dispose();
   }, [sid, flowView !== null]);
+  // The keyboard follows the input: into the field when the agent's prompt is back, into the terminal when a
+  // dialog or menu takes its place — but only if it was one of the two that had it, so a click elsewhere keeps its focus.
+  const hasField = promptView !== null;
+  useEffect(() => {
+    if (dockMode !== 'web' || !focused) return;
+    const host = getHost(sid);
+    const active = document.activeElement;
+    // Only this pane's own field or terminal (or nothing): another pane's field, or a box elsewhere, keeps the keyboard.
+    const ours = !active || active === document.body || active === host?.term.textarea
+      || !!dockEl.current?.contains(active) || !!flowDockEl.current?.contains(active);
+    if (!ours) return;
+    if (hasField) composer.current?.focus(); else host?.focusTerminal();
+  }, [hasField, dockMode, sid, focused]);
 
   // A click that selects nothing hands the keyboard back to the terminal, so typing never needs a click on the dock.
   const refocus = () => {
     // On a touch screen a tap would raise the keyboard every time someone touches the text to scroll.
     if (window.matchMedia('(pointer: coarse)').matches) return;
-    if (window.getSelection()?.isCollapsed !== false) getHost(sid)?.focusTerminal();
+    if (window.getSelection()?.isCollapsed !== false) {
+      if (promptView) composer.current?.focus(); else getHost(sid)?.focusTerminal();
+    }
   };
 
-  // A pinned styled dock stands on top of the terminal rows it copies, so it must be at least as tall as they are.
+  // A pinned web input stands on top of the terminal rows it replaces, so it must be at least as tall as they are.
   const view = pinnedView;
   const dockEl = useRef<HTMLDivElement>(null);
   const [dockH, setDockH] = useState(0);
@@ -180,17 +207,17 @@ export function ReaderView({ sid, state, error, working, live = null, layout, do
           {live ? <LiveMessage text={live.text} done={live.done} /> : null}
           {queued.map((text, i) => <div key={`q${i}`} className="rd-user rd-queued"><div className="rd-bubble">{text}</div></div>)}
           {working && !live ? <Working since={turnStartedAt(state)} /> : null}
-          {flowView ? <div className="rd-flow-dock"><StyledDock sid={sid} view={flowView} /></div> : null}
+          {flowView ? <div className="rd-flow-dock" ref={flowDockEl}><WebComposer ref={composer} sid={sid} view={flowView} busy={busy} known={known} /></div> : null}
         </div>
       </div>
-      {behind ? <button className="rd-jump" onClick={() => { toLatest(); getHost(sid)?.focusTerminal(); }}>↓ latest</button> : null}
+      {behind ? <button className="rd-jump" onClick={() => { toLatest(); if (promptView) composer.current?.focus(); else getHost(sid)?.focusTerminal(); }}>↓ latest</button> : null}
       <div className={`rd-hint${near && !flowView ? ' near' : ''}`}>
-        {view ? 'styled copy · typing goes to the terminal underneath' : `live terminal · last ${layout?.rows ?? 0} rows · PTY size unchanged`}
+        {view ? 'web input · keys it has no use for go to the agent' : `live terminal · last ${layout?.rows ?? 0} rows · PTY size unchanged`}
       </div>
     </div>
     {view && layout ? (
       <div className="rd-dock" ref={dockEl} style={{ bottom: layout.insetPx, minHeight: layout.bottomPx - layout.insetPx, ...cssVars }}>
-        <StyledDock sid={sid} view={view} />
+        <WebComposer ref={composer} sid={sid} view={view} busy={busy} known={known} />
       </div>
     ) : null}
     </>

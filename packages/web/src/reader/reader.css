@@ -114,69 +114,58 @@
 .rd-hint.near { opacity: 1; }
 @media (hover: none) { .rd-hint { display: none; } }
 
-/* styled copy of the input area: stands on the terminal rows it copies, same column as the page */
+/* the web input (WebComposer): stands on the terminal rows of the agent's prompt, same column as the page */
 .rd-dock {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; background: var(--bg0);
   display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-start; padding: 0 0 8px var(--rd-left, 0px); box-sizing: border-box;
 }
-.rd-composer-wrap, .rd-approval { width: var(--rd-w, 768px); max-width: 100%; box-sizing: border-box; }
-.rd-composer-wrap { position: relative; padding-bottom: 20px; }
-.rd-composer {
+.rd-wc { position: relative; width: var(--rd-w, 768px); max-width: 100%; box-sizing: border-box; padding-bottom: 20px; }
+.rd-wc-box {
+  position: relative; display: flex; gap: 8px; align-items: flex-start;
   background: var(--term-bg, var(--bg0)); border: 1px solid var(--line-strong); border-radius: 14px; padding: 8px 12px;
-  box-shadow: 0 1px 10px rgba(0, 0, 0, .18); cursor: text; font: var(--rd-term-fs, 13px)/1.5 var(--mono, monospace); color: var(--term-fg, var(--text));
+  box-shadow: 0 1px 10px rgba(0, 0, 0, .18); font: var(--rd-term-fs, 13px)/1.5 var(--mono, monospace); color: var(--term-fg, var(--text));
 }
-.rd-composer:hover { border-color: var(--text-dim); }
-.rd-crow { display: flex; gap: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.rd-pm { color: var(--accent); flex-shrink: 0; }
-.rd-ph { color: var(--text-dim); }
+.rd-wc-box:focus-within { border-color: var(--accent); }
+.rd-wc.busy .rd-wc-box { border-style: dashed; }
+.rd-wc-pm { color: var(--accent); flex-shrink: 0; line-height: inherit; }
+.rd-wc-input {
+  flex: 1; min-width: 0; resize: none; border: 0; outline: 0; padding: 0; margin: 0; background: transparent;
+  color: inherit; font: inherit; line-height: inherit; max-height: 40vh; overflow-y: auto;
+}
+.rd-wc-input::placeholder { color: var(--text-dim); opacity: 1; }
+.rd-wc-input[readonly] { cursor: default; }
+/* the agent's own grey completion after the typed text, as it draws it */
+.rd-wc-ghost { position: absolute; right: 12px; top: 8px; color: var(--text-dim); pointer-events: none; }
+.rd-wc-menu {
+  position: absolute; left: 0; right: 0; bottom: calc(100% - 14px); max-height: 50vh; overflow-y: auto; z-index: 4;
+  background: var(--bg1); border: 1px solid var(--line-strong); border-radius: 10px; padding: 4px; box-shadow: 0 4px 18px rgba(0, 0, 0, .25);
+  font: var(--rd-term-fs, 13px)/1.45 var(--mono, monospace); scrollbar-width: thin;
+}
+.rd-wc-item { display: flex; gap: 12px; align-items: baseline; padding: 3px 8px; border-radius: 6px; cursor: pointer; color: var(--text); }
+.rd-wc-item.sel { background: var(--accent-bg); color: var(--accent); }
+.rd-wc-label { flex-shrink: 0; white-space: nowrap; }
+.rd-wc-detail { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9em; }
+.rd-wc-note { color: var(--accent); }
 .rd-caret { background: var(--term-fg, var(--text)); color: var(--term-bg, var(--bg0)); animation: rd-blink 1.1s steps(1) infinite; }
 /* status rows overlap the padding under the box, so the dock's height doesn't change when they show */
 .rd-meta {
   position: absolute; left: 12px; right: 12px; bottom: 2px; display: flex; gap: 10px; align-items: baseline; justify-content: space-between;
-  font: 11px/16px var(--mono, monospace); color: var(--text-dim); opacity: 0; transition: opacity .15s ease; pointer-events: none;
+  font: 11px/16px var(--mono, monospace); color: var(--text-dim); pointer-events: none; white-space: nowrap; overflow: hidden;
 }
 .rd-meta-row { display: contents; }
-.rd-dock:hover .rd-meta { opacity: 1; }
-@media (hover: none) { .rd-meta { opacity: 1; } }
-
-.rd-approval {
-  border: 1px solid var(--line-strong); border-radius: 12px; padding: 16px; background: var(--bg1);
-  font: var(--rd-term-fs, 13px)/1.6 var(--mono, monospace); color: var(--term-fg, var(--text)); box-shadow: 0 1px 10px rgba(0, 0, 0, .18);
-  max-height: 60vh; overflow-y: auto;
-}
-.rd-ap-title { font-size: 11px; color: var(--text-dim); }
-.rd-ap-detail { margin: 4px 0 2px; color: var(--text); font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
-.rd-ap-q { font: 600 14px var(--sans, system-ui, sans-serif); color: var(--text); margin: 12px 0 6px; }
-.rd-opt {
-  display: flex; gap: 8px; width: calc(100% + 16px); margin: 0 -8px; padding: 3px 8px; border: 0; border-radius: 6px;
-  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
-}
-.rd-opt:hover { background: var(--hl); }
-.rd-opt.sel { background: var(--accent-bg); color: var(--accent); }
-.rd-opt-n { flex-shrink: 0; }
-.rd-ap-hint { margin-top: 10px; font-size: 11px; color: var(--text-dim); }
 
 /* scrollbars: thin, and invisible until the pointer is over the thing that scrolls (the browser's own bars are heavy next to the text) */
-.rd-scroll, .rd-md pre, .rd-md table, .rd-pre, .rd-diff, .rd-approval {
+.rd-scroll, .rd-md pre, .rd-md table, .rd-pre, .rd-diff {
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
-.rd-scroll:hover, .rd-md pre:hover, .rd-md table:hover, .rd-pre:hover, .rd-diff:hover, .rd-approval:hover {
+.rd-scroll:hover, .rd-md pre:hover, .rd-md table:hover, .rd-pre:hover, .rd-diff:hover {
   scrollbar-color: color-mix(in srgb, var(--text-dim) 55%, transparent) transparent;
 }
 
-/* touch screens: option buttons big enough for a finger */
-@media (pointer: coarse) {
-  .rd-opt { min-height: 40px; align-items: center; }
-  .rd-approval { padding: 12px; }
-}
-
-/* text an input method is still composing, drawn at the caret */
-.rd-ime { text-decoration: underline; text-underline-offset: 3px; }
-
-/* the styled dock as the last thing on the page: at the bottom when the conversation is short, after the last line when it is long */
+/* the web input as the last thing on the page (Zen): at the bottom when the conversation is short, after the last line when it is long */
 .rd-flow-dock { margin-top: auto; padding-top: 10px; }
-.rd-flow .rd-composer-wrap, .rd-flow .rd-approval { width: 100%; }
+.rd-flow .rd-wc { width: 100%; }
 
 .rd-earlier {
   align-self: center; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: none; cursor: pointer;

@@ -26,6 +26,8 @@ export type DockView =
       status: string[][];
       /** Text the agent draws in an empty prompt as a hint (Codex does); `lines` is then empty and this is shown dim. */
       placeholder?: string;
+      /** Grey text the agent draws after what was typed (an inline completion, "cap +8" after "/re"). */
+      ghost?: string;
     }
   | {
       kind: 'dialog';
@@ -60,13 +62,15 @@ const RULE_CHARS = /[─━═]/;
 /**
  * A horizontal rule: a long run of line-drawing characters. Claude Code puts the
  * session's name into the prompt's top rule ("──────── my-session ─"), so the
- * run may be followed by a title and one more dash.
+ * run may be followed by a title and one more dash. While ↑ walks the history it
+ * puts the place near the front instead ("─── History 2/5 ───────…").
  */
 const isRule = (row: string): boolean => {
   const t = row.trim();
   if (t.length < 8 || /[╭╮╰╯┌┐└┘│]/.test(t)) return false; // a box edge is not a rule
   let lead = 0;
   while (lead < t.length && RULE_CHARS.test(t[lead])) lead++;
+  if (lead >= 2 && lead < 8 && /^\s+\S.*?\s+[─━═]{8,}$/.test(t.slice(lead))) return true;
   if (lead < 8) return false;
   if (lead === t.length) return true;
   // "<rule> title ─": the title is set off by spaces and closed by one more dash, however long the title is

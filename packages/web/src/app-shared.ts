@@ -292,12 +292,12 @@ export function writePhoneReader(on: boolean): void {
   try { if (on) localStorage.setItem(PHONE_READER_STORAGE_KEY, '1'); else localStorage.removeItem(PHONE_READER_STORAGE_KEY); } catch {}
 }
 
-export function readPhoneReaderDock(): 'native' | 'styled' {
-  try { return localStorage.getItem(PHONE_READER_DOCK_STORAGE_KEY) === 'styled' ? 'styled' : 'native'; } catch { return 'native'; }
+export function readPhoneReaderDock(): 'native' | 'web' {
+  try { const v = localStorage.getItem(PHONE_READER_DOCK_STORAGE_KEY); return v === 'web' || v === 'styled' ? 'web' : 'native'; } catch { return 'native'; }
 }
 
-export function writePhoneReaderDock(mode: 'native' | 'styled'): void {
-  try { if (mode === 'styled') localStorage.setItem(PHONE_READER_DOCK_STORAGE_KEY, mode); else localStorage.removeItem(PHONE_READER_DOCK_STORAGE_KEY); } catch {}
+export function writePhoneReaderDock(mode: 'native' | 'web'): void {
+  try { if (mode === 'web') localStorage.setItem(PHONE_READER_DOCK_STORAGE_KEY, mode); else localStorage.removeItem(PHONE_READER_DOCK_STORAGE_KEY); } catch {}
 }
 
 export const PHONE_FONT_SIZE_STORAGE_KEY = 'ttym-phone-font-size';

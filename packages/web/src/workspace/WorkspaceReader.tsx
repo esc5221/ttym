@@ -14,6 +14,7 @@ export function WorkspaceReader(props: Omit<React.ComponentProps<typeof ReaderVi
   const beginSelection = usePaneSelection(sid);
   return (
     <ReaderView
+      focused={ctx.focusedSid === sid}
       {...props}
       paneProps={{
         ...fileDrop,

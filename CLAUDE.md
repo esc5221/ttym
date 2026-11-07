@@ -117,6 +117,24 @@ Claude Code · Codex         Stop 훅            그 턴의 마지막 말 — �
 Codex 훅은 `codex_hooks` feature flag(v0.114.0+)와 `~/.codex/hooks.json`의 SessionStart·Stop 등록이 필요하다
 (`scripts/ttym-codex-hook.sh`, `scripts/ttym-codex-stop-hook.sh`). hooks.json이 바뀌면 Codex가 다음 실행 때 신뢰를 묻는다.
 
+## reader 웹 입력칸 (WebComposer)
+
+reader 모드 아래쪽 입력. 칸 메뉴 `input area: native ↔ web`(폰·Zen도 같은 선택). Claude Code 칸에서만 web이고,
+Claude가 평범한 입력칸(❯)을 그릴 때만 웹 textarea가 그 자리를 덮는다. 허락 창·질문 창·선택 메뉴·외부 편집기 중에는
+터미널 줄 그대로(native)이고 키보드도 터미널로 간다. web/src/reader/WebComposer.tsx · composer-keys.ts.
+
+- 초안 소유: 웹이 비어 있으면 Claude 입력칸을 화면에서 읽어 보여 준다(미러). 고치는 순간 가져오고 Claude 쪽은
+  Ctrl+K·Ctrl+U로 비운다(Esc Esc는 history.jsonl에 남겨서 안 씀). 여러 줄로 그려진 글은 원문(대화의 프롬프트·대기열·
+  보낸 글)과 공백 무시로 맞춰 되찾고, 못 찾거나 `[Pasted text #]` 칩이 있으면 가져오지 않고 키를 그대로 보낸다.
+- 빈 입력칸의 ↑ ↓ Tab → Space는 Claude로 → 입력 기록·대기열 고치기·제안 수락·음성(Space 길게)을 Claude가 한다.
+- 웹이 안 쓰는 키(Ctrl/Alt 조합, Shift+Tab)는 초안을 Enter 없이 넘긴 뒤(`send` API `submit: 'none'`) 바이트로 보낸다.
+  키 표를 웹에 두지 않는다 — 사용자 keybindings.json은 Claude가 적용한다.
+- 보내기는 `submit: 'cr'`(submit.ts). 누르는 즉시 비우고 순서대로 보낸다. 그 전에 Claude 입력칸에 끼어든 글이 있으면 비우고 알린다.
+- `/`(맨 앞 또는 공백 뒤)·`@` 자동완성: `GET /api/sessions/:id/composer`(server/src/composer.ts) — 칸 Claude의 cwd에서
+  `claude -p` stream-json `initialize`(명령·인자 힌트·에이전트) + 숨은 holder(220×100)에 띄운 Claude의 `/` 메뉴를 끝까지 읽은 것
+  (터미널 전용 /resume·/plan…, API에 없음). 폴더당 첫 조회 ~10s, 한 번에 한 폴더, mtime 키 + 1시간 캐시. `@`는 `/composer/files`(rg --files).
+- 이미지 붙여넣기는 `/api/upload` → 경로. 폰 키바는 이 칸 입력칸에 포커스가 있으면 그 입력칸으로 간다.
+
 ## 뷰어 (`ttym open`)
 
 pane 안에서 파일·URL을 연다. macOS `open` 대체 — 크롬 새 탭이 아니라 그 pane의 헤더 탭으로 붙는다.

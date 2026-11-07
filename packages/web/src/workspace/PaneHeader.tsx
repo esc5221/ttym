@@ -193,8 +193,8 @@ export function PaneHeader({ sid, name, cwd, isFocused, dead, zoomed, fit, U, dr
               {touch ? <button onClick={act(onToggleFit)} style={attachDropdownItemStyle} title="borrow this viewport size · restored on leave">{fit ? 'reset size' : 'fit to screen'}</button> : null}
               {canRestore ? <button onClick={act(() => ctx.restoreAgent(sid))} style={attachDropdownItemStyle}>restore last agent session</button> : null}
               {readerOn ? (
-                <button onClick={act(() => setPaneDock(dockChoice === 'styled' ? 'native' : 'styled'))} style={attachDropdownItemStyle} title="reader mode: how the input area at the bottom is drawn">
-                  input area: {dockChoice === 'styled' ? 'styled → native' : 'native → styled'}
+                <button onClick={act(() => setPaneDock(dockChoice === 'web' ? 'native' : 'web'))} style={attachDropdownItemStyle} title="reader mode: type in a text field in the page, or in the terminal's own rows">
+                  input area: {dockChoice === 'web' ? 'web → native' : 'native → web'}
                 </button>
               ) : null}
               <button onClick={act(() => void ctx.detachMember(sid))} style={attachDropdownItemStyle} title="the session keeps running">detach</button>

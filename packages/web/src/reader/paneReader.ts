@@ -11,7 +11,7 @@ import { useSyncExternalStore } from 'react';
 const PANES_KEY = 'ttym-pane-reader';
 const DOCK_KEY = 'ttym-pane-reader-dock';
 
-export type PaneDock = 'native' | 'styled';
+export type PaneDock = 'native' | 'web';
 
 const listeners = new Set<() => void>();
 let panes: ReadonlySet<number> | null = null;
@@ -48,7 +48,8 @@ function loadDock(): PaneDock | null {
   if (dock !== undefined) return dock;
   try {
     const v = localStorage.getItem(DOCK_KEY);
-    dock = v === 'native' || v === 'styled' ? v : null;
+    // 'styled' was the copy of the terminal rows this replaced; whoever chose it chose the page's input.
+    dock = v === 'native' ? 'native' : v === 'web' || v === 'styled' ? 'web' : null;
   } catch { dock = null; }
   return dock;
 }

@@ -196,7 +196,7 @@ function FocusView({
     reader: readerAvailable && onTerminal ? readerOn : null,
     onToggleReader: () => setReader(!readerPref),
     dock: readerOn ? dockMode : null,
-    onToggleDock: () => pickDock(dockMode === 'native' ? 'styled' : 'native'),
+    onToggleDock: () => pickDock(dockMode === 'native' ? 'web' : 'native'),
     onFind: () => ctx.setSearch({ sid, query: '', index: -1, count: 0 }),
   };
 
@@ -281,7 +281,7 @@ function FocusView({
           // 손가락 하나에 스크롤이 두 번 걸린다. 빌려 쓰면 넘칠 것이 없다.
           terminal={{ fontSize, geometry: 'borrow', enableWebgl: false }}
         />
-        {readerOn ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} live={live} layout={dock} dockMode={dockMode} fontSize={fontSize} topInset={immersive ? 44 : undefined} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+        {readerOn ? <WorkspaceReader focused sid={sid} state={transcript.state} error={transcript.error} working={working} live={live} layout={dock} dockMode={dockMode} fontSize={fontSize} topInset={immersive ? 44 : undefined} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
       </div>
 
       {immersive ? (

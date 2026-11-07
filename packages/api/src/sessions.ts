@@ -56,10 +56,10 @@ export interface SubmitResult {
 }
 
 /**
- * Type a line and press Enter — the way await does, without waiting for an answer. Into an agent it
+ * Type a line and press Enter (`none`: type it only, in the same pieces — a draft handed to the agent's own input) — the way await does, without waiting for an answer. Into an agent it
  * waits for the composer, checks the text left it and retries once (server/src/submit.ts).
  */
-export function submitToSession(base: BaseUrl, sessionId: number, text: string, submit: 'auto' | 'cr' | 'lf' = 'auto'): Promise<SubmitResult> {
+export function submitToSession(base: BaseUrl, sessionId: number, text: string, submit: 'auto' | 'cr' | 'lf' | 'none' = 'auto'): Promise<SubmitResult> {
   return request(base, `/api/sessions/${sessionId}/send`, { method: 'POST', body: { data: text, submit } });
 }
 
@@ -114,4 +114,26 @@ export function dismissAgentSleep(base: BaseUrl, id: number): Promise<{ ok?: tru
 }
 export function getAgentSleepStatus(base: BaseUrl): Promise<{ sleeping: Array<{ sessionId: number } & AgentSleepInfo>; reclaimedBytes: number; afterMs: number }> {
   return request(base, '/api/agent-sleep');
+}
+
+/** A command the web composer offers after `/` (server/src/composer.ts). */
+export interface ComposerCommand { name: string; description: string; argumentHint?: string; terminalOnly?: boolean }
+export interface ComposerCatalog {
+  cwd: string;
+  commands: ComposerCommand[];
+  agents: { name: string; description: string }[];
+  sources: { sdk: string; menu: string };
+  version: string | null;
+  at: number;
+  ms: number;
+}
+
+/** What this pane's Claude offers for / and @agent-, asked of Claude in its own folder. Slow the first time per folder (~10 s), then cached. */
+export function getComposerCatalog(base: BaseUrl, sessionId: number, force = false): Promise<ComposerCatalog> {
+  return request(base, `/api/sessions/${sessionId}/composer${force ? '?force=1' : ''}`);
+}
+
+/** Files under the pane's Claude folder matching `q`, best first. */
+export function getComposerFiles(base: BaseUrl, sessionId: number, q: string): Promise<{ cwd: string; files: string[] }> {
+  return request(base, `/api/sessions/${sessionId}/composer/files?q=${encodeURIComponent(q)}`);
 }

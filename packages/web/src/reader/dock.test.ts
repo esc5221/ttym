@@ -11,6 +11,13 @@ describe('dockRowCount · claude-code', () => {
     expect(dockRowCount('claude-code', rows, false)).toBe(4);
   });
 
+  it('finds the prompt while ↑ walks the history (the place is written near the front of the top rule)', () => {
+    // Claude Code 2.1.319, dev pane 2026-11-07: "───   History 2/2   ─────…"
+    const rows = screen([`───   History 2/2   ${'─'.repeat(80)}`, '❯ List the files in src/', RULE, '  ⏵⏵ bypass permissions on']);
+    expect(dockRowCount('claude-code', rows, false)).toBe(4);
+    expect(dockView('claude-code', rows.slice(-4), null, false)).toMatchObject({ kind: 'prompt', lines: ['List the files in src/'] });
+  });
+
   it('grows with a prompt that is several lines tall', () => {
     const rows = screen([RULE, '❯ first line', '  second line', '  third line', RULE, '  ⏵⏵ bypass permissions on']);
     expect(dockRowCount('claude-code', rows, false)).toBe(6);

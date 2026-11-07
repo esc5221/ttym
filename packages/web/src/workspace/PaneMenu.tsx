@@ -17,7 +17,7 @@ export function PaneMenu({ label, position, onBack, onPrev, onNext, reader, onTo
   reader: boolean | null;
   onToggleReader: () => void;
   /** Only while reader mode is on. */
-  dock: 'native' | 'styled' | null;
+  dock: 'native' | 'web' | null;
   onToggleDock: () => void;
   onFind: () => void;
   immersive: boolean;

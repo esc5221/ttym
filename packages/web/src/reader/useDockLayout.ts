@@ -91,7 +91,35 @@ export function useDockLayout(
         if (continued[i]) { if (i < buf.cursorY) caretY--; continue; }
         dockRows.push(drawn[i]);
       }
-      const view = dockView(agent, dockRows, { x: buf.cursorX, y: caretY }, waiting);
+      let view = dockView(agent, dockRows, { x: buf.cursorX, y: caretY }, waiting);
+      // What the agent drew in its own grey is not what was typed: a placeholder in an empty prompt ('Try "…"',
+      // "Press up to edit queued messages", a suggested next prompt) or a completion after the typed text ("/re" + "cap +8").
+      // The plain text can't tell them apart, so the prompt rows are read again cell by cell.
+      if (view?.kind === 'prompt') {
+        const split: { typed: string; ghost: string }[] = [];
+        for (let i = dockTop; i < drawn.length; i++) {
+          if (continued[i]) continue;
+          const line = buf.getLine(buf.viewportY + i);
+          let typed = '';
+          let ghost = '';
+          // The two-cell gutter ("❯ ") is the agent's, not the text.
+          for (let x = 2; line && x < term.cols; x++) {
+            const cell = line.getCell(x);
+            if (!cell || cell.getWidth() === 0) continue;
+            const ch = cell.getChars() || ' ';
+            if (cell.isDim() && ch.trim()) ghost += ch;
+            else if (ghost && !ch.trim()) ghost += ch;
+            else typed += ch;
+          }
+          split.push({ typed: typed.trimEnd(), ghost: ghost.trim() });
+        }
+        const rowsOfPrompt = split.slice(1, 1 + view.lines.length);
+        const typedLines = rowsOfPrompt.map((r) => r.typed.replace(/^ /, ''));
+        while (typedLines.length > 1 && typedLines[typedLines.length - 1] === '') typedLines.pop();
+        const ghost = rowsOfPrompt.map((r) => r.ghost).filter(Boolean).join(' ');
+        if (typedLines.every((l) => !l.trim())) view = { ...view, lines: [''], placeholder: ghost || undefined, caret: { line: 0, col: 0 } };
+        else view = { ...view, lines: typedLines, ghost: ghost || undefined };
+      }
       const nextShift = Math.round((term.rows - drawn.length) * cellH);
       if (nextShift !== shift) { shift = nextShift; host.wrapper.style.transform = shift ? `translateY(${shift}px)` : ''; }
       const next: DockLayout = {

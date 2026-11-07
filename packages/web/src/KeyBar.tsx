@@ -55,7 +55,50 @@ export function KeyBar({ sid }: { sid: number }) {
   );
 
   const host = () => getHost(sid);
+
+  /**
+   * reader의 웹 입력칸(WebComposer)이 이 pane의 키보드를 갖고 있으면 키바 키도 그리로 간다 — 하드웨어 키와 같은
+   * 규칙(초안 넘김·전송·중단)을 타야 하므로. 버튼이 포커스를 안 뺏으니(pointerdown preventDefault) activeElement가 그 칸이다.
+   */
+  const composer = (): HTMLTextAreaElement | null => {
+    const el = document.activeElement;
+    return el instanceof HTMLTextAreaElement && el.closest(`.rd-wc[data-sid="${sid}"]`) ? el : null;
+  };
+  const KEYS: Record<string, { key: string; code: string }> = {
+    esc: { key: 'Escape', code: 'Escape' }, tab: { key: 'Tab', code: 'Tab' }, enter: { key: 'Enter', code: 'Enter' },
+    left: { key: 'ArrowLeft', code: 'ArrowLeft' }, right: { key: 'ArrowRight', code: 'ArrowRight' },
+    up: { key: 'ArrowUp', code: 'ArrowUp' }, down: { key: 'ArrowDown', code: 'ArrowDown' },
+  };
+  const press = (name: keyof typeof KEYS & string) => {
+    const field = composer();
+    if (!field) { host()?.sendKey(name as Parameters<NonNullable<ReturnType<typeof host>>['sendKey']>[0]); return; }
+    const ev = new KeyboardEvent('keydown', { ...KEYS[name]!, bubbles: true, cancelable: true });
+    field.dispatchEvent(ev);
+    // A made-up key event moves no caret; the field's own keys (← → in its text) are done here.
+    if (!ev.defaultPrevented && (name === 'left' || name === 'right')) {
+      const at = (field.selectionStart ?? 0) + (name === 'left' ? -1 : 1);
+      const c = Math.max(0, Math.min(field.value.length, at));
+      field.setSelectionRange(c, c);
+    }
+  };
   const toggleCtrl = () => {
+    const field = composer();
+    if (field) {
+      if (ctrl) { setCtrl(false); return; }
+      // The next letter from the soft keyboard becomes Ctrl+letter, sent the way the field sends a chord.
+      setCtrl(true);
+      const once = (e: InputEvent) => {
+        field.removeEventListener('beforeinput', once);
+        setCtrl(false);
+        const ch = (e.data ?? '').slice(-1).toLowerCase();
+        if (!/^[a-z\[\]\\_-]$/.test(ch)) return;
+        e.preventDefault();
+        const code = /[a-z]/.test(ch) ? `Key${ch.toUpperCase()}` : ({ '[': 'BracketLeft', ']': 'BracketRight', '\\': 'Backslash', '_': 'Minus', '-': 'Minus' } as Record<string, string>)[ch]!;
+        field.dispatchEvent(new KeyboardEvent('keydown', { key: ch, code, ctrlKey: true, bubbles: true, cancelable: true }));
+      };
+      field.addEventListener('beforeinput', once);
+      return;
+    }
     const h = host();
     if (!h) return;
     if (ctrl) { h.disarmCtrl(); return; } // disarm이 onDone으로 setCtrl(false)를 부른다
@@ -63,7 +106,13 @@ export function KeyBar({ sid }: { sid: number }) {
     h.armCtrl(() => setCtrl(false));
   };
   const paste = async () => {
-    try { host()?.sendText(await navigator.clipboard.readText()); } catch {}
+    try {
+      const text = await navigator.clipboard.readText();
+      const field = composer();
+      // Into the field as typed text, so it is ours to edit before sending.
+      if (field) { field.focus(); document.execCommand('insertText', false, text); return; }
+      host()?.sendText(text);
+    } catch {}
   };
 
   // The fold button sits where `find` used to; a little see-through so it does not read as one more key.
@@ -95,14 +144,14 @@ export function KeyBar({ sid }: { sid: number }) {
       }}
     >
       {hidden ? fold : <>
-      {key('esc', () => host()?.sendKey('esc'))}
-      {key('tab', () => host()?.sendKey('tab'))}
+      {key('esc', () => press('esc'))}
+      {key('tab', () => press('tab'))}
       {key('ctrl', toggleCtrl, ctrl)}
-      {key('←', () => host()?.sendKey('left'))}
-      {key('↓', () => host()?.sendKey('down'))}
-      {key('↑', () => host()?.sendKey('up'))}
-      {key('→', () => host()?.sendKey('right'))}
-      {key('⏎', () => host()?.sendKey('enter'))}
+      {key('←', () => press('left'))}
+      {key('↓', () => press('down'))}
+      {key('↑', () => press('up'))}
+      {key('→', () => press('right'))}
+      {key('⏎', () => press('enter'))}
       {key('paste', () => void paste())}
       {fold}
       </>}

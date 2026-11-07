@@ -24,6 +24,7 @@ import { ViewerStore } from './viewer/store.js';
 import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
 import { typeAndSubmit } from './submit.js';
+import { claudeCwd, composerCatalog, composerFiles } from './composer.js';
 import { AgentSleeper, findAgentProcess, psProcesses, psProcessesCached, readAgentStatus, turnIsStale, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
@@ -785,15 +786,38 @@ function handleHttpApi(manager: SessionManager, workspaceStore: WorkspaceStore, 
         return;
       }
       // submit: type the text, then Enter — the way await does (submit.ts). auto: CR to an agent, LF to a shell.
-      if (submit !== 'auto' && submit !== 'cr' && submit !== 'lf') { json(400, { error: 'submit must be auto, cr or lf' }); return; }
+      // none: type the text in pieces, no Enter — the web composer handing its draft to the agent's own input.
+      if (submit !== 'auto' && submit !== 'cr' && submit !== 'lf' && submit !== 'none') { json(400, { error: 'submit must be auto, cr, lf or none' }); return; }
       void manager.getMeta(id).catch(() => ({})).then(async (meta) => {
         const agent = await submitAgentOf(session, meta as Record<string, unknown>);
-        const how = submit === 'auto' ? (agent ? 'cr' : 'lf') : submit;
+        const how = submit === 'auto' ? (agent ? 'cr' : 'lf') : submit as 'cr' | 'lf' | 'none';
         const typed = await typeAndSubmit(session, data as string, { submit: how, agent, blind: Boolean(sleeper?.stateOf(id)) });
         log(`HTTP SEND session=${id} len=${(data as string).length} submit=${how}${typed.waitedMs ? ` waited=${typed.waitedMs}ms` : ''}${typed.retried ? ' retried' : ''}${typed.submitted === false ? ' stuck' : ''}`);
         json(200, { ok: true, submit: how, ...typed });
       });
     });
+    return true;
+  }
+
+  // GET /api/sessions/:id/composer[?force=1] — what the reader's web composer offers for this pane's Claude:
+  // its / commands and @agent- names, asked of Claude itself in the folder it runs in (composer.ts).
+  // GET /api/sessions/:id/composer/files?q= — files for @, from that folder.
+  const composerMatch = path.match(/^\/api\/sessions\/(\d+)\/composer(\/files)?$/);
+  if (composerMatch && req.method === 'GET') {
+    const id = parseInt(composerMatch[1]!, 10);
+    const session = manager.get(id);
+    if (!session || session.isDead) { json(404, { error: 'not found' }); return true; }
+    void (async () => {
+      const procs = await psProcessesCached(500).catch(() => null);
+      const agent = procs ? findAgentProcess(procs, session.childPid) : null;
+      if (!agent || agent.kind !== 'claude') { json(409, { error: 'no claude in this pane' }); return; }
+      const cwd = await claudeCwd(agent.pid);
+      if (!cwd) { json(500, { error: 'cwd unknown' }); return; }
+      if (composerMatch[2]) { json(200, { cwd, files: await composerFiles(cwd, url.searchParams.get('q') ?? '') }); return; }
+      const catalog = await composerCatalog(cwd, { force: url.searchParams.get('force') === '1' });
+      log(`COMPOSER catalog session=${id} cwd=${cwd} commands=${catalog.commands.length} agents=${catalog.agents.length} sdk=${catalog.sources.sdk} menu=${catalog.sources.menu} ms=${catalog.ms}`);
+      json(200, catalog);
+    })().catch((e) => { if (!res.headersSent) json(500, { error: String((e as Error)?.message ?? e) }); });
     return true;
   }
 

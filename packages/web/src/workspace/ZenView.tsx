@@ -139,8 +139,8 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
           ) : null}
           {readerOn ? (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-              {(['native', 'styled'] as const).map((m) => (
-                <button key={m} onClick={() => setPaneDock(m)} style={{ ...miniLinkBtnStyle, ...(dockMode === m ? { color: 'var(--accent)' } : null) }} title={m === 'native' ? 'bottom input area: the terminal’s own rows' : 'bottom input area: redrawn in the page’s style'}>{m}</button>
+              {(['native', 'web'] as const).map((m) => (
+                <button key={m} onClick={() => setPaneDock(m)} style={{ ...miniLinkBtnStyle, ...(dockMode === m ? { color: 'var(--accent)' } : null) }} title={m === 'native' ? 'bottom input area: the terminal’s own rows' : 'bottom input area: a text field in the page'}>{m}</button>
               ))}
             </span>
           ) : null}
@@ -184,7 +184,7 @@ export function ZenView({ sid, name, cwd, fontFamily, baseFontSize, agent, onExi
             }}
             wrapStyle={split && fixedCols === undefined ? { display: 'flex' } : { display: 'flex', justifyContent: 'center' }}
           />
-          {readerOn ? <WorkspaceReader sid={sid} state={transcript.state} error={transcript.error} working={working} live={live} layout={dock} dockMode={dockMode} flow fontSize={fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
+          {readerOn ? <WorkspaceReader focused sid={sid} state={transcript.state} error={transcript.error} working={working} live={live} layout={dock} dockMode={dockMode} flow fontSize={fontSize} onLoadEarlier={transcript.loadEarlier} loadingEarlier={transcript.loadingEarlier} /> : null}
         </div>
         {split ? (
           <>
