@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MemoryPressure, levelFromDarwin, levelFromPsi, throttleEvery, type PressureLevel } from './pressure.js';
+import { MemoryPressure, cgroupPressurePath, levelFromDarwin, levelFromPsi, throttleEvery, type PressureLevel } from './pressure.js';
 
 describe('memory pressure', () => {
   it('reads the macOS sysctl level', () => {
@@ -25,6 +25,13 @@ describe('memory pressure', () => {
     for (let i = 0; i < 6; i++) await p.poll();
     expect(seen).toEqual(['normal>warn', 'warn>critical', 'critical>normal']);
     expect(p.level).toBe('normal');
+  });
+
+  it('finds its own cgroup v2 pressure file', () => {
+    expect(cgroupPressurePath('0::/user.slice/user-1001.slice/user@1001.service/ttymbench.slice/ttymbench-server.service\n'))
+      .toBe('/sys/fs/cgroup/user.slice/user-1001.slice/user@1001.service/ttymbench.slice/ttymbench-server.service/memory.pressure');
+    expect(cgroupPressurePath('0::/\n')).toBe('/sys/fs/cgroup/memory.pressure');
+    expect(cgroupPressurePath('12:memory:/foo\n')).toBeNull(); // cgroup v1
   });
 
   it('slows periodic work under pressure', () => {
