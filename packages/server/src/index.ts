@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { createServer } from './server.js';
 import { rotateLogIfNeeded, LOG_ROTATE_INTERVAL_MS } from './log-rotate.js';
 import { getHomeDir } from './session.js';
+import { installAsyncStdio } from './async-log.js';
 
 const PORT = parseInt(process.env.PORT || '7690', 10);
 
@@ -14,6 +15,7 @@ function isMain(): boolean {
 }
 
 if (isMain()) {
+  installAsyncStdio(); // 로그가 파일이면 비동기로 — 디스크가 밀려도 event loop가 안 선다(async-log.ts)
   const homeDir = getHomeDir();
   mkdirSync(homeDir, { recursive: true });
   const pidFile = resolve(homeDir, 'ttym.pid');
