@@ -41,8 +41,9 @@ start_server() {
 }
 start_server "$UNIT"
 systemctl --user set-property --runtime "$SLICE" MemoryMax="${BENCH_MEM:-6G}" MemorySwapMax="${BENCH_SWAP:-8G}" \
-  CPUQuota="${BENCH_CPU:-800%}" IOWeight=50 ${BENCH_PROPS:-}
-# BENCH_PROPS 예(macOS 압박에 가깝게): MemoryZSwapMax=0 IOReadBandwidthMax="/dev/nvme0n1 30M" IOWriteBandwidthMax="/dev/nvme0n1 30M"
+  CPUQuota="${BENCH_CPU:-800%}" IOWeight=50
+# BENCH_PROPS 예(macOS 압박에 가깝게): MemoryZSwapMax=0 'IOReadBandwidthMax=/dev/nvme0n1 30M' 'IOWriteBandwidthMax=/dev/nvme0n1 30M'
+[ -n "${BENCH_PROPS:-}" ] && eval systemctl --user set-property --runtime "$SLICE" $BENCH_PROPS
 for i in $(seq 1 100); do curl -sf -m 2 "http://127.0.0.1:$PORT/api/sessions" >/dev/null && break; sleep 0.2; done
 CG=/sys/fs/cgroup$(systemctl --user show "$SLICE" -p ControlGroup --value)
 
