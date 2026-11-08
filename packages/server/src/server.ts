@@ -25,6 +25,7 @@ import { ViewerService } from './viewer/service.js';
 import { handleViewerApi, handleViewContent } from './viewer/http.js';
 import { typeAndSubmit } from './submit.js';
 import { claudeCwd, composerCatalog, composerFiles } from './composer.js';
+import { MemoryPressure, throttleEvery } from './pressure.js';
 import { AgentSleeper, findAgentProcess, psProcesses, psProcessesCached, readAgentStatus, turnIsStale, type SleepState } from './agent-sleep.js';
 import { execFile } from 'node:child_process';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
@@ -1583,6 +1584,7 @@ export async function createServer(port: number): Promise<TtymServer> {
   });
 
   const manager = new SessionManager();
+  const pressure = new MemoryPressure();
 
   // Load workspace store first so we know which session IDs deserve restore.
   // Sessions not referenced by any workspace remain on disk but stay dormant —
@@ -1810,6 +1812,8 @@ export async function createServer(port: number): Promise<TtymServer> {
   // loop is what the browser sees as "infinite loading"; without this line the
   // only way to spot it was sampling the process by hand (09-27: 80% CPU in an
   // O(n) Array.shift, invisible in every log).
+  pressure.onChange((level, prev) => log(`PRESSURE ${prev} -> ${level}`));
+  pressure.start();
   const loopDelay = monitorEventLoopDelay({ resolution: 20 });
   loopDelay.enable();
   let lastCpu = process.cpuUsage();
@@ -1876,8 +1880,11 @@ export async function createServer(port: number): Promise<TtymServer> {
   // broadcasts only the changes — one ps per sweep, and only while a Claude pane exists.
   const WAITING_SWEEP_MS = 3_000;
   let waitingSweepRunning = false; // a sweep that outlasts its interval is not stacked on
+  let waitingSweepTick = 0;
   const waitingSweep = setInterval(() => {
     if (waitingSweepRunning) return;
+    // 메모리 압박 중에는 덜 자주 — ps 한 장과 세션 전체 순회가 밀려난 힙을 다시 끌어올린다(pressure.ts)
+    if (waitingSweepTick++ % throttleEvery(pressure.level) !== 0) return;
     waitingSweepRunning = true;
     void (async () => {
       const claudePanes: Array<{ id: number; shellPid: number; meta: Record<string, unknown> }> = [];
@@ -1994,6 +2001,7 @@ export async function createServer(port: number): Promise<TtymServer> {
   }
   function runMapRefresh() {
     if (mapRunning) return;
+    if (pressure.high) { log(`MAP timer skipped: memory pressure ${pressure.level}`); return; }
     mapRunning = true;
     const cliPath = resolve(SERVER_DIR, 'ttym');
     // launchd가 띄운 서버는 최소 PATH라 claude 바이너리를 못 찾는다(실측 회귀).
@@ -2648,6 +2656,7 @@ export async function createServer(port: number): Promise<TtymServer> {
   manager.setExtraSessionEnv({ TTYM_PORT: String(boundPort) });
 
   sleeper = new AgentSleeper({
+    pressureHigh: () => pressure.high,
     sessions: {
       get: (id) => manager.get(id),
       ids: () => manager.list().map((s) => s.id),
@@ -2681,6 +2690,8 @@ export async function createServer(port: number): Promise<TtymServer> {
       markCleanExit();
       clearInterval(agentExpirySweep);
       clearInterval(heartbeat);
+      clearInterval(waitingSweep);
+      pressure.stop();
       loopDelay.disable();
       unsubscribeWorkspaceChanges();
       if (gcTimer) clearInterval(gcTimer);

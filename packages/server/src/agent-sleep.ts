@@ -100,6 +100,8 @@ export interface SleeperDeps {
    * the manual entry points keep listProcesses — they ask what is true now. Falls back to listProcesses.
    */
   recentProcesses?(): Promise<ProcInfo[]>;
+  /** 시스템 메모리 압박(warn 이상)인가 — `agent-sleep-on-pressure`가 켜져 있을 때만 쓴다 (pressure.ts). */
+  pressureHigh?(): boolean;
   /** Claude Code's own status for a process (~/.claude/sessions/<pid>.json), or null when absent. */
   agentStatus(pid: number): Promise<AgentStatusFile | null>;
   kill(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
@@ -270,17 +272,34 @@ function shellQuote(arg: string): string {
  * Looking only below the root missed the direct case, and with it the stale-turn check, the
  * permission-prompt sweep and sleep for those panes.
  */
+/**
+ * pid·ppid 색인 — 같은 ps 결과 배열에는 한 번만 만든다. waitingSweep은 3초마다 Claude pane 수만큼
+ * findAgentProcess를 부르는데, 예전에는 부를 때마다 색인을 새로 만들어 pane × 프로세스(2026-11-08 macpro:
+ * 231 × 2863 = 66만 번의 Map.set)가 들었다. 메모리 압박 때 이 할당이 서버 멈춤의 큰 몫이었다(sample 32%).
+ */
+interface ProcIndex { byPid: Map<number, ProcInfo>; byParent: Map<number, ProcInfo[]> }
+const procIndexes = new WeakMap<ProcInfo[], ProcIndex>();
+function procIndex(procs: ProcInfo[]): ProcIndex {
+  let idx = procIndexes.get(procs);
+  if (idx) return idx;
+  const byPid = new Map<number, ProcInfo>();
+  const byParent = new Map<number, ProcInfo[]>();
+  for (const p of procs) {
+    if (!byPid.has(p.pid)) byPid.set(p.pid, p);
+    const list = byParent.get(p.ppid);
+    if (list) list.push(p); else byParent.set(p.ppid, [p]);
+  }
+  idx = { byPid, byParent };
+  procIndexes.set(procs, idx);
+  return idx;
+}
+
 export function findAgentProcess(procs: ProcInfo[], shellPid: number): (ProcInfo & { kind: 'claude' | 'codex' }) | null {
-  const root = procs.find((p) => p.pid === shellPid);
+  const { byPid, byParent } = procIndex(procs);
+  const root = byPid.get(shellPid);
   if (root) {
     const m = AGENT_RE.exec(root.command.trim().split(/\s+/)[0] ?? '');
     if (m && isInteractiveAgent(root.command, m[2] as 'claude' | 'codex')) return { ...root, kind: m[2] as 'claude' | 'codex' };
-  }
-  const byParent = new Map<number, ProcInfo[]>();
-  for (const p of procs) {
-    const list = byParent.get(p.ppid) ?? [];
-    list.push(p);
-    byParent.set(p.ppid, list);
   }
   const queue: Array<{ pid: number; depth: number }> = [{ pid: shellPid, depth: 0 }];
   while (queue.length > 0) {
@@ -369,6 +388,8 @@ interface Live {
 export class AgentSleeper {
   private live = new Map<number, Live>();
   private afterMs = 0;
+  /** `agent-sleep-on-pressure`: 메모리 압박 중에만 쓰는 (더 짧은) 대기 시간. 0이면 끔(기본). */
+  private pressureAfterMs = 0;
   private timer: NodeJS.Timeout | null = null;
   private inFlight = new Set<number>();
   private readonly bootAt: number;
@@ -391,12 +412,25 @@ export class AgentSleeper {
   /** Config: `agent-sleep-after`. Re-arms the idle sweep. */
   configure(values: Record<string, string | undefined>): void {
     this.afterMs = parseSleepAfter(values['agent-sleep-after']);
+    // 키가 없으면 끔 — 자동 재우기를 꺼 둔 사용자에게 압박 때만 재우는 것을 몰래 켜지 않는다.
+    const onPressure = values['agent-sleep-on-pressure']?.trim();
+    this.pressureAfterMs = onPressure ? parseSleepAfter(onPressure) : 0;
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
-    if (this.afterMs > 0) {
-      this.timer = setInterval(() => void this.sweep(), Math.min(TICK_MS, Math.max(1000, this.afterMs / 4)) * this.scale);
+    const shortest = [this.afterMs, this.pressureAfterMs].filter((ms) => ms > 0);
+    if (shortest.length > 0) {
+      const base = Math.min(...shortest);
+      this.timer = setInterval(() => void this.sweep(), Math.min(TICK_MS, Math.max(1000, base / 4)) * this.scale);
       this.timer.unref();
-      this.deps.log(`SLEEP auto: after ${Math.round(this.afterMs / 60000)}m`);
+      if (this.afterMs > 0) this.deps.log(`SLEEP auto: after ${Math.round(this.afterMs / 60000)}m`);
+      if (this.pressureAfterMs > 0) this.deps.log(`SLEEP on memory pressure: after ${Math.round(this.pressureAfterMs / 60000)}m`);
     }
+  }
+
+  /** 지금 적용할 대기 시간. 압박 중이고 압박용 값이 있으면 둘 중 짧은 것. 0이면 자동 재우기 안 함. */
+  private idleAfter(): number {
+    const high = this.pressureAfterMs > 0 && (this.deps.pressureHigh?.() ?? false);
+    if (!high) return this.afterMs;
+    return this.afterMs > 0 ? Math.min(this.afterMs, this.pressureAfterMs) : this.pressureAfterMs;
   }
 
   stop(): void { if (this.timer) { clearInterval(this.timer); this.timer = null; } }
@@ -713,7 +747,7 @@ export class AgentSleeper {
   private async refusal(id: number, session: Session, meta: Record<string, unknown>, checkIdle: boolean): Promise<string | null> {
     if (this.deps.hasPendingInteraction(id)) return 'an interaction is pending';
     if (checkIdle) {
-      const idleFloor = this.afterMs > 0 ? this.afterMs : 0;
+      const idleFloor = this.idleAfter();
       if (idleFloor <= 0) return 'auto sleep is off (settings → agents)';
       const now = this.now();
       const lastIn = session.lastInputAt || this.bootAt;
@@ -785,7 +819,7 @@ export class AgentSleeper {
    * dropped: its agent is gone and the next pane is decided on a fresh read.
    */
   private async sweep(): Promise<void> {
-    if (this.afterMs <= 0) return;
+    if (this.idleAfter() <= 0) return;
     let put = 0;
     let table: ProcInfo[] | null = null;
     const read = this.deps.recentProcesses ?? this.deps.listProcesses;

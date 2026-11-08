@@ -45,7 +45,7 @@ class FakeSession {
   output() { this.lastOutputAt = Date.now(); }
 }
 
-function harness(opts: { procs?: () => ProcInfo[]; meta?: Record<string, unknown>; pending?: boolean; config?: Record<string, string>; status?: AgentStatusFile | null } = {}) {
+function harness(opts: { procs?: () => ProcInfo[]; meta?: Record<string, unknown>; pending?: boolean; config?: Record<string, string>; status?: AgentStatusFile | null; pressureHigh?: () => boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ttym-sleep-'));
   const session = new FakeSession(1);
   const metas = new Map<number, Record<string, unknown>>([[1, { claudeLastSessionId: 'abc-123', ...(opts.meta ?? {}) }]]);
@@ -61,6 +61,7 @@ function harness(opts: { procs?: () => ProcInfo[]; meta?: Record<string, unknown
       setMeta: async (id, patch) => { metas.set(id, { ...(metas.get(id) ?? {}), ...patch }); },
     },
     hasPendingInteraction: () => opts.pending === true,
+    pressureHigh: opts.pressureHigh,
     listProcesses: async () => procs(),
     agentStatus: async () => opts.status ?? null,
     kill: (pid, signal) => killed.push({ pid, signal }),
@@ -440,6 +441,49 @@ describe('auto sleep', () => {
   it('a pane with no recorded activity counts from the sleeper boot, not from zero', async () => {
     h = harness({ config: { 'agent-sleep-after': '1m' } });
     expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'input too recent' });
+  });
+});
+
+describe('sleep on memory pressure (opt-in)', () => {
+  let h: ReturnType<typeof harness>;
+  afterEach(() => h?.cleanup());
+
+  it('with auto sleep off, sleeps only while pressure is high and only past the pressure window', async () => {
+    let high = false;
+    let alive = true;
+    h = harness({
+      procs: () => (alive ? [claudeProc()] : []),
+      config: { 'agent-sleep-after': 'off', 'agent-sleep-on-pressure': '2m' },
+      pressureHigh: () => high,
+    });
+    const origRaw = h.session.writeRaw.bind(h.session);
+    let presses = 0;
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
+    h.session.lastInputAt = Date.now() - 180_000;
+    h.session.lastOutputAt = Date.now() - 180_000;
+    expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'auto sleep is off (settings → agents)' });
+    high = true;
+    h.session.lastOutputAt = Date.now() - 60_000;
+    expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'output too recent' });
+    h.session.lastOutputAt = Date.now() - 180_000;
+    expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: true });
+  });
+
+  it('without the key nothing changes under pressure', async () => {
+    h = harness({ config: { 'agent-sleep-after': 'off' }, pressureHigh: () => true });
+    h.session.lastInputAt = Date.now() - 3_600_000;
+    h.session.lastOutputAt = Date.now() - 3_600_000;
+    expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'auto sleep is off (settings → agents)' });
+  });
+
+  it('with both set, pressure shortens the window', async () => {
+    let high = false;
+    h = harness({ config: { 'agent-sleep-after': '30m', 'agent-sleep-on-pressure': '2m' }, pressureHigh: () => high });
+    h.session.lastInputAt = Date.now() - 300_000;
+    h.session.lastOutputAt = Date.now() - 300_000;
+    expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'input too recent' });
+    high = true;
+    expect((await h.sleeper.sleep(1, 'idle')).error).not.toBe('input too recent');
   });
 });
 

@@ -12,6 +12,8 @@ describe('service 파일 렌더러 — 설치 시점 생성, 정적 출하 금�
     const xml = renderLaunchdPlist({ ...base, label: 'com.ttym.server', bind: null, logPath: '/home/u/.ttym/ttym.log' });
     expect(xml).toContain('<key>KeepAlive</key><true/>');
     expect(xml).toContain('<key>ThrottleInterval</key><integer>10</integer>');
+    // 비우면 launchd가 CPU·I/O를 조인다 — pane 안 프로그램까지 물려받는다
+    expect(xml).toContain('<key>ProcessType</key><string>Interactive</string>');
     // stdout과 stderr가 같은 파일 — 이중 로그 방지
     expect(xml.match(/<string>\/home\/u\/\.ttym\/ttym\.log<\/string>/g)?.length).toBe(2);
     expect(xml).toContain('<key>PORT</key><string>7690</string>');

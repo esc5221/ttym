@@ -32,7 +32,13 @@ export function readServiceMarker(): ServiceMarker | null {
   return null;
 }
 
-/** 순수 렌더러 — 테스트가 여기를 본다. KeepAlive + 10초 스로틀(크래시 루프 방어). */
+/**
+ * 순수 렌더러 — 테스트가 여기를 본다. KeepAlive + 10초 스로틀(크래시 루프 방어).
+ * ProcessType=Interactive: 비워 두면 launchd가 '가벼운 제한'(CPU·I/O 스로틀)을 건다(launchd.plist(5)).
+ * 실측(2026-11-08 macpro): 비우면 서버와 그 아래 모든 pane(셸·claude)이 pri 20, Interactive면 31 —
+ * Terminal.app 아래 셸과 같다. load가 높을 때 서버 스레드가 차례를 못 받아 웹 접속이 끊기던 몫.
+ * jetsam 우선순위(40)는 그대로다.
+ */
 export function renderLaunchdPlist(opts: {
   label: string; nodePath: string; serverJs: string; holderBin: string | null;
   port: number; bind?: string | null; logPath: string; homeDir: string;
@@ -71,6 +77,7 @@ ${envXml}
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
+  <key>ProcessType</key><string>Interactive</string>
   <key>StandardOutPath</key><string>${opts.logPath}</string>
   <key>StandardErrorPath</key><string>${opts.logPath}</string>
 </dict>
