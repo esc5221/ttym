@@ -64,6 +64,20 @@ export function holderSocketOf(id: number, dir = runtimeDir()): string | null {
   }
 }
 
+/**
+ * 자는 Claude pane인가 — 그 pane의 셸은 맨 zsh이고 화면은 서버만 갖고 있다. direct로 친 글은 Claude가 아니라
+ * 셸 명령으로 실행되므로(서버의 깨우기 문을 거치지 않는다) 읽기 전용으로만 연다. 메타 파일: run/meta-<id>.json.
+ */
+export function sleepingAgent(id: number, dir = runtimeDir()): boolean {
+  try {
+    const meta = JSON.parse(readFileSync(resolve(dir, `meta-${id}.json`), 'utf8')) as { agentSleep?: { state?: string } };
+    const st = meta.agentSleep?.state;
+    return st === 'sleeping' || st === 'waking';
+  } catch {
+    return false;
+  }
+}
+
 export function frame(cmd: number, payload: Uint8Array = new Uint8Array(0)): Buffer {
   const b = Buffer.alloc(5 + payload.length);
   b.writeUInt32LE(1 + payload.length, 0);
@@ -152,6 +166,11 @@ export async function cmdAttachDirect(token: string, opts: { prefixByte: number;
     process.exit(EXIT.FAIL);
   }
   const { sock, state, reader, early } = viewer;
+  let readonly = opts.readonly;
+  if (!readonly && sleepingAgent(id)) {
+    readonly = true;
+    console.error(`[ttym] session ${id} is a sleeping agent pane — read-only here (typing would run in the bare shell, not reach the agent)`);
+  }
   const cols = Number(state.cols) || 0;
   const rows = Number(state.rows) || 0;
   const out = process.stdout;
@@ -200,6 +219,6 @@ export async function cmdAttachDirect(token: string, opts: { prefixByte: number;
       if (b === opts.prefixByte) { prefixed = true; continue; }
       pass.push(b);
     }
-    if (pass.length && !opts.readonly) sock.write(frame(CMD_DATA_IN, Uint8Array.from(pass)));
+    if (pass.length && !readonly) sock.write(frame(CMD_DATA_IN, Uint8Array.from(pass)));
   });
 }

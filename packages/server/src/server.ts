@@ -2388,20 +2388,23 @@ export async function createServer(port: number): Promise<TtymServer> {
       batchers.delete(sessionId);
     }
 
-    // 아직 복원 중인 세션으로 온 프레임(ATTACH·입력)은 그 세션이 돌아올 때까지 미룬다. 한 번 미루기 시작하면
-    // 이 연결의 뒤 프레임도 같은 줄에 세운다 — 같은 세션의 입력 순서가 바뀌면 안 된다.
-    let deferredFrames: Promise<void> | null = null;
-    let deferredCount = 0;
+    // 아직 복원 중인 세션으로 온 프레임(ATTACH·입력)은 그 세션이 돌아올 때까지 미룬다. 줄은 세션마다 따로 —
+    // 웹은 pane 전부를 이 연결 하나로 보내므로, 늦은 pane 하나가 다른 pane의 ATTACH·입력·ACK를 붙잡으면 안 된다.
+    // 순서는 같은 세션 안에서만 지키면 된다.
+    const deferred = new Map<number, { tail: Promise<void>; count: number }>();
     ws.on('message', (raw) => {
-      const peekId = deferredCount === 0 ? decodeClientFrame(toBuffer(raw))?.sessionId : undefined;
-      if (deferredCount === 0 && !(peekId !== undefined && manager.isPending(peekId))) { handleFrame(raw); return; }
-      const id = peekId ?? decodeClientFrame(toBuffer(raw))?.sessionId ?? 0;
-      deferredCount++;
-      deferredFrames = (deferredFrames ?? Promise.resolve())
+      const id = decodeClientFrame(toBuffer(raw))?.sessionId;
+      if (id === undefined || id === 0) { handleFrame(raw); return; }
+      const line = deferred.get(id);
+      if (!line && !manager.isPending(id)) { handleFrame(raw); return; }
+      const entry = line ?? { tail: Promise.resolve(), count: 0 };
+      entry.count++;
+      entry.tail = entry.tail
         .then(() => manager.whenRecovered(id))
         .then(() => handleFrame(raw))
         .catch((e) => log('WS deferred frame error', e))
-        .finally(() => { deferredCount--; });
+        .finally(() => { if (--entry.count === 0 && deferred.get(id) === entry) deferred.delete(id); });
+      deferred.set(id, entry);
     });
     const handleFrame = (raw: WebSocket.RawData) => {
       const buf = toBuffer(raw);

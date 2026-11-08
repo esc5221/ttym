@@ -171,9 +171,13 @@ async function serverUp(port: number): Promise<boolean> {
 async function installLaunchd(port: number, bind: string | null) {
   const plistPath = resolve(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`);
 
+  // 이미 이 label로 감독 중이면(재설치: plist만 바꾸는 경우) 인계하지 않는다 — SIGTERM을 보내면 KeepAlive가
+  // 곧바로 다시 띄워 '감독 안 하는 프로세스가 포트를 쥐고 있다'로 실패했다. 아래 bootout·bootstrap이 새 plist로
+  // 다시 띄운다. holder는 서버와 다른 프로세스 그룹이라 bootout 뒤에도 남는다(setsid 자식으로 확인, 2026-11-08).
+  const ownJobLoaded = launchctl(['print', `${gui()}/${LABEL}`], { allowFail: true }) !== '';
   // 기존의 감독 없는 서버가 이 포트를 쥐고 있으면 인계한다. 다른 감독자
   // (수제 launchd 등)가 쥐고 있으면 KeepAlive끼리 포트 싸움이 나므로 거부.
-  if (await serverUp(port)) {
+  if (!ownJobLoaded && await serverUp(port)) {
     const pid = readPid();
     if (pid) {
       try { process.kill(pid, 'SIGTERM'); } catch {}

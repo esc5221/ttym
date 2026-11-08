@@ -124,4 +124,34 @@ describe('boot before recovery finishes', () => {
     const files = readdirSync(run);
     for (const id of ids) expect(files).toContain(`session-${id}.json`);
   }, 30_000);
+
+  it('a pending pane does not hold up frames for other panes on the same connection', async () => {
+    const run = resolve(DIR, 'run');
+    const ids = await leaveHolders(run, 1);
+    process.env.TTYM_RUNTIME_DIR = run;
+    process.env.TTYM_HOME = DIR;
+    process.env.TTYM_TEST_RECOVER_DELAY_MS = '2000';
+    server = await createServer(0);
+    const port = (server.httpServer.address() as AddressInfo).port;
+    // 복원 중에 새로 만든 세션
+    const fresh = await (await fetch(`http://127.0.0.1:${port}/api/sessions`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cmd: ['/bin/sh', '-c', 'sleep 30'], cols: 80, rows: 24 }),
+    })).json() as { id: number };
+    expect(server.manager.isPending(ids[0]!)).toBe(true);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((r) => ws.once('open', r));
+    const order: number[] = [];
+    const both = new Promise<void>((done) => {
+      ws.on('message', (raw) => {
+        const f = decode(toBuffer(raw));
+        if (f && f.cmd === CMD.ATTACH) { order.push(f.sessionId); if (order.length === 2) done(); }
+      });
+    });
+    ws.send(encode(ids[0]!, CMD.ATTACH, Buffer.from(JSON.stringify({ mode: 'readwrite' }))));   // 아직 복원 중
+    ws.send(encode(fresh.id, CMD.ATTACH, Buffer.from(JSON.stringify({ mode: 'readwrite' })))); // 이미 있음
+    await both;
+    expect(order).toEqual([fresh.id, ids[0]]);
+    ws.close();
+  }, 30_000);
 });
