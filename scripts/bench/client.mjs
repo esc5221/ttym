@@ -93,6 +93,7 @@ function viewer(sessionIds, onData) {
     });
     ws.once('error', reject);
   });
+  ready.catch(() => {}); // 재시작 중 거절된 연결은 다음 단계에서 다시 붙는다 — 처리 안 된 reject로 죽지 않게
   ws.on('message', (raw) => {
     const f = dec(raw);
     if (!f) return;

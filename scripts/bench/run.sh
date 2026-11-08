@@ -41,7 +41,8 @@ start_server() {
 }
 start_server "$UNIT"
 systemctl --user set-property --runtime "$SLICE" MemoryMax="${BENCH_MEM:-6G}" MemorySwapMax="${BENCH_SWAP:-8G}" \
-  CPUQuota="${BENCH_CPU:-800%}" IOWeight=50
+  CPUQuota="${BENCH_CPU:-800%}" IOWeight=50 ${BENCH_PROPS:-}
+# BENCH_PROPS 예(macOS 압박에 가깝게): MemoryZSwapMax=0 IOReadBandwidthMax="/dev/nvme0n1 30M" IOWriteBandwidthMax="/dev/nvme0n1 30M"
 for i in $(seq 1 100); do curl -sf -m 2 "http://127.0.0.1:$PORT/api/sessions" >/dev/null && break; sleep 0.2; done
 CG=/sys/fs/cgroup$(systemctl --user show "$SLICE" -p ControlGroup --value)
 
@@ -52,6 +53,6 @@ export BENCH_PORT=$PORT BENCH_FRAMES=$ROOT/frames BENCH_LABEL=$LABEL BENCH_CGROU
   BENCH_SERVER_PID="ss -ltnpH 'sport = :$PORT' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2" \
   BENCH_STRESS_START="systemd-run --user --quiet --collect --slice=$SLICE --unit=$STRESS stress-ng --vm 1 --vm-bytes %BYTES% --vm-keep --timeout 3600s" \
   BENCH_STRESS_STOP="systemctl --user stop $STRESS" \
-  BENCH_RESTART="kill -TERM \$(systemctl --user show -p MainPID --value $UNIT); sleep 0.5; systemd-run --user --quiet --collect --slice=$SLICE --unit=$UNIT-2 -p KillMode=process -p StandardOutput=append:$RUN/server.log -p StandardError=append:$RUN/server.log --setenv=HOME=$HOME --setenv=PATH=/usr/bin:/bin --setenv=TTYM_HOME=$HOMEDIR --setenv=PORT=$PORT --setenv=TTYM_HOLDER_BIN=$DIST/ttym-holder /usr/bin/node $DIST/ttym-server.js"
+  BENCH_RESTART="kill -TERM \$(systemctl --user show -p MainPID --value $UNIT); for i in \$(seq 1 300); do ss -ltn | grep -q ':$PORT ' || break; sleep 0.1; done; systemd-run --user --quiet --collect --slice=$SLICE --unit=$UNIT-2 -p KillMode=process -p StandardOutput=append:$RUN/server.log -p StandardError=append:$RUN/server.log --setenv=HOME=$HOME --setenv=PATH=/usr/bin:/bin --setenv=TTYM_HOME=$HOMEDIR --setenv=PORT=$PORT --setenv=TTYM_HOLDER_BIN=$DIST/ttym-holder /usr/bin/node $DIST/ttym-server.js"
 node "$REPO/scripts/bench/client.mjs"
 echo "result: $BENCH_OUT" >&2
