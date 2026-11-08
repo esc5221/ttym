@@ -655,10 +655,11 @@ export class Session {
     // 10s, not 3: on a machine already running a fleet of agents, a holder
     // plus its shell can take longer than 3s to reach the socket, and the old
     // limit turned load into spurious 'spawn failed' errors.
+    const deadline = Date.now() + 10_000;
     await Promise.race([waitForSocket(socketPath, 10_000), spawnFailed]);
 
     // Connect and wait for STATE
-    const sock = await connectSocket(socketPath);
+    const sock = await Promise.race([connectSocketFresh(socketPath, Math.max(deadline, Date.now() + 2_000)), spawnFailed]);
     const session = new Session(id, cmd, cols, rows, proc.pid ?? 0, 0, Date.now());
     session.holderProc = proc;
 
@@ -1457,6 +1458,23 @@ function connectSocket(path: string): Promise<Socket> {
     const sock = createConnection(path, () => resolve(sock));
     sock.on('error', reject);
   });
+}
+
+/**
+ * 막 띄운 holder에 붙는다. 소켓 파일은 bind()에서 생기고 listen()은 그 뒤라, 파일이 보이는 순간 붙으면
+ * ECONNREFUSED가 난다 — 부하 중엔 그 틈이 길어져 세션 만들기가 실패했다(2026-11-08 벤치 준비 단계 2번,
+ * session.test.ts flaky). 거절·없음이면 기한까지 다시 시도한다.
+ */
+export async function connectSocketFresh(path: string, deadline: number): Promise<Socket> {
+  for (let wait = 10; ; wait = Math.min(wait * 2, 200)) {
+    try {
+      return await connectSocket(path);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if ((code !== 'ECONNREFUSED' && code !== 'ENOENT') || Date.now() + wait > deadline) throw e;
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
 }
 
 interface HolderState {
