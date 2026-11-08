@@ -11,6 +11,7 @@ import { readPid, GLOBAL, EXIT, getPort, apiBase, legacyBody, fetchJson, fetchPa
 import { resolveAttachTarget, listWorkspaces, memberAddress } from './addresses.js';
 import { ensureServerRunning } from './lifecycle.js';
 import { createInterface } from 'node:readline/promises';
+import { cmdAttachDirect } from './attach-direct.js';
 
 /** TTY에서 생성 전 확인 — 동사 오타가 워크스페이스가 되는 사고의 방어선. Enter=예. */
 async function confirmCreate(what) {
@@ -57,12 +58,14 @@ export async function cmdAttach() {
   let role = null;
   let memberName = null;
   let prefixSpec = process.env.TTYM_PREFIX || null;
+  let direct = false;
   const positional = [];
 
   for (let i = 0; i < head.length; i += 1) {
     const arg = head[i];
     if (arg === '--json') continue;
     if (arg === '--readonly') { readonly = true; continue; }
+    if (arg === '--direct') { direct = true; continue; }
     if (arg === '--new') { createNew = true; continue; }
     if (arg === '--cwd') { cwd = head[++i] ?? null; continue; }
     if (arg === '--role') { role = head[++i] ?? null; continue; }
@@ -78,7 +81,7 @@ export async function cmdAttach() {
   const targetToken = positional[0];
   if (!targetToken) {
     console.error('usage: ttym attach <session-id | workspace | workspace/member> [--new]');
-    console.error('            [--readonly] [--prefix C-<key>]');
+    console.error('            [--readonly] [--prefix C-<key>] [--direct]');
     console.error('            [--new [--cmd <cmd...>] [--cwd <path>] [--role <role>] [--name <name>]]');
     process.exit(EXIT.USAGE);
   }
@@ -88,6 +91,11 @@ export async function cmdAttach() {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error('ttym attach requires an interactive TTY');
     process.exit(EXIT.FAIL);
+  }
+  // 서버를 거치지 않는다 — 서버가 멈췄거나 꺼져 있어도 holder에 바로 (attach-direct.ts)
+  if (direct) {
+    await cmdAttachDirect(targetToken, { prefixByte, prefixLabel: pfxLabel, readonly });
+    return;
   }
   // 진입 동사는 서버가 없으면 띄운다 — tmux의 근육. 조회 동사들은 여전히 exit 4.
   await ensureServerRunning(port);

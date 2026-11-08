@@ -41,13 +41,26 @@ const CMD_REPLAY: u8 = 0x11;
 // know it ignore it (unknown frames are dropped), exactly as they would never
 // have received the bytes anyway.
 const CMD_GAP: u8 = 0x12;
+// A direct viewer: a connection that never claims the lease. It gets its own
+// journal cursor and nonblocking queue, may type (DATA_IN) and ask the app to
+// redraw, but never resizes, dumps or evicts. `ttym attach --direct` uses it to
+// reach a pane while the server is stalled (memory pressure, 2026-11-08).
+// payload: optional [u64 tail_bytes] — start that far back from the live end.
+const CMD_VIEW: u8 = 0x13;
+// Ask the program to repaint: shrink the PTY by one row and restore it, which
+// delivers SIGWINCH twice and leaves the size as it was.
+const CMD_REDRAW: u8 = 0x14;
 
 /// Capabilities announced in STATE. A server checks these instead of guessing.
 ///  journal  — output is kept in an on-disk journal and streamed by cursor:
 ///             a slow server never stalls the PTY, and DATA_OUT never duplicates
 ///             what DUMP_*/REPLAY already returned.
 ///  gap      — CMD_GAP frames may arrive.
-const CAPS: &str = r#"["journal","gap"]"#;
+///  viewer   — CMD_VIEW / CMD_REDRAW: direct viewers beside the controller.
+const CAPS: &str = r#"["journal","gap","viewer"]"#;
+
+/// Direct viewers at once. Each costs a queue of at most OUT_HIGH_WATER.
+const MAX_VIEWERS: usize = 4;
 
 /// Bytes queued for the client before the streamer stops pulling from the
 /// journal. The PTY keeps draining into the journal regardless.
@@ -371,12 +384,14 @@ struct Client {
     promoted_at: Instant,
     /// EXIT waits until the output before it has been streamed.
     pending_exit: Option<[u8; 4]>,
+    /// EXIT already queued (viewers learn about the exit after the fact).
+    exit_sent: bool,
 }
 
 impl Client {
     fn new(stream: UnixStream, written: u64) -> Self {
         let _ = stream.set_nonblocking(true);
-        Client { stream, out: Vec::new(), out_pos: 0, cursor: None, promote_offset: written, promoted_at: Instant::now(), pending_exit: None }
+        Client { stream, out: Vec::new(), out_pos: 0, cursor: None, promote_offset: written, promoted_at: Instant::now(), pending_exit: None, exit_sent: false }
     }
 
     fn queued(&self) -> usize { self.out.len() - self.out_pos }
@@ -668,6 +683,7 @@ fn main() {
     let mut rows = config.rows;
     let mut client: Option<Client> = None;
     let mut reader = FrameReader::new();
+    let mut viewers: Vec<(Client, FrameReader)> = Vec::new();
     // Accepted but not yet the controller: it has been sent STATE and we are
     // waiting to see whether it claims the lease.
     let mut pending: Option<(UnixStream, Instant)> = None;
@@ -728,7 +744,7 @@ fn main() {
             c.queued() > 0 || c.cursor.map(|cur| cur < ring.written).unwrap_or(false)
         }).unwrap_or(false);
         let pending_fd = pending.as_ref().map(|(c, _)| c.as_raw_fd()).unwrap_or(-1);
-        let mut fds = [
+        let mut fds = vec![
             libc::pollfd {
                 fd: master_fd,
                 events: if pty_alive {
@@ -746,7 +762,16 @@ fn main() {
             },
             libc::pollfd { fd: pending_fd, events: if pending_fd >= 0 { libc::POLLIN } else { 0 }, revents: 0 },
         ];
-        let nfds: libc::nfds_t = 4;
+        for (v, _) in &viewers {
+            let wants = v.queued() > 0 || v.cursor.map(|cur| cur < ring.written).unwrap_or(false)
+                || (!pty_alive && !v.exit_sent);
+            fds.push(libc::pollfd {
+                fd: v.stream.as_raw_fd(),
+                events: libc::POLLIN | if wants { libc::POLLOUT } else { 0 },
+                revents: 0,
+            });
+        }
+        let nfds = fds.len() as libc::nfds_t;
 
         let timeout_ms = match linger_deadline {
             Some(deadline) => deadline.checked_duration_since(Instant::now())
@@ -842,6 +867,7 @@ fn main() {
         // is the behaviour every existing server relies on.
         if pending_fd >= 0 {
             let mut resolve: Option<bool> = None; // Some(true) = promote, Some(false) = reject
+            let mut as_viewer: Option<u64> = None; // CMD_VIEW: tail bytes
             let mut hangup = false;
 
             if fds[3].revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
@@ -855,9 +881,20 @@ fn main() {
                     }
                 }
 
-                while resolve.is_none() && !hangup {
+                while resolve.is_none() && as_viewer.is_none() && !hangup {
                     let Some((cmd, payload)) = pending_reader.next_frame() else { break };
-                    if cmd == CMD_ACQUIRE {
+                    if cmd == CMD_VIEW {
+                        let tail = if payload.len() >= 8 { u64::from_le_bytes(payload[..8].try_into().unwrap()) } else { 0 };
+                        if viewers.len() >= MAX_VIEWERS {
+                            log(config.id, "viewer denied: too many viewers");
+                            if let Some((ref mut c, _)) = pending {
+                                let _ = write_frame(c, CMD_DENIED, b"{\"reason\":\"viewers\"}");
+                            }
+                            resolve = Some(false);
+                        } else {
+                            as_viewer = Some(tail);
+                        }
+                    } else if cmd == CMD_ACQUIRE {
                         let body = String::from_utf8_lossy(&payload);
                         let takeover = body.contains("\"takeover\":true");
                         if client.is_some() && !takeover {
@@ -890,8 +927,25 @@ fn main() {
                 }
             }
 
+            if let Some(tail) = as_viewer {
+                if let Some((stream, _)) = pending.take() {
+                    let mut stream = stream;
+                    let _ = write_frame(&mut stream, CMD_ACQUIRED, b"{\"viewer\":true}");
+                    let mut v = Client::new(stream, ring.written);
+                    // Start `tail` bytes back, at a lexically safe offset; 0 = live only.
+                    let start = if tail == 0 { ring.written } else {
+                        let want = ring.written.saturating_sub(tail).max(ring.base_offset());
+                        match tracker.first_at_or_after(want) { Some(safe) if safe <= ring.written => safe, _ => ring.written }
+                    };
+                    v.cursor = Some(start);
+                    let carried = std::mem::replace(&mut pending_reader, FrameReader::new());
+                    viewers.push((v, carried));
+                    log(config.id, &format!("viewer attached ({} now)", viewers.len()));
+                }
+            }
+
             // Silence past the deadline means legacy too.
-            if resolve.is_none() && !hangup {
+            if resolve.is_none() && as_viewer.is_none() && !hangup {
                 if let Some((_, since)) = pending.as_ref() {
                     if since.elapsed() >= LEASE_CLAIM_TIMEOUT {
                         log(config.id, "lease claim timed out, promoting as legacy");
@@ -1078,6 +1132,51 @@ fn main() {
         if drop_client {
             client = None;
             reader = FrameReader::new();
+        }
+
+        // ── Direct viewers: read, apply input/redraw, stream, flush. Never blocking. ──
+        let mut gone: Vec<usize> = Vec::new();
+        for (i, (v, vreader)) in viewers.iter_mut().enumerate() {
+            let rev = fds.get(4 + i).map(|f| f.revents).unwrap_or(0);
+            if rev & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
+                let mut tmp = [0u8; 16384];
+                match v.stream.read(&mut tmp) {
+                    Ok(0) => { gone.push(i); continue; }
+                    Ok(n) => vreader.feed(&tmp[..n]),
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+                    Err(_) => { gone.push(i); continue; }
+                }
+            }
+            while let Some((cmd, payload)) = vreader.next_frame() {
+                match cmd {
+                    CMD_DATA_IN if pty_alive => {
+                        if pending_input.len() + payload.len() > MAX_PENDING_INPUT { continue; }
+                        pending_input.extend_from_slice(&payload);
+                        let _ = flush_pending_input(master_fd, &mut pending_input);
+                    }
+                    CMD_REDRAW if pty_alive => {
+                        let shrunk = Winsize { ws_col: cols, ws_row: rows.saturating_sub(1).max(1), ws_xpixel: 0, ws_ypixel: 0 };
+                        let same = Winsize { ws_col: cols, ws_row: rows, ws_xpixel: 0, ws_ypixel: 0 };
+                        unsafe { libc::ioctl(master_fd, libc::TIOCSWINSZ as _, &shrunk); }
+                        std::thread::sleep(Duration::from_millis(30));
+                        unsafe { libc::ioctl(master_fd, libc::TIOCSWINSZ as _, &same); }
+                    }
+                    CMD_PING => v.send(CMD_PONG, &[]),
+                    _ => {} // viewers never resize, dump, kill or claim
+                }
+            }
+            stream_to(v, &ring, &tracker, &mut seq, config.id);
+            if !pty_alive && !v.exit_sent && v.cursor.map(|cur| cur >= ring.written).unwrap_or(true) {
+                v.send(CMD_EXIT, &exit_code.unwrap_or(-1).to_le_bytes());
+                v.exit_sent = true;
+            }
+            if v.flush().is_err() { gone.push(i); }
+        }
+        gone.sort_unstable();
+        gone.dedup();
+        for i in gone.into_iter().rev() {
+            viewers.remove(i);
+            log(config.id, &format!("viewer detached ({} left)", viewers.len()));
         }
 
         // Periodic child check
