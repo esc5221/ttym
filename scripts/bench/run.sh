@@ -22,6 +22,8 @@ mkdir -p "$HOMEDIR" "$ROOT/frames" "$ROOT/results"
 cleanup() {
   # 서버 유닛은 KillMode=process(재시작 시험 때 holder를 살려 둬야 해서)라 stop만으로는 holder가 남는다.
   # 이 slice 안만 통째로 끝낸다(cgroup v2 cgroup.kill) — slice 밖은 건드리지 않는다.
+  # 상한(특히 IO)을 먼저 푼다 — swap에서 읽어 오느라 멈춘 프로세스는 그래야 죽는다(보정 실행에서 겪음).
+  systemctl --user set-property --runtime "$SLICE" "IOReadBandwidthMax=" "IOWriteBandwidthMax=" MemoryMax=infinity "CPUQuota=" >/dev/null 2>&1 || true
   local cg; cg=/sys/fs/cgroup$(systemctl --user show "$SLICE" -p ControlGroup --value 2>/dev/null)
   [ -n "$cg" ] && [ "$cg" != /sys/fs/cgroup ] && [ -w "$cg/cgroup.kill" ] && echo 1 > "$cg/cgroup.kill" 2>/dev/null || true
   sleep 0.5
