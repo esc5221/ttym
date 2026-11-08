@@ -16,6 +16,7 @@ let server: TtymServer | null = null;
 
 afterEach(async () => {
   delete process.env.TTYM_TEST_RECOVER_DELAY_MS;
+  delete process.env.TTYM_TEST_RECOVER_CONCURRENCY;
   delete process.env.TTYM_RUNTIME_DIR;
   delete process.env.TTYM_HOME;
   if (server) { await server.close().catch(() => {}); server = null; }
@@ -70,6 +71,32 @@ describe('boot before recovery finishes', () => {
     await done;
     expect(m2.list().some((s) => s.recovering)).toBe(false);
     expect(m2.get(ids[2]!)!.screenText()).toContain('hello-2');
+  }, 30_000);
+
+  it('a session someone is waiting for jumps the recovery queue', async () => {
+    // 압박 중 재시작 벤치(2026-11-08): 치던 pane이 191개 중 마지막에 돌아와 첫 키가 60초.
+    const run = resolve(DIR, 'run');
+    const ids = await leaveHolders(run, 5);
+    process.env.TTYM_TEST_RECOVER_DELAY_MS = '300';
+    process.env.TTYM_TEST_RECOVER_CONCURRENCY = '1';
+    const m2 = new SessionManager(run);
+    managers.unshift(m2);
+    await m2.bootPrepare();
+    const last = ids[ids.length - 1]!;
+    // 줄이 만들어지기 전에 온 요청도 센다
+    const waited = m2.whenRecovered(last);
+    const done = m2.bootFinish();
+    await waited;
+    expect(m2.get(last)).toBeTruthy();
+    // 한 줄로 300ms씩 — 맨 앞으로 왔으니 나머지 넷은 아직이다
+    expect(ids.filter((id) => m2.isPending(id)).length).toBeGreaterThanOrEqual(3);
+    // 줄이 돌고 있을 때 온 요청
+    const mid = ids.find((id) => m2.isPending(id) && id !== ids[0])!;
+    const pendingBefore = ids.filter((id) => m2.isPending(id)).length;
+    await m2.whenRecovered(mid);
+    expect(ids.filter((id) => m2.isPending(id)).length).toBeGreaterThanOrEqual(pendingBefore - 2);
+    await done;
+    expect(ids.every((id) => m2.get(id))).toBe(true);
   }, 30_000);
 
   it('runs the recovered hook before releasing waiters, and holds sessions until the hook is set', async () => {

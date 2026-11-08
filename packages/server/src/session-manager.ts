@@ -188,6 +188,7 @@ export class SessionManager {
   /** 그 세션이 복원을 마칠 때까지(또는 포기할 때까지, 최대 maxMs) 기다린다. 복원 대상이 아니면 바로 끝난다. */
   whenRecovered(id: number, maxMs = 60_000): Promise<void> {
     if (!this.pending.has(id)) return Promise.resolve();
+    this.demand(id);
     return new Promise((resolveWait) => {
       const timer = setTimeout(done, maxMs);
       timer.unref?.();
@@ -229,11 +230,35 @@ export class SessionManager {
     // queue behind it — worst case scaled with session count. Now the whole
     // pass costs one timeout, not one per stuck holder.
     // 동시에 RECOVER_CONCURRENCY개까지 — 187개를 한꺼번에 파싱하면 메모리가 튀고 handshake가 밀린다.
-    let next = 0;
+    // 기다리는 요청(입력·ATTACH·API)이 있는 세션은 줄 맨 앞으로(demand) — 압박 중 재시작에서 사람이 치던
+    // pane이 191개 중 마지막에 돌아와 첫 키가 60초 걸렸다(2026-11-08 벤치).
+    this.recoverQueue = manifests;
+    this.queueBuilt = true;
+    for (const id of this.demanded) this.demand(id);
+    this.demanded.clear();
     const worker = async () => {
-      while (next < manifests.length) await this.recoverOne(manifests[next++]!);
+      let f: string | undefined;
+      while ((f = this.recoverQueue.shift()) !== undefined) await this.recoverOne(f);
     };
-    await Promise.all(Array.from({ length: Math.min(RECOVER_CONCURRENCY, manifests.length) }, worker));
+    const n = Number(process.env.TTYM_TEST_RECOVER_CONCURRENCY || 0) || RECOVER_CONCURRENCY;
+    await Promise.all(Array.from({ length: Math.min(n, manifests.length) }, worker));
+  }
+
+  /** 아직 시작 안 한 복원 줄 */
+  private recoverQueue: string[] = [];
+  /** 줄이 만들어지기 전에 요청이 온 id */
+  private demanded = new Set<number>();
+  private queueBuilt = false;
+  /** 다시 시도를 기다리는 세션의 타이머 — 요청이 오면 기다리지 않고 바로 다시 시도한다 */
+  private retryTimers = new Map<number, () => void>();
+
+  /** 그 세션을 기다리는 요청이 있다 — 아직 줄에 있으면 맨 앞으로, 다시 시도 대기 중이면 지금 시도. */
+  private demand(id: number): void {
+    const f = `session-${id}.json`;
+    const i = this.recoverQueue.indexOf(f);
+    if (i > 0) { this.recoverQueue.splice(i, 1); this.recoverQueue.unshift(f); }
+    else if (i < 0 && !this.queueBuilt) this.demanded.add(id);
+    this.retryTimers.get(id)?.();
   }
 
   /**
@@ -317,7 +342,10 @@ export class SessionManager {
         const delay = SessionManager.RETRY_MS[attempt];
         if (delay !== undefined) {
           console.error(`[mgr] recover ${filename} failed (attempt ${attempt + 1}): ${(e as Error)?.message ?? e} — holder alive, retry in ${delay}ms`);
-          setTimeout(() => { void this.recoverOne(filename, attempt + 1); }, delay).unref?.();
+          const retry = () => { clearTimeout(t); this.retryTimers.delete(sid); void this.recoverOne(filename, attempt + 1); };
+          const t = setTimeout(retry, delay);
+          t.unref?.();
+          this.retryTimers.set(sid, retry);
         } else {
           console.error(`[mgr] recover ${filename} gave up after ${attempt + 1} attempts — holder alive, manifest kept`);
           this.settle(sid);
