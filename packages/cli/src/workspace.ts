@@ -180,7 +180,7 @@ export async function cmdWorkspace() {
     const sessionById = new Map((Array.isArray(sessions) ? sessions : []).map((session) => [session.id, session]));
     result.members = result.members.map((member) => ({
       ...member,
-      status: sessionById.get(member.sessionId)?.status ?? 'missing',
+      status: sessionById.get(member.sessionId)?.recovering ? 'recovering' : sessionById.get(member.sessionId)?.status ?? 'missing',
       cmd: sessionById.get(member.sessionId)?.cmd ?? [],
     }));
     if (asJson) return printOutput(result, true);
@@ -411,7 +411,7 @@ export async function cmdLs() {
     process.exit(EXIT.NOT_FOUND);
   }
 
-  const stateOf = (s) => !s || s.status === 'dead' ? 'gone' : s.status === 'attached' ? `attached${s.viewerCount > 1 ? `×${s.viewerCount}` : ''}` : 'detached';
+  const stateOf = (s) => !s || s.status === 'dead' ? 'gone' : s.recovering ? 'recovering' : s.status === 'attached' ? `attached${s.viewerCount > 1 ? `×${s.viewerCount}` : ''}` : 'detached';
   const rows = shown.map((w) => ({
     workspace: w.name,
     id: w.id,

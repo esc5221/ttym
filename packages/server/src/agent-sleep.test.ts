@@ -483,7 +483,8 @@ describe('sleep on memory pressure (opt-in)', () => {
     h.session.lastOutputAt = Date.now() - 300_000;
     expect(await h.sleeper.sleep(1, 'idle')).toEqual({ ok: false, error: 'input too recent' });
     high = true;
-    expect((await h.sleeper.sleep(1, 'idle')).error).not.toBe('input too recent');
+    const r = await h.sleeper.sleep(1, 'idle');
+    expect('error' in r ? r.error : null).not.toBe('input too recent');
   });
 });
 

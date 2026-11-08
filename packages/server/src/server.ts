@@ -1646,7 +1646,13 @@ export async function createServer(port: number): Promise<TtymServer> {
   // The port is known before listen (0 only in tests); panes the boot re-spawns
   // must carry it, or their hooks address the wrong server.
   if (port > 0) manager.setExtraSessionEnv({ TTYM_PORT: String(port) });
-  await manager.boot(safeMode ? new Set<number>() : restoreAllowlist);
+  // 복원은 기다리지 않는다 — 다음 id와 자리표시만 잡고 바로 listen까지 간다. 아직 안 돌아온 세션으로 온
+  // 요청은 manager.whenRecovered로 기다린다(아래 route·WS). 압박 중 재시작에서 이 기다림이 2분이었다.
+  await manager.bootPrepare();
+  manager.expectRecoveredHook(); // 아래 sleeper가 생기면 놓는다 — 그 전에 돌아온 세션도 재우기 상태부터
+  const bootDone = manager.bootFinish(safeMode ? new Set<number>() : restoreAllowlist)
+    .then(() => log(`BOOT recovered: ${manager.list().filter((s) => !s.recovering).length} sessions`))
+    .catch((e) => log('BOOT recovery error', e));
 
   // Sweep the accumulation of dead sessions' files. Live sessions and every
   // workspace member are always kept; the rest gets a two-week grace before
@@ -1671,7 +1677,8 @@ export async function createServer(port: number): Promise<TtymServer> {
         })
         .catch(() => {});
     };
-    sweep();
+    // 복원이 끝난 뒤에 — 그 전에는 아직 안 돌아온 세션의 파일을 '죽은 세션 것'으로 지울 수 있다.
+    void bootDone.then(sweep);
     gcTimer = setInterval(sweep, 24 * 60 * 60 * 1000);
     gcTimer.unref();
   }
@@ -1726,6 +1733,15 @@ export async function createServer(port: number): Promise<TtymServer> {
     route(req, res);
   });
   function route(req: IncomingMessage, res: ServerResponse) {
+    // 재시작 직후 아직 복원 중인 세션으로 온 요청(send·screen·훅 등)은 그 세션이 돌아올 때까지 기다린다.
+    const pendingId = /^\/api\/(?:internal\/)?sessions\/(\d+)(?:\/|$)/.exec((req.url || '/').split('?')[0]!)?.[1];
+    if (pendingId && manager.isPending(Number(pendingId))) {
+      void manager.whenRecovered(Number(pendingId)).then(() => routeNow(req, res));
+      return;
+    }
+    routeNow(req, res);
+  }
+  function routeNow(req: IncomingMessage, res: ServerResponse) {
     if (handleAgentRequest && handleAgentRequest(req, res)) return;
     if (handleEmbedHttp(req, res, embedDeps)) return;
     // /view/<cap>/… before the SPA catch-all, which would otherwise answer with index.html.
@@ -2372,7 +2388,22 @@ export async function createServer(port: number): Promise<TtymServer> {
       batchers.delete(sessionId);
     }
 
+    // 아직 복원 중인 세션으로 온 프레임(ATTACH·입력)은 그 세션이 돌아올 때까지 미룬다. 한 번 미루기 시작하면
+    // 이 연결의 뒤 프레임도 같은 줄에 세운다 — 같은 세션의 입력 순서가 바뀌면 안 된다.
+    let deferredFrames: Promise<void> | null = null;
+    let deferredCount = 0;
     ws.on('message', (raw) => {
+      const peekId = deferredCount === 0 ? decodeClientFrame(toBuffer(raw))?.sessionId : undefined;
+      if (deferredCount === 0 && !(peekId !== undefined && manager.isPending(peekId))) { handleFrame(raw); return; }
+      const id = peekId ?? decodeClientFrame(toBuffer(raw))?.sessionId ?? 0;
+      deferredCount++;
+      deferredFrames = (deferredFrames ?? Promise.resolve())
+        .then(() => manager.whenRecovered(id))
+        .then(() => handleFrame(raw))
+        .catch((e) => log('WS deferred frame error', e))
+        .finally(() => { deferredCount--; });
+    });
+    const handleFrame = (raw: WebSocket.RawData) => {
       const buf = toBuffer(raw);
       if (buf.length < 3) return;
 
@@ -2619,7 +2650,7 @@ export async function createServer(port: number): Promise<TtymServer> {
           manager.get(sessionId)?.resume();
           break;
       }
-    });
+    };
 
     ws.on('close', () => {
       embedConns.delete(ws);
@@ -2674,7 +2705,11 @@ export async function createServer(port: number): Promise<TtymServer> {
     runtimeDir: manager.runtimeDir,
     log,
   });
+  const restoreSleep = sleeper;
+  manager.setRecoveredHook((id) => restoreSleep.restoreOne(id));
   await sleeper.restore();
+  // 스냅샷으로 새로 띄운 세션(restoreWorkspace)은 훅을 안 거친다 — 다 끝난 뒤 한 번 더
+  void bootDone.then(() => restoreSleep.restore());
   sleeper.configure(configStore.get());
 
   return {

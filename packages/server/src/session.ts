@@ -25,6 +25,8 @@ export interface TerminalMarker {
 }
 
 export interface SessionInfo {
+  /** 서버 재시작 직후 아직 holder에 다시 붙는 중(SessionManager.bootPrepare의 자리표시) */
+  recovering?: boolean;
   /** headless 터미널을 내린 상태(Session.goCold) */
   cold?: boolean;
   /** holder 종류: journal(커서 스트리밍) · legacy */

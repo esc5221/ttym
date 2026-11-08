@@ -1,4 +1,4 @@
-import { readdir, readFile, readlink, unlink, mkdir, writeFile, rename } from 'node:fs/promises';
+import { readdir, readFile, readlink, unlink, mkdir, writeFile, rename, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -108,6 +108,16 @@ export class SessionManager {
    * will be restored from snapshots; others stay on disk untouched.
    */
   async boot(restoreAllowlist?: Set<number>): Promise<void> {
+    await this.bootPrepare();
+    await this.bootFinish(restoreAllowlist);
+  }
+
+  /**
+   * 복원 전에 끝내야 하는 것만: 다음 id와 복원할 세션 목록(자리표시). 서버는 이 뒤에 바로 listen하고
+   * bootFinish를 기다리지 않는다 — 압박 중 재시작에서 세션 196개 복원이 2분 걸렸고(2026-11-08), 그동안
+   * 포트가 닫혀 있어 웹도 CLI도 못 붙었다. 아직 안 돌아온 세션으로 온 요청은 whenRecovered로 기다린다.
+   */
+  async bootPrepare(): Promise<void> {
     await mkdir(this.runtimeDir, { recursive: true });
 
     // Load persisted next-id
@@ -117,15 +127,87 @@ export class SessionManager {
       this.nextId = parseInt(raw.trim(), 10) || 1;
     } catch {}
 
-    // Discover and recover holders
-    await this.recover();
-
-    // Always attempt snapshot-based restore: holders may cover some sessions,
-    // remaining snapshots fill the gaps. Both code paths preserve original IDs.
-    await this.restoreWorkspace(restoreAllowlist);
-
-    this._ready = true;
+    // 복원이 끝나기 전에 새 세션이 생겨도 아직 안 돌아온 세션의 id를 받지 않게, 디스크에 있는 id를 먼저 센다.
+    let files: string[] = [];
+    try { files = await readdir(this.runtimeDir); } catch {}
+    for (const f of files) {
+      const m = /^(?:session|snapshot)-(\d+)\.json$/.exec(f);
+      if (m) this.nextId = Math.max(this.nextId, parseInt(m[1]!, 10) + 1);
+      if (!m || !f.startsWith('session-')) continue;
+      try {
+        const manifest = JSON.parse(await readFile(resolve(this.runtimeDir, f), 'utf8')) as HolderManifest;
+        if (typeof manifest.id === 'number') this.pending.set(manifest.id, manifest);
+      } catch {}
+    }
   }
+
+  /** holder 복원 + 스냅샷 복원. 끝나면 ready. 여러 번 불러도 한 번만 돈다. */
+  bootFinish(restoreAllowlist?: Set<number>): Promise<void> {
+    this.bootDone ??= (async () => {
+      try {
+        // Discover and recover holders
+        await this.recover();
+        // Always attempt snapshot-based restore: holders may cover some sessions,
+        // remaining snapshots fill the gaps. Both code paths preserve original IDs.
+        await this.restoreWorkspace(restoreAllowlist);
+      } finally {
+        this._ready = true;
+        // 다시 시도 중인 것(recovering)만 자리표시로 남기고 나머지 대기는 푼다 — 없는 세션은 평소처럼 404.
+        for (const id of [...this.pending.keys()]) if (!this.recovering.has(id)) this.settle(id);
+      }
+    })();
+    return this.bootDone;
+  }
+
+  private bootDone: Promise<void> | null = null;
+  /** 아직 다시 붙지 않은 holder 세션 — 목록에는 recovering으로 보인다. */
+  private pending = new Map<number, HolderManifest>();
+  private pendingWaiters = new Map<number, Array<() => void>>();
+
+  isPending(id: number): boolean { return this.pending.has(id); }
+
+  /**
+   * 세션 하나가 돌아온 직후, 기다리던 요청을 놓기 전에 부르는 것(서버: 재우기 상태 되살리기). 서버가
+   * expectRecoveredHook()을 불렀으면 훅이 놓일 때까지 복원된 세션도 기다린다 — 훅보다 입력이 먼저 가면 안 된다.
+   */
+  private recoveredHook: ((id: number) => Promise<void>) | null = null;
+  private hookReady: Promise<void> = Promise.resolve();
+  private releaseHook: () => void = () => {};
+  expectRecoveredHook(): void {
+    this.hookReady = new Promise((r) => { this.releaseHook = r; });
+  }
+  setRecoveredHook(fn: (id: number) => Promise<void>): void {
+    this.recoveredHook = fn;
+    this.releaseHook();
+  }
+  private async runRecoveredHook(id: number): Promise<void> {
+    await this.hookReady;
+    try { await this.recoveredHook?.(id); } catch (e) { console.error(`[mgr] recovered hook session=${id} failed:`, e); }
+  }
+
+  /** 그 세션이 복원을 마칠 때까지(또는 포기할 때까지, 최대 maxMs) 기다린다. 복원 대상이 아니면 바로 끝난다. */
+  whenRecovered(id: number, maxMs = 60_000): Promise<void> {
+    if (!this.pending.has(id)) return Promise.resolve();
+    return new Promise((resolveWait) => {
+      const timer = setTimeout(done, maxMs);
+      timer.unref?.();
+      function done() { clearTimeout(timer); resolveWait(); }
+      const list = this.pendingWaiters.get(id) ?? [];
+      list.push(done);
+      this.pendingWaiters.set(id, list);
+    });
+  }
+
+  /** 그 id의 복원이 끝났다(성공이든 아니든) — 기다리던 요청을 놓아준다. */
+  private settle(id: number): void {
+    this.pending.delete(id);
+    const waiters = this.pendingWaiters.get(id);
+    this.pendingWaiters.delete(id);
+    for (const w of waiters ?? []) w();
+  }
+
+  /** 모든 복원(재시도 제외)이 끝났을 때 */
+  get recovered(): Promise<void> { return this.bootDone ?? Promise.resolve(); }
 
   private async recover(): Promise<void> {
     let files: string[];
@@ -134,6 +216,13 @@ export class SessionManager {
     } catch { return; }
 
     const manifests = files.filter((f) => f.startsWith('session-') && f.endsWith('.json'));
+    // 최근에 쓰던 세션부터 — 체크포인트가 늦게 저장된 순. 재시작 직후 사람이 다시 여는 건 대개 이쪽이다.
+    const touched = new Map<string, number>();
+    await Promise.all(manifests.map(async (f) => {
+      const id = /^session-(\d+)\.json$/.exec(f)?.[1];
+      try { touched.set(f, (await stat(resolve(this.runtimeDir, `snapshot-${id}.json`))).mtimeMs); } catch { touched.set(f, 0); }
+    }));
+    manifests.sort((a, b) => (touched.get(b) ?? 0) - (touched.get(a) ?? 0));
 
     // Recover concurrently. A holder that never answers its handshake blocks
     // for 10s (session.ts), and recovering in sequence made every later session
@@ -164,6 +253,9 @@ export class SessionManager {
 
   private async recoverOne(filename: string, attempt = 0): Promise<void> {
     const manifestPath = resolve(this.runtimeDir, filename);
+    // 테스트 전용: 복원을 일부러 늦춰 '복원 중' 상태를 관찰한다(boot-early.test.ts).
+    const testDelay = Number(process.env.TTYM_TEST_RECOVER_DELAY_MS || 0);
+    if (testDelay > 0) await new Promise((r) => setTimeout(r, testDelay));
     try {
       const raw = await readFile(manifestPath, 'utf8');
       const manifest: HolderManifest = JSON.parse(raw);
@@ -175,6 +267,7 @@ export class SessionManager {
         console.log(`[mgr] stale holder pid=${manifest.pid} session=${manifest.id}, cleaning`);
         await unlink(manifestPath).catch(() => {});
         await unlink(manifest.socket).catch(() => {});
+        this.settle(manifest.id);
         return;
       }
 
@@ -186,9 +279,11 @@ export class SessionManager {
       this.sessions.set(session.id, session);
       this.recovering.delete(session.id);
       this.nextId = Math.max(this.nextId, session.id + 1);
-
+      // 훅(재우기 상태)은 미뤄 둔 요청보다 먼저. bootFinish가 이 세션을 '끝남'으로 놓기 전에 마쳐야 한다.
       // Load persisted meta
       await this.getMeta(session.id);
+      await this.runRecoveredHook(session.id);
+      this.settle(session.id);
       console.log(
         `[mgr] recovered session=${session.id} pid=${manifest.childPid}` +
         (checkpoint ? ` via checkpoint@${checkpoint.offset}${session.recoveryGap ? ' GAP' : ''}` : ''),
@@ -205,7 +300,7 @@ export class SessionManager {
         // must survive — deleting it here is how a losing server used to strand
         // a live holder.
         const idMatch = filename.match(/session-(\d+)\.json$/);
-        if (idMatch) this.heldByOthers.add(parseInt(idMatch[1], 10));
+        if (idMatch) { this.heldByOthers.add(parseInt(idMatch[1], 10)); this.settle(parseInt(idMatch[1], 10)); }
         console.log(`[mgr] ${filename} held by another server, leaving it alone`);
         return;
       }
@@ -225,11 +320,13 @@ export class SessionManager {
           setTimeout(() => { void this.recoverOne(filename, attempt + 1); }, delay).unref?.();
         } else {
           console.error(`[mgr] recover ${filename} gave up after ${attempt + 1} attempts — holder alive, manifest kept`);
+          this.settle(sid);
         }
         return;
       }
       console.error(`[mgr] failed to recover ${filename}:`, e);
       await unlink(manifestPath).catch(() => {});
+      if (Number.isFinite(sid)) this.settle(sid);
     }
   }
 
@@ -554,6 +651,14 @@ export class SessionManager {
     const result: SessionInfo[] = [];
     for (const s of this.sessions.values()) {
       if (!s.isDead) result.push(s.info());
+    }
+    // 아직 복원 중인 세션은 자리표시로 — 빠지면 클라이언트가 그 멤버를 '없는 세션'으로 그린다.
+    for (const [id, m] of this.pending) {
+      if (this.sessions.has(id)) continue;
+      result.push({
+        id, pid: m.childPid, cmd: m.cmd, cols: m.cols, rows: m.rows, status: 'detached',
+        viewerCount: 0, lastSeq: 0, createdAt: m.createdAt, detachedAt: null, recovering: true,
+      });
     }
     return result;
   }

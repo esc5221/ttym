@@ -451,22 +451,31 @@ export class AgentSleeper {
 
   /** Restore gates and frozen screens after a server restart. */
   async restore(): Promise<void> {
-    for (const id of this.deps.sessions.ids()) {
-      const session = this.deps.sessions.get(id);
-      if (!session || session.isDead) continue;
-      const meta = await this.deps.sessions.getMeta(id);
-      const saved = meta.agentSleep as SleepState | undefined;
-      if (!saved || typeof saved !== 'object') continue;
-      if (saved.state === 'failed') { this.live.set(id, { state: saved, queue: [], queuedBytes: 0, started: false, wakeStartedAt: 0 }); continue; }
-      // 'waking' at the time of the crash → back to sleeping; the queue is gone with the old process.
-      const state: SleepState = { ...saved, state: 'sleeping' };
-      let snapshot: string | undefined;
-      try { snapshot = await readFile(this.snapshotPath(id), 'utf8'); } catch {}
-      session.freeze(snapshot);
-      this.install(id, session, state);
-      await this.deps.sessions.setMeta(id, { agentSleep: state });
-      this.deps.log(`SLEEP restored session=${id} (${saved.state})`);
-    }
+    for (const id of this.deps.sessions.ids()) await this.restoreOne(id);
+  }
+
+  /**
+   * 세션 하나의 재우기 상태를 되살린다. 이미 되살렸으면 아무것도 안 한다. 서버 재시작 때 세션은 하나씩 늦게
+   * 돌아오므로(SessionManager.bootFinish) 세션마다 복원 직후, 그 세션으로 미뤄 둔 입력을 놓기 전에 부른다 —
+   * 그러지 않으면 자는 pane에 온 입력이 문 없이 셸로 간다.
+   */
+  async restoreOne(id: number): Promise<void> {
+    if (this.live.has(id)) return;
+    const session = this.deps.sessions.get(id);
+    if (!session || session.isDead) return;
+    const meta = await this.deps.sessions.getMeta(id);
+    const saved = meta.agentSleep as SleepState | undefined;
+    if (!saved || typeof saved !== 'object' || this.live.has(id)) return;
+    if (saved.state === 'failed') { this.live.set(id, { state: saved, queue: [], queuedBytes: 0, started: false, wakeStartedAt: 0 }); return; }
+    // 'waking' at the time of the crash → back to sleeping; the queue is gone with the old process.
+    const state: SleepState = { ...saved, state: 'sleeping' };
+    let snapshot: string | undefined;
+    try { snapshot = await readFile(this.snapshotPath(id), 'utf8'); } catch {}
+    if (this.live.has(id)) return;
+    session.freeze(snapshot);
+    this.install(id, session, state);
+    await this.deps.sessions.setMeta(id, { agentSleep: state });
+    this.deps.log(`SLEEP restored session=${id} (${saved.state})`);
   }
 
   // ── entry points ──────────────────────────────────────────────────────
