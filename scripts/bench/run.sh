@@ -19,13 +19,16 @@ HOMEDIR=$RUN/home
 mkdir -p "$HOMEDIR" "$ROOT/frames" "$ROOT/results"
 [ -f "$ROOT/frames/redraw-00.ansi" ] || node "$REPO/scripts/bench/synth.mjs" "$ROOT/frames" >&2
 
-cleanup() { systemctl --user stop "$SLICE" >/dev/null 2>&1 || true; }
+cleanup() {
+  systemctl --user stop "$SLICE" "$UNIT" "$UNIT-2" "$STRESS" >/dev/null 2>&1 || true
+  systemctl --user reset-failed "$UNIT" "$UNIT-2" "$STRESS" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 cleanup
 if ss -ltn | grep -q ":$PORT "; then echo "port $PORT busy" >&2; exit 1; fi
 
 start_server() {
-  systemd-run --user --quiet --slice="$SLICE" --unit="$1" -p KillMode=process \
+  systemd-run --user --quiet --collect --slice="$SLICE" --unit="$1" -p KillMode=process \
     -p StandardOutput=append:"$RUN/server.log" -p StandardError=append:"$RUN/server.log" \
     --setenv=HOME="$HOME" --setenv=PATH=/usr/bin:/bin --setenv=TTYM_HOME="$HOMEDIR" \
     --setenv=PORT="$PORT" --setenv=TTYM_HOLDER_BIN="$DIST/ttym-holder" \
@@ -42,8 +45,8 @@ export BENCH_PORT=$PORT BENCH_FRAMES=$ROOT/frames BENCH_LABEL=$LABEL BENCH_CGROU
   BENCH_COMMIT=$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo '?') \
   BENCH_OUT=$ROOT/results/$(basename "$RUN").json \
   BENCH_SERVER_PID="ss -ltnpH 'sport = :$PORT' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2" \
-  BENCH_STRESS_START="systemd-run --user --quiet --slice=$SLICE --unit=$STRESS stress-ng --vm 1 --vm-bytes %BYTES% --vm-keep --timeout 3600s" \
+  BENCH_STRESS_START="systemd-run --user --quiet --collect --slice=$SLICE --unit=$STRESS stress-ng --vm 1 --vm-bytes %BYTES% --vm-keep --timeout 3600s" \
   BENCH_STRESS_STOP="systemctl --user stop $STRESS" \
-  BENCH_RESTART="kill -TERM \$(systemctl --user show -p MainPID --value $UNIT); sleep 0.5; systemd-run --user --quiet --slice=$SLICE --unit=$UNIT-2 -p KillMode=process -p StandardOutput=append:$RUN/server.log -p StandardError=append:$RUN/server.log --setenv=HOME=$HOME --setenv=PATH=/usr/bin:/bin --setenv=TTYM_HOME=$HOMEDIR --setenv=PORT=$PORT --setenv=TTYM_HOLDER_BIN=$DIST/ttym-holder /usr/bin/node $DIST/ttym-server.js"
+  BENCH_RESTART="kill -TERM \$(systemctl --user show -p MainPID --value $UNIT); sleep 0.5; systemd-run --user --quiet --collect --slice=$SLICE --unit=$UNIT-2 -p KillMode=process -p StandardOutput=append:$RUN/server.log -p StandardError=append:$RUN/server.log --setenv=HOME=$HOME --setenv=PATH=/usr/bin:/bin --setenv=TTYM_HOME=$HOMEDIR --setenv=PORT=$PORT --setenv=TTYM_HOLDER_BIN=$DIST/ttym-holder /usr/bin/node $DIST/ttym-server.js"
 node "$REPO/scripts/bench/client.mjs"
 echo "result: $BENCH_OUT" >&2
