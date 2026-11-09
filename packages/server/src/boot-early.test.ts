@@ -99,6 +99,29 @@ describe('boot before recovery finishes', () => {
     expect(ids.every((id) => m2.get(id))).toBe(true);
   }, 30_000);
 
+  it('requests for a session whose holder is briefly unreachable do not burn the retry budget (2026-11-09 review)', async () => {
+    const run = resolve(DIR, 'run');
+    const [id] = await leaveHolders(run, 1);
+    const { readFileSync, renameSync } = await import('node:fs');
+    const manifest = JSON.parse(readFileSync(resolve(run, `session-${id}.json`), 'utf8')) as { socket: string };
+    // holder는 살아 있는데 소켓 경로가 잠깐 없다(다른 holder가 지웠을 때와 같다 — holder는 5초마다 다시 bind)
+    renameSync(manifest.socket, manifest.socket + '.away');
+    const m2 = new SessionManager(run);
+    managers.unshift(m2);
+    await m2.bootPrepare();
+    void m2.bootFinish();
+    await sleep(300);
+    // 요청이 몰린다: 예전에는 이것만으로 재시도 5번을 다 써 버리고 포기했다
+    for (let i = 0; i < 20; i++) { void m2.whenRecovered(id!, 100); await sleep(50); }
+    await sleep(200);
+    expect(m2.isPending(id!)).toBe(true); // 아직 포기하지 않았다
+    renameSync(manifest.socket + '.away', manifest.socket);
+    for (let i = 0; i < 20; i++) void m2.whenRecovered(id!, 100); // 앞당긴 시도가 이번엔 붙는다
+    for (let i = 0; i < 80 && !m2.get(id!); i++) await sleep(100);
+    expect(m2.get(id!)).toBeTruthy();
+    expect(m2.isPending(id!)).toBe(false);
+  }, 30_000);
+
   it('runs the recovered hook before releasing waiters, and holds sessions until the hook is set', async () => {
     const run = resolve(DIR, 'run');
     const [id] = await leaveHolders(run, 1);

@@ -46,3 +46,51 @@ describe('async log', () => {
     rmSync(dir, { recursive: true });
   });
 });
+
+describe('async log at exit (2026-11-09 review)', () => {
+  it('flushSync does not rewrite the chunk already handed to the kernel, and keeps what is queued behind it', () => {
+    const written: string[] = [];
+    let complete: (() => void) | null = null;
+    const log = createAsyncLog(99, {
+      write: (_fd, b, cb) => { complete = () => { written.push(b.toString()); cb(null, b.length); }; },
+      writeSync: (_fd, b) => { written.push(b.toString()); },
+    });
+    log.write(Buffer.from('A\n')); // in flight
+    log.write(Buffer.from('B\n')); // queued
+    complete!();                    // the kernel finishes A after all
+    // (A가 끝나고 바로 B가 in flight로 넘어갔다 — 다시 A·B를 쓰면 안 된다)
+    const before = written.join('');
+    log.write(Buffer.from('C\n'));
+    log.flushSync();
+    expect(before).toBe('A\n');
+    expect(written.join('').split('A\n').length - 1).toBe(1);
+    expect(written.join('')).toContain('C\n');
+  });
+
+  it('on an error exit the in-flight chunk is written again rather than lost', () => {
+    const written: string[] = [];
+    const log = createAsyncLog(99, { write: () => {}, writeSync: (_fd, b) => { written.push(b.toString()); } });
+    log.write(Buffer.from('fatal: x\n')); // 스레드풀에 넘어간 채 프로세스가 끝난다
+    log.flushSync(true);
+    expect(written.join('')).toBe('fatal: x\n');
+  });
+
+  it('drain waits for the in-flight write and the queue', async () => {
+    const written: string[] = [];
+    const log = createAsyncLog(99, { write: (_fd, b, cb) => { setTimeout(() => { written.push(b.toString()); cb(null, b.length); }, 30); } });
+    log.write(Buffer.from('A\n'));
+    log.write(Buffer.from('B\n'));
+    await log.drain(2000);
+    expect(written.join('')).toBe('A\nB\n');
+    expect(log.queued).toBe(0);
+  });
+
+  it('reports dropped bytes at exit even if nothing is logged after the drop', () => {
+    const written: string[] = [];
+    const log = createAsyncLog(99, { max: 100, write: () => {}, writeSync: (_fd, b) => { written.push(b.toString()); } });
+    log.write(Buffer.from('x'.repeat(60))); // in flight forever
+    log.write(Buffer.from('y'.repeat(60))); // over the cap → dropped
+    log.flushSync();
+    expect(written.join('')).toMatch(/\[log\] dropped 60 bytes/);
+  });
+});

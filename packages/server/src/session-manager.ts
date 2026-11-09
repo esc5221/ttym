@@ -249,8 +249,14 @@ export class SessionManager {
   /** 줄이 만들어지기 전에 요청이 온 id */
   private demanded = new Set<number>();
   private queueBuilt = false;
-  /** 다시 시도를 기다리는 세션의 타이머 — 요청이 오면 기다리지 않고 바로 다시 시도한다 */
+  /**
+   * 다시 시도를 기다리는 세션 — 요청이 오면 예정보다 일찍 한 번 더 시도한다. 일찍 하는 시도는 예정된 재시도
+   * 예산(RETRY_MS)을 쓰지 않고, 같은 세션에 EARLY_RETRY_MIN_MS보다 자주 하지 않는다. 그러지 않으면 요청 몇 개로
+   * 몇 분짜리 재시도가 몇백 ms에 다 끝나, holder가 조금 뒤 돌아와도 포기한 상태로 남았다(2026-11-09 리뷰 재현).
+   */
   private retryTimers = new Map<number, () => void>();
+  private lastEarlyRetry = new Map<number, number>();
+  private static readonly EARLY_RETRY_MIN_MS = 2_000;
 
   /** 그 세션을 기다리는 요청이 있다 — 아직 줄에 있으면 맨 앞으로, 다시 시도 대기 중이면 지금 시도. */
   private demand(id: number): void {
@@ -342,10 +348,19 @@ export class SessionManager {
         const delay = SessionManager.RETRY_MS[attempt];
         if (delay !== undefined) {
           console.error(`[mgr] recover ${filename} failed (attempt ${attempt + 1}): ${(e as Error)?.message ?? e} — holder alive, retry in ${delay}ms`);
-          const retry = () => { clearTimeout(t); this.retryTimers.delete(sid); void this.recoverOne(filename, attempt + 1); };
-          const t = setTimeout(retry, delay);
+          const scheduled = () => { this.retryTimers.delete(sid); void this.recoverOne(filename, attempt + 1); };
+          const t = setTimeout(scheduled, delay);
           t.unref?.();
-          this.retryTimers.set(sid, retry);
+          // 요청이 앞당긴 시도: 같은 attempt로(예산을 안 씀). 실패하면 그 시도가 같은 간격으로 다시 예약한다.
+          const early = () => {
+            const now = Date.now();
+            if (now - (this.lastEarlyRetry.get(sid) ?? 0) < SessionManager.EARLY_RETRY_MIN_MS) return;
+            this.lastEarlyRetry.set(sid, now);
+            clearTimeout(t);
+            this.retryTimers.delete(sid);
+            void this.recoverOne(filename, attempt);
+          };
+          this.retryTimers.set(sid, early);
         } else {
           console.error(`[mgr] recover ${filename} gave up after ${attempt + 1} attempts — holder alive, manifest kept`);
           this.settle(sid);

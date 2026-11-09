@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { createServer } from './server.js';
 import { rotateLogIfNeeded, LOG_ROTATE_INTERVAL_MS } from './log-rotate.js';
 import { getHomeDir } from './session.js';
-import { installAsyncStdio } from './async-log.js';
+import { installAsyncStdio, drainAsyncStdio } from './async-log.js';
 
 const PORT = parseInt(process.env.PORT || '7690', 10);
 
@@ -58,7 +58,7 @@ if (isMain()) {
       // where the old 5s budget ran out and left sessions unreachable.
       const deadline = setTimeout(() => {
         console.error('[shutdown] persist deadline exceeded, force exit');
-        process.exit(1);
+        void drainAsyncStdio(1000).finally(() => process.exit(1));
       }, 15000);
 
       try {
@@ -68,6 +68,7 @@ if (isMain()) {
       }
 
       clearTimeout(deadline);
+      await drainAsyncStdio(3000); // 로그 큐를 비운 뒤 — 'exit'의 동기 flush는 마지막 수단(async-log.ts)
       process.exit(0);
     };
 
