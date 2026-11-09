@@ -225,8 +225,48 @@ export function isPassiveInput(data: Buffer): boolean {
  * Duplicates collapse (dedupeFlags) so a pane that already piled some up types
  * a clean line on its next wake.
  */
+/**
+ * `ps` joins argv with spaces, so one argument such as Codex's
+ * `-c model_providers.x={name="x", base_url="…"}` comes back as several words, and a resume
+ * typed from them hands Codex stray positional arguments ("unexpected argument").
+ * Glue a word to the next ones while it is a `key=value` whose value still has an open
+ * quote or bracket. Only such values are glued, so plain words never swallow the flags after them.
+ */
+export function rejoinSplitWords(words: readonly string[]): string[] {
+  const out: string[] = [];
+  let cur: string | null = null;
+  for (const w of words) {
+    if (cur === null) {
+      if (opensValue(w)) cur = w;
+      else out.push(w);
+      continue;
+    }
+    cur = `${cur} ${w}`;
+    if (!opensValue(cur)) { out.push(cur); cur = null; }
+  }
+  if (cur !== null) out.push(cur);
+  return out;
+}
+
+function opensValue(word: string): boolean {
+  const eq = word.indexOf('=');
+  if (eq < 1) return false;
+  let depth = 0;
+  let quoted = false;
+  for (let i = eq + 1; i < word.length; i++) {
+    const c = word[i]!;
+    if (quoted) {
+      if (c === '\\') i++;
+      else if (c === '"') quoted = false;
+    } else if (c === '"') quoted = true;
+    else if (c === '{' || c === '[') depth++;
+    else if ((c === '}' || c === ']') && depth > 0) depth--;
+  }
+  return quoted || depth > 0;
+}
+
 export function resumeArgsFrom(command: string): string[] {
-  const tokens = command.trim().split(/\s+/).slice(1);
+  const tokens = rejoinSplitWords(command.trim().split(/\s+/).slice(1));
   // Codex names the session as a subcommand: `codex resume <id> …` / `codex fork <id> …`. Drop both.
   if (tokens[0] === 'resume' || tokens[0] === 'fork') { tokens.shift(); if (tokens[0] && !tokens[0].startsWith('-')) tokens.shift(); }
   const out: string[] = [];
@@ -237,6 +277,8 @@ export function resumeArgsFrom(command: string): string[] {
     // --fork-session은 "이 resume에서 새 세션으로 갈라져라"다. 남기면 wake마다 새 id로 갈라지고,
     // 메시지 없이 다시 재우면 transcript가 없는 id가 남아 다음 wake가 대화를 못 찾는다(F-3).
     if (t === '--fork-session') continue;
+    // A wrapper (ccx shim) puts its own -c flags first, so Codex's `resume <id>` / `fork <id>` can come after them.
+    if ((t === 'resume' || t === 'fork') && i > 0) { if (tokens[i + 1] && !tokens[i + 1]!.startsWith('-')) i++; continue; }
     // Claude's -c is --continue; Codex's -c is a config override that takes a value.
     if (t === '-c') { if (tokens[i + 1]?.includes('=')) { out.push(t, tokens[++i]!); } continue; }
     out.push(t);
@@ -581,7 +623,10 @@ export class AgentSleeper {
     // ttym may predate TTYM_PORT awareness — an env prefix is harmless everywhere.
     session.writeRaw(Buffer.from([0x15]));
     await this.delay(100);
-    const extra = [...KINDS[l.state.agent].resumeExtra, ...(l.state.args ?? [])].map(shellQuote).join(' ');
+    // Run stored args through resumeArgsFrom again: a pane that went to sleep before it rejoined split values and
+    // dropped a trailing `resume <id>` gets a clean line too (those args were whitespace words, so the join is lossless).
+    const stored = l.state.args?.length ? resumeArgsFrom(['_', ...l.state.args].join(' ')) : [];
+    const extra = [...KINDS[l.state.agent].resumeExtra, ...stored].map(shellQuote).join(' ');
     session.writeRaw(Buffer.from(`PORT=${this.deps.port} ttym agent resume ${l.state.agent}${extra ? ' ' + extra : ''}\r`));
 
     const ready = await this.waitReady(id, session);

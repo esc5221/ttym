@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentSleeper, busyChildOf, composerText, findAgentProcess, isInteractiveAgent, isPassiveInput, parseSleepAfter, resumeArgsFrom, turnIsStale, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, busyChildOf, composerText, findAgentProcess, isInteractiveAgent, isPassiveInput, parseSleepAfter, rejoinSplitWords, resumeArgsFrom, turnIsStale, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
 import type { Session } from './session.js';
 import type { ScreenRun } from '@ttym/protocol';
 
@@ -134,6 +134,21 @@ describe('helpers', () => {
     expect(resumeArgsFrom('codex resume 01a0-9f --dangerously-bypass-approvals-and-sandbox')).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
     expect(resumeArgsFrom('codex resume --last')).toEqual([]);
     expect(resumeArgsFrom('codex -c model="o3" --full-auto')).toEqual(['-c', 'model="o3"', '--full-auto']);
+  });
+
+  it('a -c value that ps split on its spaces comes back as one argument', () => {
+    const provider = 'model_providers.ccx={name="ccx", base_url="http://h:1/backend-api/codex", env_key="K", http_headers={"a"="b", "c"="d"}}';
+    expect(resumeArgsFrom(`/x/codex -c model_provider="ccx" -c ${provider} -c features.apps=false --dangerously-bypass-approvals-and-sandbox resume 01a1-b8`))
+      .toEqual(['-c', 'model_provider="ccx"', '-c', provider, '-c', 'features.apps=false', '--dangerously-bypass-approvals-and-sandbox']); // `resume <id>` after the wrapper's flags is dropped too
+    // a quoted value with a space
+    expect(resumeArgsFrom('codex -c instructions="be brief" --full-auto')).toEqual(['-c', 'instructions="be brief"', '--full-auto']);
+    // args a pane stored before the fix are repaired on wake
+    const stored = ['-c', 'model_providers.ccx={name="ccx",', 'base_url="u",', 'env_key="K"}', '--dangerously-bypass-approvals-and-sandbox', 'resume', '01a1'];
+    expect(resumeArgsFrom(['_', ...stored].join(' '))).toEqual(['-c', 'model_providers.ccx={name="ccx", base_url="u", env_key="K"}', '--dangerously-bypass-approvals-and-sandbox']);
+    expect(rejoinSplitWords(['-c', 'x={a="1",', 'b="2"}', '--yolo'])).toEqual(['-c', 'x={a="1", b="2"}', '--yolo']);
+    // plain words are never glued, and an unclosed value only takes what is left
+    expect(rejoinSplitWords(['--model', 'opus', '[x', 'y'])).toEqual(['--model', 'opus', '[x', 'y']);
+    expect(rejoinSplitWords(['k={a', '--f'])).toEqual(['k={a --f']);
   });
 
   it('focus reports and mouse events are passive; keys are not', () => {
