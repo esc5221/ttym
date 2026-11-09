@@ -1,5 +1,5 @@
-import { execFileSync, execFile } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, execFile, spawnSync } from 'node:child_process';
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import process from 'node:process';
@@ -143,6 +143,55 @@ export function stableNodePath(execPath: string): string {
 }
 
 /**
+ * The node that runs the server is, to macOS, the app responsible for every pane: launchd starts
+ * the server, the server starts holders, and a shell or claude in a pane is judged as that node
+ * for Local Network and file permissions (TCC log 2026-11-09: responsible=node-5555…, binary_path=/bin/ls).
+ * The judgement resolves the node's binary UUID through the allowed rule's path, so:
+ *  - Homebrew node is ad-hoc signed — `brew upgrade node` changes its identity and path and deletes
+ *    the old file. Every pane that server started then gets EHOSTUNREACH on the LAN (2026-11-09).
+ *  - Overwriting one fixed path has the same effect on panes started by the old binary.
+ * So the server's node lives in ~/.ttym/runtime/v<x.y.z>/node, one directory per version, never
+ * overwritten (an official nodejs.org build: Developer ID signed, no Homebrew dylibs). The highest
+ * version wins; an older directory stays as long as panes started by it are alive.
+ */
+export function runtimeNodePath(runtimeDir = resolve(HOME_DIR, 'runtime')): string | null {
+  let names: string[];
+  try { names = readdirSync(runtimeDir); } catch { return null; }
+  const versions = names
+    .map((name) => ({ name, v: /^v(\d+)\.(\d+)\.(\d+)$/.exec(name)?.slice(1).map(Number) }))
+    .filter((e): e is { name: string; v: number[] } => !!e.v)
+    .filter((e) => {
+      try { accessSync(resolve(runtimeDir, e.name, 'node'), fsConstants.X_OK); return true; } catch { return false; }
+    })
+    .sort((a, b) => b.v[0] - a.v[0] || b.v[1] - a.v[1] || b.v[2] - a.v[2]);
+  return versions.length ? resolve(runtimeDir, versions[0].name, 'node') : null;
+}
+
+export function serviceNodePath(execPath = process.execPath): string {
+  return runtimeNodePath() ?? stableNodePath(execPath);
+}
+
+/** codesign identity of a binary (macOS). null when codesign is missing or the file is unsigned. */
+export function codeIdentity(path: string): { identifier: string | null; team: string | null } | null {
+  if (process.platform !== 'darwin') return null;
+  const r = spawnSync('codesign', ['-dv', path], { encoding: 'utf8', timeout: 5000 });
+  const text = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  const identifier = text.match(/^Identifier=(.+)$/m)?.[1]?.trim() ?? null;
+  if (!identifier) return null;
+  const team = text.match(/^TeamIdentifier=(.+)$/m)?.[1]?.trim() ?? null;
+  return { identifier, team: team && team !== 'not set' ? team : null };
+}
+
+/** Why this node would lose the panes' macOS permissions on the next upgrade, or null if it would not. */
+export function nodeIdentityWarning(path: string, identity: { identifier: string | null; team: string | null } | null): string | null {
+  if (!identity) return null;
+  if (identity.team && !/^\/(opt\/homebrew|usr\/local)\//.test(path)) return null;
+  return `node ${path} is ${identity.team ? 'a Homebrew path' : 'ad-hoc signed'} — macOS judges every pane as this binary `
+    + `(Local Network, network volumes), so an upgrade cuts their LAN. Put an official build in `
+    + `${resolve(HOME_DIR, 'runtime')}/v<version>/node and run \`ttym service install\`.`;
+}
+
+/**
  * PATH for the job. Not process.env.PATH — install often runs from inside an
  * agent's shell, whose PATH carries that agent's plugin dirs, and
  * buildSessionEnv fossilizes whatever the server got into every pane it ever
@@ -196,7 +245,7 @@ async function installLaunchd(port: number, bind: string | null) {
 
   mkdirSync(resolve(homedir(), 'Library', 'LaunchAgents'), { recursive: true });
   writeFileSync(plistPath, renderLaunchdPlist({
-    label: LABEL, nodePath: stableNodePath(process.execPath), serverJs: SERVER_JS,
+    label: LABEL, nodePath: serviceNodePath(), serverJs: SERVER_JS,
     holderBin: holderBinForServer(),
     port, bind, logPath: LOG_FILE, homeDir: HOME_DIR,
     path: loginShellPath() ?? '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
@@ -275,6 +324,12 @@ async function status() {
     const lastExit = dump.match(/last exit code = ([^\n]+)/)?.[1]?.trim();
     out.pid = pid ? parseInt(pid, 10) : null;
     out.lastExit = lastExit ?? null;
+    const program = dump.match(/^\s*program = (.+)$/m)?.[1]?.trim() ?? null;
+    if (program) {
+      const identity = codeIdentity(program);
+      out.node = { path: program, identifier: identity?.identifier ?? null, team: identity?.team ?? null };
+      out.nodeWarning = nodeIdentityWarning(program, identity);
+    }
   }
   if (up) {
     try {
@@ -288,6 +343,9 @@ async function status() {
   console.log(`supervised: ${out.supervised ? `yes (${out.kind}, ${out.label})` : 'no'}`);
   console.log(`server:     ${up ? `running on ${port}` : 'not running'}${out.pid ? ` (pid ${out.pid})` : ''}`);
   if (out.lastExit && out.lastExit !== '0') console.log(`last exit:  ${out.lastExit}`);
+  const node = out.node as { path: string; identifier: string | null; team: string | null } | undefined;
+  if (node) console.log(`node:       ${node.path} (${node.identifier ?? 'unsigned'}${node.team ? `, team ${node.team}` : ', ad-hoc'})`);
+  if (out.nodeWarning) console.log(`warning:    ${out.nodeWarning}`);
   if (out.sessions !== undefined) console.log(`sessions:   ${out.sessions}`);
   process.exit(up || !marker ? EXIT.OK : EXIT.NO_SERVER);
 }
