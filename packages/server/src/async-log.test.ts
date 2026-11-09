@@ -63,6 +63,7 @@ describe('async log at exit (2026-11-09 review)', () => {
     log.write(Buffer.from('C\n'));
     log.flushSync();
     expect(before).toBe('A\n');
+    expect(written.join('')).toContain('disk stalled at exit'); // B가 아직 쓰는 중이라 순서가 바뀔 수 있음을 남긴다
     expect(written.join('').split('A\n').length - 1).toBe(1);
     expect(written.join('')).toContain('C\n');
   });

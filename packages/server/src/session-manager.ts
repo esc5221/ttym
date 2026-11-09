@@ -153,7 +153,9 @@ export class SessionManager {
       } finally {
         this._ready = true;
         // 다시 시도 중인 것(recovering)만 자리표시로 남기고 나머지 대기는 푼다 — 없는 세션은 평소처럼 404.
-        for (const id of [...this.pending.keys()]) if (!this.recovering.has(id)) this.settle(id);
+        // 훅을 마치는 중인 세션(hooking)은 그 세션의 recoverOne이 놓는다 — 여기서 먼저 놓으면 재우기 상태를
+        // 되살리기 전에 입력이 나간다(2026-11-09 리뷰).
+        for (const id of [...this.pending.keys()]) if (!this.recovering.has(id) && !this.hooking.has(id)) this.settle(id);
       }
     })();
     return this.bootDone;
@@ -162,6 +164,8 @@ export class SessionManager {
   private bootDone: Promise<void> | null = null;
   /** 아직 다시 붙지 않은 holder 세션 — 목록에는 recovering으로 보인다. */
   private pending = new Map<number, HolderManifest>();
+  /** 붙었고 복원 훅(재우기 상태)을 마치는 중 */
+  private hooking = new Set<number>();
   private pendingWaiters = new Map<number, Array<() => void>>();
 
   isPending(id: number): boolean { return this.pending.has(id); }
@@ -308,12 +312,13 @@ export class SessionManager {
       const checkpoint = await this.readCheckpoint(manifest.id);
       const session = await Session.recover(manifest, this.runtimeDir, false, checkpoint);
       this.sessions.set(session.id, session);
+      this.hooking.add(session.id);
       this.recovering.delete(session.id);
       this.nextId = Math.max(this.nextId, session.id + 1);
       // 훅(재우기 상태)은 미뤄 둔 요청보다 먼저. bootFinish가 이 세션을 '끝남'으로 놓기 전에 마쳐야 한다.
       // Load persisted meta
       await this.getMeta(session.id);
-      await this.runRecoveredHook(session.id);
+      try { await this.runRecoveredHook(session.id); } finally { this.hooking.delete(session.id); }
       this.settle(session.id);
       console.log(
         `[mgr] recovered session=${session.id} pid=${manifest.childPid}` +

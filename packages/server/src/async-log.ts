@@ -84,7 +84,11 @@ export function createAsyncLog(fd: number, opts: { max?: number; write?: WriteFn
     },
     flushSync(includeInFlight = false) {
       if (dropped > 0) { q.push(note()); dropped = 0; }
-      const rest = [...(includeInFlight && inFlight ? [inFlight] : []), ...q];
+      // drain이 시간을 넘겨 쓰는 중인 조각이 아직 있으면, 그것이 아래 줄들보다 나중에 파일에 붙을 수 있다
+      // (2026-11-09 리뷰 재현: B, A). 기다릴 수 없으니 순서가 바뀌었을 수 있다고 적어 둔다.
+      const stalled = inFlight && !includeInFlight
+        ? [Buffer.from('[log] disk stalled at exit — a line or two above this may land after it\n')] : [];
+      const rest = [...(includeInFlight && inFlight ? [inFlight] : []), ...stalled, ...q];
       inFlight = null;
       q.length = 0;
       for (const b of rest) doWriteSync(fd, b);
