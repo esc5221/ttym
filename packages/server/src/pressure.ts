@@ -37,6 +37,23 @@ export function levelFromPsi(raw: string): PressureLevel | null {
 
 export type PressureReader = () => Promise<PressureLevel | null>;
 
+/** cgroup v2: /proc/self/cgroup의 `0::<path>` → /sys/fs/cgroup<path>/memory.pressure (없으면 null) */
+export function cgroupPressurePath(procSelfCgroup: string, root = '/sys/fs/cgroup'): string | null {
+  const m = /^0::(\/.*)$/m.exec(procSelfCgroup);
+  if (!m) return null;
+  return `${root}${m[1] === '/' ? '' : m[1]}/memory.pressure`;
+}
+
+let ownPath: string | null | undefined;
+async function ownCgroupPressurePath(): Promise<string | null> {
+  if (ownPath !== undefined) return ownPath;
+  try {
+    const p = cgroupPressurePath(await readFile('/proc/self/cgroup', 'utf8'));
+    ownPath = p && (await readFile(p, 'utf8').then(() => true, () => false)) ? p : null;
+  } catch { ownPath = null; }
+  return ownPath;
+}
+
 export function defaultPressureReader(platform = process.platform): PressureReader {
   if (platform === 'darwin') {
     return () => new Promise((resolve) => {
@@ -46,7 +63,16 @@ export function defaultPressureReader(platform = process.platform): PressureRead
     });
   }
   if (platform === 'linux') {
-    return () => readFile('/proc/pressure/memory', 'utf8').then(levelFromPsi, () => null);
+    // 자기 cgroup의 memory.pressure를 먼저 — 공용 머신에서 다른 사용자 때문에 생긴 압박에 반응하지 않고,
+    // 컨테이너·systemd 유닛 안에서는 상한에 닿은 것을 본다. 못 읽으면 시스템 전체(/proc/pressure/memory).
+    return async () => {
+      const own = await ownCgroupPressurePath();
+      if (own) {
+        const lvl = await readFile(own, 'utf8').then(levelFromPsi, () => null);
+        if (lvl) return lvl;
+      }
+      return readFile('/proc/pressure/memory', 'utf8').then(levelFromPsi, () => null);
+    };
   }
   return async () => null;
 }
