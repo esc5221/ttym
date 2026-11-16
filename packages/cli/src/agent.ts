@@ -500,7 +500,7 @@ export async function cmdAgent() {
   console.log('                        pane (its folder, resumed). Refuses while that conversation still runs.');
   console.log('  sleep|wake <addr>     Put a pane\'s agent to sleep (process gone, screen kept,');
   console.log('                        any input resumes it) / wake it now. <addr> = ws:name|:name|%id');
-  console.log('                        auto sleep is on (30m) unless config agent-sleep-after = off. never while the');
+  console.log('                        auto sleep is on (1h) unless config agent-sleep-after = off. never while the');
   console.log('                        agent reports a background task, a scheduled wakeup, or a prompt waiting');
   console.log('  dismiss <addr>        Clear the "resume failed" notice on a pane (the shell is already live)');
   console.log('  restart (<addr>... | --stale) [--dry-run] [--json]');

@@ -193,8 +193,8 @@ function typedAfter(runs: ScreenRun[], mark: string): string {
   return typed.replace(/\u00a0/g, ' ').trim();
 }
 
-/** Auto-sleep when the config key was never written. On, at half an hour. */
-export const SLEEP_AFTER_DEFAULT_MS = 30 * 60_000;
+/** Auto-sleep when the config key was never written. On, at an hour (half an hour put away panes still in use — 2026-11-16). */
+export const SLEEP_AFTER_DEFAULT_MS = 60 * 60_000;
 
 /**
  * Duration text from config: "30m" · "2h" · "90s". Unset means the default

@@ -92,8 +92,8 @@ describe('helpers', () => {
     expect(parseSleepAfter('90s')).toBe(90_000);
     expect(parseSleepAfter('45')).toBe(45 * 60_000);
     // Never configured → the default, so a fresh install sleeps idle agents.
-    expect(parseSleepAfter(undefined)).toBe(30 * 60_000);
-    expect(parseSleepAfter('')).toBe(30 * 60_000);
+    expect(parseSleepAfter(undefined)).toBe(60 * 60_000);
+    expect(parseSleepAfter('')).toBe(60 * 60_000);
     expect(parseSleepAfter('off')).toBe(0);
     expect(parseSleepAfter('Never')).toBe(0);
     expect(parseSleepAfter('0')).toBe(0);

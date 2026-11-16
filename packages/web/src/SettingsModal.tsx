@@ -255,7 +255,7 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
   );
 
   /**
-   * Auto sleep: on by default at 30m. The toggle writes "off" (an explicit
+   * Auto sleep: on by default at 1h. The toggle writes "off" (an explicit
    * value, not an empty key — an empty key means "never configured", which is
    * on) and restores the last window when switched back.
    */
@@ -295,7 +295,7 @@ function AgentsSection({ onPatchConfig }: { onPatchConfig: Props['onPatchConfig'
           <Segmented
             options={['on', 'off'] as const}
             value={off ? 'off' : 'on'}
-            onChange={(v) => write(v === 'off' ? 'off' : '30m')}
+            onChange={(v) => write(v === 'off' ? 'off' : '1h')}
           />
           {off ? null : (
             <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>

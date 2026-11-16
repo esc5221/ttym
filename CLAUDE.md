@@ -197,8 +197,8 @@ ttym agent restart --stale     # claude·codex 업데이트 후: 옛 버전으�
   건너뛰는 것: sleep이 거절하는 것 전부, 입력창에 안 보낸 글자(Ctrl-C가 지운다. `composerText`), 30초 안의 입력,
   transcript가 아직 없는 대화(메시지 0개 — 내리면 resume할 게 없다), 명령을 친 pane 자신.
   내렸는데 못 올라오면 거기서 멈춘다. 모델은 안 바꾼다 — resume은 그 대화의 모델을 유지한다.
-- 자동: **기본 켜짐, 30분**. 설정(agents 탭)에서 on/off와 10m·30m·1h·2h. config 키 `agent-sleep-after` —
-  키가 없으면 기본값(30m), `off`/`never`/`0`이면 끔. 입력·출력이 그 시간 동안 없고 아래 "바쁨" 신호가 없을 때만.
+- 자동: **기본 켜짐, 1시간**. 설정(agents 탭)에서 on/off와 10m·30m·1h·2h. config 키 `agent-sleep-after` —
+  키가 없으면 기본값(1h), `off`/`never`/`0`이면 끔. 입력·출력이 그 시간 동안 없고 아래 "바쁨" 신호가 없을 때만.
   한 번에 3개, 3초 간격. pin 같은 수동 예외는 없다 — 에이전트가 스스로 말하는 것으로 판단한다.
 - "바쁨" 판정(권위 순, server/src/agent-sleep.ts `whyBusy`):
   1. `~/.claude/sessions/<pid>.json`의 status — `waiting`(permission·대화상자, `waitingFor`에 이름)·`busy`
