@@ -128,12 +128,15 @@
 .rd-wc-box:focus-within { border-color: var(--accent); }
 .rd-wc.busy .rd-wc-box { border-style: dashed; }
 .rd-wc-pm { color: var(--accent); flex-shrink: 0; line-height: inherit; }
-/* as tall as its text (WebComposer sets the height); nothing scrolls inside it */
-.rd-wc-input {
+/* as tall as its text (WebComposer sets the height); nothing scrolls inside it. The twin measures it, so they share every rule. */
+.rd-wc-input, .rd-wc-twin {
   flex: 1; min-width: 0; resize: none; border: 0; outline: 0; padding: 0; margin: 0; background: transparent;
   color: inherit; font: inherit; line-height: inherit; overflow: hidden; display: block;
 }
 .rd-wc-input::placeholder { color: var(--text-dim); opacity: 1; }
+/* the measuring twin: same box as the field, out of the layout (absolute, one row tall), never seen.
+   Not height 0 — a textarea that tall reports scrollHeight 0 in Chrome. */
+.rd-wc-twin { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; flex: none; }
 .rd-wc-input[readonly] { cursor: default; }
 /* the agent's own grey completion after the typed text, as it draws it */
 .rd-wc-ghost { position: absolute; right: 12px; top: 8px; color: var(--text-dim); pointer-events: none; }

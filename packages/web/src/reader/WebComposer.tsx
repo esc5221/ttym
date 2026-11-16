@@ -31,6 +31,10 @@ const CHIP = /\[(?:Pasted text|Image|Truncated text) #\d+/;
 
 interface Item { insert: string; label: string; detail?: string; submitAfter?: boolean }
 
+/** Room kept under the caret line inside the page: the status row (20px) and the button or notice over the page's bottom. */
+const CARET_CLEAR_BOTTOM = 56;
+const CARET_CLEAR_TOP = 8;
+
 export const WebComposer = forwardRef<ComposerHandle, {
   sid: number;
   view: Extract<DockView, { kind: 'prompt' }>;
@@ -109,19 +113,55 @@ export const WebComposer = forwardRef<ComposerHandle, {
 
   // As tall as its text, wrapped lines included; nothing scrolls inside it. A draft taller than the page allows
   // goes into the page (ReaderView), whose own scroll then carries it.
+  //
+  // Heights are read off a hidden twin, never by shrinking the field itself: in the page, setting the field to
+  // height:auto for a moment shortened the page, the browser cut the scroll position down to the new end, and it
+  // stayed there when the height came back — the line being typed sank below the screen (dev, 2026-11-16).
+  const twin = useRef<HTMLTextAreaElement>(null);
+  /** Height of `text` laid out exactly as the field lays it out. */
+  const measure = useCallback((text: string): number => {
+    const el = area.current, t = twin.current;
+    if (!el || !t) return 0;
+    t.style.width = `${el.getBoundingClientRect().width}px`;
+    t.value = text;
+    return t.scrollHeight;
+  }, []);
+
+  /**
+   * Keep the line with the caret in sight when the field is part of the page. Typing at the end grows the field
+   * below the visible part, and moving the caret through a long draft goes past it. The bottom keeps clear of
+   * what stands over the page there (the status row under the field, the "↓ latest" button, the sleep notice).
+   */
+  const revealCaret = useCallback(() => {
+    const el = area.current;
+    if (!el || document.activeElement !== el) return;
+    const sc = el.closest('.rd-scroll');
+    if (!(sc instanceof HTMLElement)) return;
+    const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
+    const top = el.getBoundingClientRect().top;
+    const caretBottom = top + measure(el.value.slice(0, el.selectionStart ?? el.value.length));
+    const caretTop = caretBottom - lh;
+    const box = sc.getBoundingClientRect();
+    const below = caretBottom + CARET_CLEAR_BOTTOM - box.bottom;
+    const above = box.top + CARET_CLEAR_TOP - caretTop;
+    if (below > 0) sc.scrollTop += below;
+    else if (above > 0) sc.scrollTop -= above;
+  }, [measure]);
+
   useLayoutEffect(() => {
     const el = area.current;
     if (!el) return;
     const fit = () => {
-      el.style.height = 'auto';
-      el.style.height = `${el.scrollHeight}px`;
+      el.style.height = `${measure(el.value)}px`;
       onHeight?.(el.getBoundingClientRect().height);
+      // After the page has had its say (it follows its end when the reader was at the end).
+      requestAnimationFrame(revealCaret);
     };
     fit();
     const ro = new ResizeObserver(() => fit());
     ro.observe(el.parentElement ?? el);
     return () => ro.disconnect();
-  }, [value, onHeight]);
+  }, [value, onHeight, measure, revealCaret]);
 
   // Keep the caret where the agent's is while mirroring, so a taken-over edit lands where the person expects.
   useEffect(() => {
@@ -356,12 +396,14 @@ export const WebComposer = forwardRef<ComposerHandle, {
           onCompositionEnd={(ev) => { if (!owned && mirrorHasChip && ev.data) send(ev.data); }}
           onChange={onChange}
           onKeyDown={onKeyDown}
-          onSelect={(e) => { setCaret(e.currentTarget.selectionStart ?? 0); extra.caret = e.currentTarget.selectionStart; }}
-          onFocus={() => { extra.focused = true; }}
+          onSelect={(e) => { setCaret(e.currentTarget.selectionStart ?? 0); extra.caret = e.currentTarget.selectionStart; requestAnimationFrame(revealCaret); }}
+          onFocus={() => { extra.focused = true; requestAnimationFrame(revealCaret); }}
           onBlur={() => { extra.focused = false; }}
           onPaste={onPaste}
           aria-label="Message to the agent"
         />
+        {/* Measures heights for the field (see `measure`); out of the layout, never seen. */}
+        <textarea ref={twin} className="rd-wc-twin" rows={1} tabIndex={-1} aria-hidden readOnly />
         {!owned && view.ghost ? <span className="rd-wc-ghost">{view.ghost}</span> : null}
       </div>
       <div className="rd-meta">
