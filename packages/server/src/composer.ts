@@ -50,7 +50,8 @@ export interface ComposerCatalog {
 /** Changes to skill/command dirs, settings and the binary are caught by `freshnessKey`; this bounds the rest (an MCP server connected later). */
 const TTL_MS = 60 * 60_000;
 const SDK_TIMEOUT_MS = 15_000;
-const MENU_TIMEOUT_MS = 30_000;
+/** Startup included: a folder with many plugins took 17–24 s to show the menu (gpai-forest, 2.1.325). */
+const MENU_TIMEOUT_MS = 60_000;
 /** The hidden terminal is wide so names are not cut, and tall so a page holds many entries. */
 const MENU_COLS = 220;
 const MENU_ROWS = 100;
@@ -169,11 +170,22 @@ export async function menuScan(cwd: string, timeoutMs = MENU_TIMEOUT_MS): Promis
     }
     await sleep(400);
     s.write(Buffer.from('/'));
-    await sleep(500);
+    const selectedOf = (rows: string[]) => rows.map((r) => SELECTED.exec(r)?.[1]).find(Boolean) ?? null;
+    // No key goes in until the menu is drawn with its selection. It can take seconds (Claude Code 2.1.325 loads the
+    // skills for it; longer in a folder with many plugins), and a ↓ before it walks the prompt history instead:
+    // the "/" is replaced by an old prompt and no menu ever comes, or the selection starts mid-list
+    // ("no menu" in gpai-forest, five entries read in a lab folder — dev, 2026-11-16).
+    for (;;) {
+      if (Date.now() > deadline) throw new Error('menu did not open');
+      const rows = belowPrompt(s.screenText());
+      if (parseMenu(rows).length > 0 && selectedOf(rows)) break;
+      if (s.isDead) throw new Error('claude exited');
+      await sleep(100);
+    }
+    await sleep(150);
     const seen = new Map<string, ComposerCommand>();
     // The selection moves inside the visible window before the window scrolls, so a page with nothing new
     // is normal. The list wraps at its end: the scan is over when the selection comes back to where it began.
-    const selectedOf = (rows: string[]) => rows.map((r) => SELECTED.exec(r)?.[1]).find(Boolean) ?? null;
     let first: string | null = null;
     let moved = 0;
     let quiet = 0;
