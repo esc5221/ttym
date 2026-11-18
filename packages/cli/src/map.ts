@@ -106,22 +106,65 @@ export async function cmdMap() {
   // 편집본이든 저쪽이 유효본을 안다. 데이터 블록만 여기서 조립한다.
   const { prompt: instructions } = await fetchJson(port, '/api/map/prompt') as { prompt: string };
   const note = readOption(args, '--note') || '';
-  const prompt = buildPrompt(instructions, note, map, stale, screens, organize);
-  if (hasFlag('--dry-run')) { console.log(prompt); return; }
 
-  const raw = baseUrl ? await runOpenAi(prompt, model, baseUrl) : await runClaude(prompt, model);
-  const parsed = extractJson(raw);
-  if (!parsed || typeof parsed !== 'object') {
-    console.error('map: 모델 출력에서 JSON을 못 찾았다 —');
-    console.error(raw.slice(0, 400));
-    process.exit(EXIT.FAIL);
+  // 한 번에 보내는 세션 수. 207개를 한 요청에 넣었더니 답(세션마다 제목·현황·상태)이 출력 한도(8192 토큰)를
+  // 넘어 JSON이 중간에 잘렸고, 11-09부터 요약이 전부 멈췄다. workspace 배치는 첫 묶음만 맡는다.
+  const batches: MapSession[][] = [];
+  for (let i = 0; i < stale.length; i += SESSIONS_PER_CALL) batches.push(stale.slice(i, i + SESSIONS_PER_CALL));
+  if (batches.length === 0) batches.push([]);
+  if (hasFlag('--dry-run')) {
+    batches.forEach((b, i) => console.log(buildPrompt(instructions, note, map, b, screens, organize && i === 0)));
+    return;
   }
 
+  const sessionOutAll: Record<string, unknown> = {};
+  let wsOutFirst: unknown = undefined;
+  const failures: string[] = [];
+  // A batch that fails (output cut, broken JSON) is asked again once, in two halves.
+  const retried = new Set<MapSession[]>();
+  for (let i = 0; i < batches.length; i++) {
+    const prompt = buildPrompt(instructions, note, map, batches[i]!, screens, organize && i === 0);
+    let raw = '';
+    let why = '';
+    try {
+      raw = baseUrl ? await runOpenAi(prompt, model, baseUrl) : await runClaude(prompt, model);
+    } catch (e) {
+      why = (e as Error).message;
+    }
+    const parsed = why ? null : extractJson(raw);
+    if (!parsed || typeof parsed !== 'object') {
+      if (!why) why = `모델 출력에서 JSON을 못 찾았다 — ${raw.slice(0, 200)}`;
+      const b = batches[i]!;
+      if (b.length > 1 && !retried.has(b)) {
+        const half = Math.ceil(b.length / 2);
+        const a1 = b.slice(0, half), a2 = b.slice(half);
+        retried.add(a1); retried.add(a2);
+        batches.push(a1, a2);
+        console.error(`map: 묶음 ${i + 1}: ${why.slice(0, 120)} — 반으로 나눠 다시 묻는다`);
+        continue;
+      }
+      failures.push(`묶음 ${i + 1}/${batches.length}: ${why}`);
+      continue;
+    }
+    const out = (parsed as Record<string, unknown>).sessions;
+    if (out && typeof out === 'object') Object.assign(sessionOutAll, out);
+    if (i === 0) wsOutFirst = (parsed as Record<string, unknown>).workspaces;
+  }
+  if (failures.length > 0 && Object.keys(sessionOutAll).length === 0) {
+    console.error(`map: 모든 묶음이 실패했다 —\n${failures.join('\n')}`);
+    process.exit(EXIT.FAIL);
+  }
+  for (const f of failures) console.error(`map: ${f}`);
+  // 실패한 묶음의 세션은 손대지 않는다 — 신선 처리하면 다음 refresh가 다시 묻지 않는다.
+  const failedIds = new Set<number>();
+  batches.forEach((b, i) => { if (failures.some((f) => f.startsWith(`묶음 ${i + 1}/`))) for (const s of b) failedIds.add(s.id); });
+
   let sessionsApplied = 0;
-  const sessionOut = (parsed as Record<string, unknown>).sessions;
+  const sessionOut = sessionOutAll;
   if (sessionOut && typeof sessionOut === 'object') {
     for (const [idStr, value] of Object.entries(sessionOut as Record<string, unknown>)) {
-      const id = parseInt(idStr, 10);
+      // 모델은 프롬프트에 적힌 대로 "%1606"으로 답하기도 한다.
+      const id = sessionKey(idStr);
       const row = map.sessions.find((s) => s.id === id);
       if (!row || !value || typeof value !== 'object') continue;
       const v = value as Record<string, unknown>;
@@ -142,9 +185,9 @@ export async function cmdMap() {
   // 모델이 응답에서 뺀 stale 세션은 신선 처리하되 내용은 지키지 않는다 —
   // 기존 요약이 있으면 그대로 두고 atSeq만 올린다(모델이 한 판을 통째로
   // 빼먹어도 멀쩡한 요약이 빈 것으로 덮이지 않는다). 없던 세션만 빈 요약.
-  const answered = new Set(Object.keys((sessionOut as Record<string, unknown>) ?? {}).map((k) => parseInt(k, 10)));
+  const answered = new Set(Object.keys((sessionOut as Record<string, unknown>) ?? {}).map(sessionKey));
   for (const row of stale) {
-    if (answered.has(row.id)) continue;
+    if (answered.has(row.id) || failedIds.has(row.id)) continue;
     const prev = (row.summary ?? {}) as Record<string, unknown>;
     await fetchPatch(port, `/api/sessions/${row.id}/annotations`, {
       mapSummary: {
@@ -165,7 +208,7 @@ export async function cmdMap() {
   // 다시 묶고 싶으면 --force. column/order는 배치일 뿐이라 매번 갱신해도 된다.
   let workspacesApplied = 0;
   const plan: Record<string, { stream: string; column: number; order: number }> = {};
-  const wsOut = (parsed as Record<string, unknown>).workspaces;
+  const wsOut = wsOutFirst;
   const placedNow = new Set<string>();
   if (organize && wsOut && typeof wsOut === 'object') {
     for (const [wsId, value] of Object.entries(wsOut as Record<string, unknown>)) {
@@ -200,6 +243,15 @@ export async function cmdMap() {
     : organize
       ? `map: 세션 ${sessionsApplied}/${stale.length} 요약, workspace ${workspacesApplied} 배치 (${backend})`
       : `map: 세션 ${sessionsApplied}/${stale.length} 요약 — stream은 안 건드림 (${backend})`);
+}
+
+/** Sessions per model call: each answer runs ~100–150 tokens in Korean, and the output cap is 8192. */
+export const SESSIONS_PER_CALL = 20;
+
+/** A session key as the model writes it: "1606" or "%1606". NaN when it is neither. */
+export function sessionKey(k: string): number {
+  const m = /^%?(\d+)$/.exec(k.trim());
+  return m ? parseInt(m[1]!, 10) : NaN;
 }
 
 function buildPrompt(instructions: string, note: string, map: { workspaces: MapWorkspace[]; sessions: MapSession[] }, stale: MapSession[], screens: Map<number, string>, organize: boolean): string {
@@ -284,9 +336,10 @@ async function runOpenAi(prompt: string, model: string, baseUrl: string): Promis
     let res = await call(true);
     if (res.status === 400) res = await call(false);
     if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
-    const body = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const body = await res.json() as { choices?: Array<{ message?: { content?: string }; finish_reason?: string }> };
     const content = body.choices?.[0]?.message?.content ?? '';
     if (!content.trim()) throw new Error('빈 응답 — 모델이 content 없이 종료 (사고가 예산을 소진?)');
+    if (body.choices?.[0]?.finish_reason === 'length') throw new Error(`출력 한도(max_tokens 8192)에서 잘렸다 — 세션을 더 잘게 나눠야 한다`);
     return content;
   } finally {
     clearTimeout(timer);

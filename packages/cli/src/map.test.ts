@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractJson, resolveStream } from './map.js';
+import { extractJson, resolveStream, sessionKey, SESSIONS_PER_CALL } from './map.js';
 
 describe('extractJson — 모델 출력 방어', () => {
   it('생 JSON을 그대로 파싱한다', () => {
@@ -38,5 +38,18 @@ describe('resolveStream — 요약기가 사용자의 이름을 덮지 않는다
   });
   it('30자를 넘기지 않는다', () => {
     expect(resolveStream(undefined, 'x'.repeat(50), false)).toHaveLength(30);
+  });
+});
+
+describe('sessionKey', () => {
+  it('reads the id the way the model writes it, with or without the %', () => {
+    expect(sessionKey('1606')).toBe(1606);
+    expect(sessionKey('%1606')).toBe(1606);
+    expect(sessionKey(' %42 ')).toBe(42);
+    expect(Number.isNaN(sessionKey('abc'))).toBe(true);
+    expect(Number.isNaN(sessionKey('%'))).toBe(true);
+  });
+  it('keeps a call small enough for the output cap', () => {
+    expect(SESSIONS_PER_CALL).toBeLessThanOrEqual(40);
   });
 });
