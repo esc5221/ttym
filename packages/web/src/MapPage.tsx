@@ -102,11 +102,12 @@ const MAP_CSS = `
    디자인은 보드 카드(.wmb-card)와 같은 톤: 얇은 테두리 + 은은한 배경, 종류는
    작은 색 점 하나로만(왼쪽 색 바 없음 — 이 화면의 언어에 없다). */
 .wmb-agents {
-  flex:0 0 100%; width:100%; display:flex; flex-wrap:wrap; gap:calc(var(--wu)*0.7);
+  /* 같은 폭의 격자 — 글 길이마다 카드 폭이 달라 줄이 들쭉날쭉하던 것 */
+  flex:0 0 100%; width:100%; display:grid; grid-template-columns:repeat(auto-fill, minmax(calc(var(--wu)*17), 1fr)); gap:calc(var(--wu)*0.7);
 }
 .wmb-agent {
   display:flex; align-items:flex-start; gap:calc(var(--wu)*0.6);
-  min-width:calc(var(--wu)*13.5); max-width:calc(var(--wu)*22); min-height:calc(var(--wu)*2.7);
+  min-width:0; min-height:calc(var(--wu)*2.7);
   padding:calc(var(--wu)*0.5) calc(var(--wu)*0.85);
   border:1px solid var(--wm-line); border-radius:7px;
   background:color-mix(in srgb, var(--wm-tx) 3%, transparent);
@@ -118,21 +119,38 @@ const MAP_CSS = `
 .wmb-agent .adot { flex:0 0 auto; width:calc(var(--wu)*0.42); height:calc(var(--wu)*0.42); margin-top:calc(var(--wu)*0.42); border-radius:50%; background:var(--adot, var(--wm-dim)); }
 .wmb-agent.live .adot { animation:wmb-live 1.8s ease-out infinite; }
 @keyframes wmb-live { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--adot) 55%, transparent); } 70%,100% { box-shadow:0 0 0 calc(var(--wu)*0.4) transparent; } }
-.wmb-agent .meat { min-width:0; display:flex; flex-direction:column; line-height:1.3; }
-.wmb-agent .meat b { font-size:calc(var(--wu)*0.88); font-weight:650; color:var(--wm-tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.wmb-agent .meat small { font-size:calc(var(--wu)*0.72); color:var(--wm-dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.wmb-agent .meat .wsn { color:var(--wm-soft); }
-/* 요약 한 줄(note): 카드 폭에서 두 줄까지. 요약 전 세션은 이 줄이 없다. */
-.wmb-agent .meat .note { font-size:calc(var(--wu)*0.76); color:var(--wm-soft); margin-top:calc(var(--wu)*0.15); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+/* 세 단: 제목(+상태 알약) → 현황(note) → 어디인지(workspace · 칸 · %번호 · 활동). 밝기로 위계를 둔다:
+   제목 tx > 현황 soft > 위치 dim. 같은 workspace의 칸끼리는 제목이 다르고, 요약이 없어도 %번호가 다르다. */
+.wmb-agent .meat { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; line-height:1.3; gap:calc(var(--wu)*0.12); }
+.wmb-agent .meat .top { display:flex; align-items:baseline; gap:calc(var(--wu)*0.45); min-width:0; }
+.wmb-agent .meat b { flex:1 1 auto; min-width:0; font-size:calc(var(--wu)*0.9); font-weight:650; color:var(--wm-tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wmb-agent .meat .chip {
+  flex:0 0 auto; max-width:45%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:calc(var(--wu)*0.66); line-height:1.5; padding:0 calc(var(--wu)*0.42); border-radius:999px;
+  color:var(--chip, var(--wm-soft)); background:color-mix(in srgb, var(--chip, var(--wm-soft)) 15%, transparent);
+}
+.wmb-agent .meat .chip.wait { --chip:var(--wm-wait); }
+.wmb-agent .meat .chip.done { --chip:var(--wm-done); }
+.wmb-agent .meat .chip.run  { --chip:var(--wm-run); }
+.wmb-agent .meat .chip.warn { --chip:var(--wm-warn); }
+/* 현황(note): 카드 폭에서 두 줄까지. 요약 전 세션은 이 줄이 없다. */
+.wmb-agent .meat .note { font-size:calc(var(--wu)*0.78); color:color-mix(in srgb, var(--wm-tx) 72%, transparent); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.wmb-agent .meat small { display:flex; gap:calc(var(--wu)*0.4); font-size:calc(var(--wu)*0.68); color:var(--wm-dim); white-space:nowrap; overflow:hidden; }
+.wmb-agent .meat small > span { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.wmb-agent .meat small > span + span::before { content:'·'; margin-right:calc(var(--wu)*0.4); color:var(--wm-faint); }
+.wmb-agent .meat small .wsn { color:var(--wm-soft); }
+.wmb-agent .meat small .sid, .wmb-agent .meat small .act { flex:0 0 auto; }
+.wmb-agent .meat small .act.live { color:var(--adot, var(--wm-run)); }
 .wmb-more {
-  align-self:center; padding:calc(var(--wu)*0.3) calc(var(--wu)*0.8); font:inherit; font-size:calc(var(--wu)*0.78);
+  align-self:stretch; justify-self:start; padding:calc(var(--wu)*0.3) calc(var(--wu)*0.8); font:inherit; font-size:calc(var(--wu)*0.78);
   color:var(--wm-dim); background:none; border:1px dashed var(--wm-line); border-radius:7px; cursor:pointer;
 }
 .wmb-more:hover { color:var(--wm-tx); border-color:var(--wm-dim); }
 /* 모바일: 한 줄에 하나씩 꽉 차게, 터치 타깃 크게. */
 @media (max-width:560px) {
-  .wmb-agent { max-width:none; flex:1 1 100%; min-height:calc(var(--wu)*3.1); }
-  .wmb-more { flex:1 1 100%; min-height:calc(var(--wu)*2.6); }
+  .wmb-agents { grid-template-columns:1fr; }
+  .wmb-agent { min-height:calc(var(--wu)*3.1); }
+  .wmb-more { justify-self:stretch; min-height:calc(var(--wu)*2.6); }
 }
 /* 보드: stream 칸이 가로로 늘어서되, 화면 폭을 넘으면 아래로 접힌다(wrap) —
    오른쪽으로 튀어나가는 가로 스크롤 대신 세로 스크롤. 칸 하나가 stream, 그 안에
@@ -454,8 +472,8 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
     const summarized = data.sessions.some((s) => s.summary);
 
     // 세션 id → 소속 workspace(포커스 이동·이름 표시용).
-    const wsBySession = new Map<number, { wsId: string; wsName: string }>();
-    for (const w of data.workspaces) for (const m of w.members) wsBySession.set(m.sessionId, { wsId: w.id, wsName: w.name });
+    const wsBySession = new Map<number, { wsId: string; wsName: string; member: string }>();
+    for (const w of data.workspaces) for (const m of w.members) wsBySession.set(m.sessionId, { wsId: w.id, wsName: w.name, member: m.name });
 
     // 상단 세션 카드: 에이전트가 실제로 돌았던(agentActiveAt 있는) 세션을 최신순 후보로.
     // 순서는 첫 로드 때 잡아 topOrderRef에 고정 — 폴링/라이브 갱신으로 재정렬되지
@@ -678,8 +696,12 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
         <div className="wmb-agents">
           {(topExpanded ? [...view.topSessions, ...view.topMore] : view.topSessions).map((s) => {
             const loc = view.wsBySession.get(s.id);
-            const title = s.summary?.title || loc?.wsName || `#${s.id}`;
             const sum = s.summary;
+            // Without a summary, the pane's own name tells panes of one workspace apart; an automatic "term-123" does not.
+            const member = loc?.member && !/^term-\d+$/.test(loc.member) ? loc.member : '';
+            const title = sum?.title || member || loc?.wsName || `%${s.id}`;
+            // The line under it names where the session is, without repeating what the title already says.
+            const where = [loc?.wsName, member].filter((x): x is string => !!x && x !== title);
             return (
               <div
                 key={s.id}
@@ -692,14 +714,16 @@ export function MapPage({ mux }: { mux?: { onWorkspace(cb: (e: unknown) => void)
               >
                 <span className="adot" />
                 <span className="meat">
-                  <b>{title}</b>
-                  <small>
-                    <span className="wsn">{loc?.wsName ?? `#${s.id}`}</span>
-                    {' · '}
-                    {s.agentActive ? 'working' : ago(s.agentActiveAt ?? undefined, now)}
-                    {sum?.status ? <> <span className={`st ${sum.status}`}>{sum.statusNote || sum.status}</span></> : null}
-                  </small>
+                  <span className="top">
+                    <b>{title}</b>
+                    {sum?.status ? <span className={`chip ${sum.status}`}>{sum.statusNote || sum.status}</span> : null}
+                  </span>
                   {sum?.note ? <span className="note">{sum.note}</span> : null}
+                  <small>
+                    {where.map((w) => <span key={w} className="wsn">{w}</span>)}
+                    <span className="sid">%{s.id}</span>
+                    <span className={s.agentActive ? 'act live' : 'act'}>{s.agentActive ? 'working' : ago(s.agentActiveAt ?? undefined, now)}</span>
+                  </small>
                 </span>
               </div>
             );
