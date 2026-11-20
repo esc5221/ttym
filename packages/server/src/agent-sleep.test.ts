@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AgentSleeper, busyChildOf, composerText, findAgentProcess, isInteractiveAgent, isPassiveInput, parseSleepAfter, rejoinSplitWords, resumeArgsFrom, turnIsStale, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
+import { AgentSleeper, busyChildOf, claudePromptUp, composerText, findAgentProcess, isInteractiveAgent, isPassiveInput, parseSleepAfter, rejoinSplitWords, resumeArgsFrom, turnIsStale, type AgentStatusFile, type ProcInfo, type SleepState } from './agent-sleep.js';
 import type { Session } from './session.js';
 import type { ScreenRun } from '@ttym/protocol';
 
@@ -34,7 +34,8 @@ class FakeSession {
   writeRaw(data: Buffer) { this.raw.push(data.toString('latin1')); }
   viewerSnapshot() { return this.screen; }
   rows = 24;
-  tail: ScreenRun[][] = [[{ t: '❯\u00a0', fg: '#999999' }]];
+  // Claude's prompt box, as a woken Claude draws it once it is ready.
+  tail: ScreenRun[][] = [[{ t: '─'.repeat(40) }], [{ t: '❯\u00a0', fg: '#999999' }], [{ t: '─'.repeat(40) }]];
   screenTail() { return this.tail; }
   freeze(snapshot?: string) { this.frozen = { snapshot: snapshot ?? this.screen, seq: 7 }; }
   thaw() { this.frozen = null; }
@@ -315,12 +316,14 @@ describe('wake', () => {
 
   async function asleep() {
     let alive = true;
-    h = harness({ procs: () => (alive ? [claudeProc()] : []) });
+    let woken = false; // after the sleep, a claude that appears is a new process with its own pid
+    h = harness({ procs: () => (alive ? [woken ? { ...claudeProc(), pid: AGENT + 1 } : claudeProc()] : []) });
     const origRaw = h.session.writeRaw.bind(h.session);
     let presses = 0;
     h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
     expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
     h.session.raw = [];
+    woken = true;
     return { setAlive: (v: boolean) => { alive = v; } };
   }
 
@@ -381,14 +384,15 @@ describe('wake', () => {
     h.session.write(Buffer.from('typed while asleep'));
     await tick(5);
     h.agentStarted();
-    // Output keeps flowing: a progress bar repainting.
-    const noisy = setInterval(() => h.session.output(), 2);
+    // Output keeps flowing: a progress bar repainting, over the prompt.
+    h.session.tail = [[{ t: '✻ Compacting conversation… (esc to interrupt)' }]];
+    const noisy = setInterval(() => h.session.output(), 1);
     await tick(150);
     clearInterval(noisy);
     expect(h.meta().agentSleep).toBeNull();
     expect(h.session.writes).toEqual(['typed while asleep']);
     expect(h.session.isFrozen).toBe(false);
-    expect(h.logs.some((m) => /still busy after 8s — proceeding/.test(m))).toBe(true);
+    expect(h.logs.some((m) => /8s after start — proceeding \(bottom: ✻ Compacting/.test(m))).toBe(true);
   });
 
   it('a resume that never starts is reported as failed, the pane is thawed so the shell is visible, the queue is dropped', async () => {
@@ -745,5 +749,95 @@ describe('turnIsStale', () => {
 
   it('treats a flag with no stamp at all (a fossil) as stale once Claude is idle', () => {
     expect(turnIsStale({ claudeActive: true }, { status: 'idle', updatedAt: 5 })).toBe(true);
+  });
+});
+
+describe('claudePromptUp', () => {
+  const R = '─'.repeat(40);
+  it('sees the prompt box at the bottom, with a titled top rule and a footer', () => {
+    expect(claudePromptUp(['⏺ PONG-1', '', R, '❯ ', R, '  ⏵⏵ bypass permissions on', ''])).toBe(true);
+    expect(claudePromptUp(['──── my-session ' + R, '❯ hello', R])).toBe(true);
+    expect(claudePromptUp([R, '! ls', R])).toBe(true);
+  });
+  it('does not take a redrawn conversation for the prompt', () => {
+    expect(claudePromptUp(['❯ Reply with exactly: PONG-1', '⏺ PONG-1', '✻ Baked for 2s'])).toBe(false);
+    expect(claudePromptUp([R, '⏺ some answer', R])).toBe(false);   // rules, but not the prompt between them
+    expect(claudePromptUp([R, '❯ ', R, ...Array(12).fill('text below')])).toBe(false); // box far above the bottom
+  });
+});
+
+describe('wake readiness and the sleep/wake race', () => {
+  let h: ReturnType<typeof harness>;
+  afterEach(() => h?.cleanup());
+  const R = '─'.repeat(40);
+  const rowsOf = (lines: string[]): ScreenRun[][] => lines.map((t) => [{ t }]);
+
+  it('a resumed Claude is ready only once its prompt is drawn, not at the first lull of the redraw', async () => {
+    let alive = true; let woken = false;
+    h = harness({ procs: () => (alive ? [woken ? { ...claudeProc(), pid: AGENT + 1 } : claudeProc()] : []) });
+    const origRaw = h.session.writeRaw.bind(h.session); let presses = 0;
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
+    woken = true;
+    h.session.tail = rowsOf(['❯ old question', '⏺ old answer']);   // the conversation being redrawn
+    h.session.write(Buffer.from('x'));
+    await tick(5); alive = true; h.agentStarted();
+    await tick(15);                                                  // quiet > 0.3 s (scaled), still no prompt
+    expect(h.session.writes).toEqual([]);
+    h.session.tail = rowsOf(['⏺ old answer', R, '❯ ', R, '  ⏵⏵ bypass permissions on']);
+    h.session.output();
+    await tick(30);
+    expect(h.session.writes).toEqual(['x']);
+    expect(h.logs.some((m) => /no prompt on screen/.test(m))).toBe(false);
+  });
+
+  it('a Claude that never draws its prompt (a dialog) gets the queue 8 s after it started, and says what was on screen', async () => {
+    let alive = true; let woken = false;
+    h = harness({ procs: () => (alive ? [woken ? { ...claudeProc(), pid: AGENT + 1 } : claudeProc()] : []) });
+    const origRaw = h.session.writeRaw.bind(h.session); let presses = 0;
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1') === '\x03' && ++presses === 2) alive = false; };
+    expect(await h.sleeper.sleep(1, 'manual')).toEqual({ ok: true });
+    woken = true;
+    h.session.tail = rowsOf(['Do you trust the files in this folder?', '❯ 1. Yes, proceed']);
+    h.session.write(Buffer.from('1'));
+    await tick(5); alive = true; h.agentStarted();
+    await tick(40);                                                  // 4 s scaled: still waiting for a prompt
+    expect(h.session.writes).toEqual([]);
+    await tick(80);
+    expect(h.session.writes).toEqual(['1']);
+    expect(h.logs.some((m) => /no prompt on screen 8s after start .*trust the files/.test(m))).toBe(true);
+  });
+
+  it('a key during the sleep waits for the old agent to exit (terminating it early), then resumes; the old pid is not the new agent', async () => {
+    let old = true; let fresh = false;
+    h = harness({ procs: () => [...(old ? [claudeProc()] : []), ...(fresh ? [{ ...claudeProc(), pid: AGENT + 1 }] : [])] });
+    const origKill = h.killed.push.bind(h.killed);
+    h.killed.push = (...k) => { if (k[0]!.signal === 'SIGTERM') old = false; return origKill(...k); };
+    let resumeWhileOld: boolean | null = null;
+    const origRaw = h.session.writeRaw.bind(h.session);
+    h.session.writeRaw = (d) => { origRaw(d); if (d.toString('latin1').includes('agent resume')) resumeWhileOld = old; };
+    const sleeping = h.sleeper.sleep(1, 'manual');                   // old agent ignores Ctrl-C
+    await tick(10);
+    h.session.write(Buffer.from('x'));                               // wakes while the old one still runs
+    expect(await sleeping).toEqual({ ok: true });
+    expect(h.killed[0]).toEqual({ pid: AGENT, signal: 'SIGTERM' });
+    expect(h.logs.some((m) => /woken while exiting/.test(m))).toBe(true);
+    await tick(10);
+    expect(resumeWhileOld).toBe(false);                              // typed only after the old agent was gone
+    fresh = true; h.agentStarted();
+    await tick(60);
+    expect(h.session.writes).toEqual(['x']);
+  });
+
+  it('an agent that will not exit gets what was typed meanwhile, instead of it being lost', async () => {
+    h = harness();                                                   // never exits, even on SIGKILL
+    const sleeping = h.sleeper.sleep(1, 'manual');
+    await tick(10);
+    h.session.write(Buffer.from('typed'));
+    expect(await sleeping).toEqual({ ok: false, error: 'agent did not exit' });
+    await tick(10);
+    expect(h.session.writes).toEqual(['typed']);
+    expect(h.session.raw.some((r) => r.includes('agent resume'))).toBe(false);
+    expect(h.meta().agentSleep).toBeNull();
   });
 });

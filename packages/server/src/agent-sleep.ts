@@ -425,6 +425,32 @@ interface Live {
   /** Set by the SessionStart hook arriving while waking. */
   started: boolean;
   wakeStartedAt: number;
+  /** The agent put to sleep. It may still be exiting when a wake begins, and must not be taken for the new one. */
+  oldPid?: number;
+  /** Resolves when the sleep is over: true once the old agent is gone, false if it would not exit. */
+  down?: Promise<boolean>;
+  /** A wake is waiting on `down`: stop waiting for Ctrl-C and terminate the old agent now. */
+  hurry?: boolean;
+}
+
+/**
+ * Claude's own prompt is on screen: two rules near the bottom with the ❯ (or ! for bash mode) row between them.
+ * Only that — a resumed conversation is redrawn first, and its old "❯ question" rows have no rules around them.
+ * The top rule can carry a title ("──── my-session ─" or "─── History 2/5 ───…"), so a rule only has to start with one.
+ */
+export function claudePromptUp(rows: string[]): boolean {
+  let end = rows.length;
+  while (end > 0 && !rows[end - 1]!.trim()) end--;
+  const isRule = (r: string) => /^[─━]{3,}/.test(r.trim()) && (r.match(/[─━]/g)?.length ?? 0) >= 8;
+  for (let b = end - 1; b >= Math.max(1, end - 8); b--) {
+    if (!isRule(rows[b]!)) continue;
+    for (let a = b - 1; a >= Math.max(0, b - 15); a--) {
+      if (!isRule(rows[a]!)) continue;
+      return /^\s*[❯!]/.test(rows[a + 1] ?? '');
+    }
+    return false;
+  }
+  return false;
 }
 
 export class AgentSleeper {
@@ -560,6 +586,7 @@ export class AgentSleeper {
     if (busy) return { ok: false, error: busy };
 
     this.inFlight.add(id);
+    let settled: ((gone: boolean) => void) | null = null;
     try {
       const state: SleepState = { state: 'sleeping', since: this.now(), agent: agent.kind, agentSessionId, rssBefore: agent.rss, reason, args: resumeArgsFrom(agent.command) };
       // Freeze first: nothing that follows (Ctrl-C notices, the shell prompt) reaches a viewer.
@@ -567,6 +594,11 @@ export class AgentSleeper {
       session.freeze(snapshot);
       await writeFile(this.snapshotPath(id), snapshot).catch(() => {});
       this.install(id, session, state);
+      const mine = this.live.get(id)!;
+      mine.oldPid = agent.pid;
+      let settle!: (gone: boolean) => void;
+      mine.down = new Promise<boolean>((r) => { settle = r; });
+      settled = settle;
       await this.deps.sessions.setMeta(id, { agentSleep: state });
       this.deps.onState(id, state);
       this.deps.log(`SLEEP session=${id} reason=${reason} rss=${Math.round(agent.rss / 1048576)}MB agent=${agentSessionId.slice(0, 8)}`);
@@ -581,24 +613,32 @@ export class AgentSleeper {
         await this.delay(220);
       }
 
-      const gone = await this.waitGone(session.childPid, agent.pid, 8000);
+      // A key arriving meanwhile starts a wake that waits on this; it should not wait the whole 8 s for an agent
+      // that ignores Ctrl-C (dev 2026-11-20: a wake mid-exit took the old process for the new one and lost every key).
+      const gone = await this.waitGone(session.childPid, agent.pid, 8000, () => this.live.get(id)?.hurry === true);
       if (!gone) {
-        this.deps.log(`SLEEP session=${id} Ctrl-C ignored → SIGTERM`);
+        this.deps.log(`SLEEP session=${id} ${this.live.get(id)?.hurry ? 'woken while exiting' : 'Ctrl-C ignored'} → SIGTERM`);
         this.deps.kill(agent.pid, 'SIGTERM');
         if (!(await this.waitGone(session.childPid, agent.pid, 4000))) {
           this.deps.kill(agent.pid, 'SIGKILL');
           if (!(await this.waitGone(session.childPid, agent.pid, 3000))) {
-            // Could not bring it down: undo everything, the agent is still there.
+            // Could not bring it down: undo everything, the agent is still there — and so is whatever was typed
+            // meanwhile, which goes to it rather than nowhere.
+            const left = this.live.get(id)?.queue ?? [];
             this.uninstall(id, session);
             session.thaw();
             await this.deps.sessions.setMeta(id, { agentSleep: null });
             this.deps.onState(id, null);
+            for (const chunk of left) { session.write(chunk); await this.delay(SUBMIT_GAP_MS); }
+            settled?.(false);
             return { ok: false, error: 'agent did not exit' };
           }
         }
       }
+      settled?.(true);
       return { ok: true };
     } finally {
+      settled?.(false); // an exception on the way: a waiting wake must not hang
       this.inFlight.delete(id);
     }
   }
@@ -617,6 +657,14 @@ export class AgentSleeper {
     await this.deps.sessions.setMeta(id, { agentSleep: l.state });
     this.deps.onState(id, l.state);
     this.deps.log(`WAKE session=${id} trigger=${trigger} queued=${l.queuedBytes}B`);
+
+    // The sleep may still be taking the old agent down. Typing the resume now would land in the old agent, and the
+    // readiness check would take the old process for the new one.
+    if (this.inFlight.has(id) && l.down) {
+      l.hurry = true;
+      const gone = await l.down;
+      if (!gone || !this.live.get(id)) return { ok: false, error: 'the agent did not exit; it is still running' };
+    }
 
     // Ctrl-U clears whatever sits on the shell line, then resume through the CLI so the
     // flag layering (config → env → argv) stays in one place. PORT= because the pane's
@@ -812,19 +860,20 @@ export class AgentSleeper {
     return null;
   }
 
-  private async waitGone(shellPid: number, agentPid: number, ms: number): Promise<boolean> {
+  private async waitGone(shellPid: number, agentPid: number, ms: number, stop?: () => boolean): Promise<boolean> {
     const until = this.now() + this.t(ms);
     for (;;) {
       const procs = await this.deps.listProcesses();
       if (!procs.some((p) => p.pid === agentPid)) return true;
       if (findAgentProcess(procs, shellPid) === null) return true;
-      if (this.now() >= until) return false;
+      if (this.now() >= until || stop?.()) return false;
       await this.delay(400);
     }
   }
 
   /**
-   * Ready = the agent is up and output has been quiet for 500 ms. "Up" is the
+   * Ready = the agent is up and output has been quiet for 500 ms (Claude: its prompt drawn and 300 ms quiet).
+   * Up but not ready 8 s on: proceed anyway. "Up" is the
    * SessionStart hook, or — if the hook never reaches this server (a pane
    * whose env names another port) — the agent process under the shell with
    * output quiet for 2 s. Failed = no agent process 10 s in with a quiet
@@ -841,19 +890,34 @@ export class AgentSleeper {
       const now = this.now();
       const quietFor = now - (session.lastOutputAt || startedAt);
       if (l.started && startedSeenAt === null) startedSeenAt = now;
-      if (l.started && quietFor >= this.t(500)) return { ok: true };
-      // Up but never quiet: a resume into a full context runs auto-compact for
-      // minutes, progress bar and all (session 1172, 2026-09-13). The agent is
-      // there and takes typing into its composer meanwhile, so hand it the queue
-      // rather than call this a failure and drop the keys.
+      // Claude is usable once its prompt is drawn. After SessionStart it redraws the whole resumed conversation
+      // first, with lulls on the way; calling a 500 ms lull ready unfroze the pane before the prompt came
+      // (dev 2026-11-20: in 4 of 5 wakes the prompt came 1.5–3 s after "ready").
+      // (The prompt check was run on 139 prod Claude screens, 2026-11-20: all found.)
+      let rows: string[] | null = null;
+      if (l.started) {
+        if (l.state.agent !== 'claude') { if (quietFor >= this.t(500)) return { ok: true }; }
+        else {
+          rows = session.screenTail(session.rows).map((r) => r.map((x) => x.t).join(''));
+          if (claudePromptUp(rows) && quietFor >= this.t(300)) return { ok: true };
+        }
+      }
+      // Up but not ready after 8 s: a resume into a full context runs auto-compact for minutes, progress bar and
+      // all (session 1172, 2026-09-13), or a dialog holds the screen instead of the prompt. Either takes typing,
+      // so hand it the queue rather than call this a failure and drop the keys.
       if (l.started && startedSeenAt !== null && now - startedSeenAt >= this.t(8000)) {
-        this.deps.log(`WAKE session=${id} agent up but still busy after 8s — proceeding`);
+        if (rows && !claudePromptUp(rows)) {
+          const bottom = rows.filter((r) => r.trim()).slice(-4).map((r) => r.trim().slice(0, 50)).join(' | ');
+          this.deps.log(`WAKE session=${id} no prompt on screen 8s after start — proceeding (bottom: ${bottom})`);
+        } else this.deps.log(`WAKE session=${id} agent up but still busy after 8s — proceeding`);
         return { ok: true };
       }
       const elapsed = now - startedAt;
       if (!l.started && elapsed >= this.t(1500) && quietFor >= this.t(2000) && now - lastProcCheck >= this.t(1000)) {
         lastProcCheck = now;
-        const agent = findAgentProcess(await this.deps.listProcesses(), session.childPid);
+        const found = findAgentProcess(await this.deps.listProcesses(), session.childPid);
+        // The agent that was put to sleep is not the one coming up, however it is still listed.
+        const agent = found && found.pid !== l.oldPid ? found : null;
         if (agent) {
           // Codex reports SessionStart on its first turn, not at boot — the process is the normal signal there.
           if (l.state.agent === 'claude') this.deps.log(`WAKE session=${id} agent process up (pid ${agent.pid}) but no SessionStart hook — proceeding; check the pane's TTYM_PORT`);
