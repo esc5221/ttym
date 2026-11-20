@@ -209,8 +209,10 @@ ttym agent restart --stale     # claude·codex 업데이트 후: 옛 버전으�
   durable cron(`.claude/scheduled_tasks.json`)은 resume 후 다시 로드되므로 막지 않는다.
 - 자는 동안 뷰어는 마지막 화면에 **frozen** — ATTACH/SNAPSHOT/`ttym screen`이 그 화면을 준다. 셸 프롬프트는 안 보인다.
   화면은 `run/sleep-<id>.ansi`에 저장돼 서버 재시작 후에도 그대로.
-- 깨우기: 입력은 큐(64KB·20초)에 담고 `ttym agent resume claude <원래 플래그>`를 셸에 친다. SessionStart 훅 +
-  출력 500ms 정지 = 준비. 그때 스냅샷 한 장으로 갱신하고 큐를 순서대로 쓴다. 실측 1.7s. `ttym await`는 그대로 동작.
+- 깨우기: 입력은 큐(64KB·20초)에 담고 `ttym agent resume claude <원래 플래그>`를 셸에 친다. 준비 = SessionStart 훅 +
+  Claude는 화면 아래 입력칸(가로줄 사이 ❯) + 0.3s 정지(`claudePromptUp`), 그 밖은 출력 500ms 정지. 8초 넘게 안 되면
+  화면 아래 줄을 로그에 남기고 넘긴다. 그때 스냅샷 한 장으로 갱신하고 큐를 순서대로 쓴다. `ttym await`는 그대로 동작.
+  재우는 중(옛 프로세스 종료 전)에 온 키는 옛 프로세스가 끝난 뒤에 resume한다(바로 SIGTERM).
 - 상태는 meta.agentSleep(runtime key, PATCH 불가). CMD.AGENT push에 `sleep`·`pin`. 웹: 헤더 ☾/◌/✕, 하단 알약.
 - Codex도 같은 방식(실측 RSS 280~320MB). 차이: 프롬프트 훅이 없어 "턴 열림"은 최근 10초 출력으로 판단하고,
   SessionStart가 첫 턴에야 와서 깨우기는 프로세스 감지(1.5s + 출력 2s 정지)로 끝난다(실측 4초). resume에
